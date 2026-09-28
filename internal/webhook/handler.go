@@ -40,7 +40,7 @@ type Forwarder interface {
 	Forward(header http.Header, body []byte)
 }
 
-// Handler serves POST /webhook.
+// Handler serves POST /github/hooks.
 type Handler struct {
 	Secret  []byte
 	Router  Router

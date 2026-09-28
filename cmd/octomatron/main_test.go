@@ -110,3 +110,34 @@ func TestNewLogger(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutes(t *testing.T) {
+	named := func(name string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(name)) })
+	}
+	mux := routes(named("hook"), named("ready"), named("metrics"))
+	tests := []struct {
+		method, path string
+		wantCode     int
+		wantBody     string
+	}{
+		{method: http.MethodPost, path: "/github/hooks", wantCode: http.StatusOK, wantBody: "hook"},
+		{method: http.MethodGet, path: "/healthz", wantCode: http.StatusOK, wantBody: "ok\n"},
+		{method: http.MethodGet, path: "/readyz", wantCode: http.StatusOK, wantBody: "ready"},
+		{method: http.MethodGet, path: "/metrics", wantCode: http.StatusOK, wantBody: "metrics"},
+		{method: http.MethodPost, path: "/webhook", wantCode: http.StatusNotFound},
+		{method: http.MethodPost, path: "/github/hooks/extra", wantCode: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			if rec.Code != tt.wantCode {
+				t.Fatalf("status %d, want %d", rec.Code, tt.wantCode)
+			}
+			if tt.wantBody != "" && rec.Body.String() != tt.wantBody {
+				t.Fatalf("body %q, want %q", rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}

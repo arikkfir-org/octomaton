@@ -165,7 +165,7 @@ func newHandler(t *testing.T, router Router, queue int) (*Handler, *stubRelay) {
 }
 
 func post(h http.Handler, event, delivery string, body []byte, sign bool) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/github/hooks", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", event)
 	req.Header.Set("X-GitHub-Delivery", delivery)
 	req.Header.Set("Content-Type", "application/json")
@@ -209,7 +209,7 @@ func TestHandler(t *testing.T) {
 			if method == "" {
 				method = http.MethodPost
 			}
-			req := httptest.NewRequest(method, "/webhook", strings.NewReader(tt.body))
+			req := httptest.NewRequest(method, "/github/hooks", strings.NewReader(tt.body))
 			req.Header.Set("X-GitHub-Event", tt.event)
 			req.Header.Set("X-GitHub-Delivery", "d-1")
 			if tt.sign {

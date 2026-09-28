@@ -99,6 +99,19 @@ func runLint(args []string, stdout, stderr io.Writer) int {
 	return lint.Run(fs.Args(), *render, stdout, stderr)
 }
 
+// webhookPath is where GitHub delivers the App's webhooks.
+const webhookPath = "/github/hooks"
+
+// routes maps the HTTP endpoints: the GitHub webhook, the probes and the metrics.
+func routes(hook, ready, metrics http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle(webhookPath, hook)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprintln(w, "ok") })
+	mux.Handle("/readyz", ready)
+	mux.Handle("/metrics", metrics)
+	return mux
+}
+
 func serve(args []string) int {
 	defaultConfig := config.DefaultPath
 	if v := os.Getenv("OCTOMATRON_CONFIG"); v != "" {
@@ -106,7 +119,7 @@ func serve(args []string) int {
 	}
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	configPath := fs.String("config", defaultConfig, "path to the server configuration file (env OCTOMATRON_CONFIG)")
-	listen := fs.String("listen", ":8080", "address to serve /webhook, /healthz, /readyz and /metrics on")
+	listen := fs.String("listen", ":8080", "address to serve "+webhookPath+", /healthz, /readyz and /metrics on")
 	workers := fs.Int("workers", 8, "number of webhook worker goroutines")
 	queueSize := fs.Int("queue-size", 256, "number of accepted webhook deliveries that may wait for a worker")
 	if err := fs.Parse(args); err != nil {
@@ -194,14 +207,9 @@ func serve(args []string) int {
 		ttl:      5 * time.Second,
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/webhook", hook)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprintln(w, "ok") })
-	mux.Handle("/readyz", ready)
-	mux.Handle("/metrics", promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{Registry: m.Registry}))
 	server := &http.Server{
 		Addr:              *listen,
-		Handler:           mux,
+		Handler:           routes(hook, ready, promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{Registry: m.Registry})),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,

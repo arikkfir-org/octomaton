@@ -246,7 +246,7 @@ retention:
 | Flag / environment | Default | Meaning |
 | --- | --- | --- |
 | `--config`, `OCTOMATRON_CONFIG` | `/etc/octomatron/config.yaml` | server configuration |
-| `--listen` | `:8080` | address of `/webhook`, `/healthz`, `/readyz`, `/metrics` |
+| `--listen` | `:8080` | address of `/github/hooks`, `/healthz`, `/readyz`, `/metrics` |
 | `--workers`, `--queue-size` | `8`, `256` | webhook worker pool |
 | `OCTOMATRON_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
 | `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `octomatron` namespace and holder identity |
@@ -255,7 +255,7 @@ retention:
 ## GitHub App
 
 `octomatron`, installed on all `arikkfir-org` repositories, webhook URL
-`https://octomatron.kfirs.com/webhook`.
+`https://octomatron.dev.kfirs.com/github/hooks`.
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
@@ -269,7 +269,7 @@ Octomatron is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.
 `private-key`, `webhook-secret`) at `/etc/octomatron/github/`. Every replica serves webhooks; the replica holding the
 Lease `octomatron` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
 
-Endpoints (all on 8080): `POST /webhook`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
+Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced); `GET /metrics`.
 
 **RBAC Octomatron needs:**

@@ -153,7 +153,7 @@ func (e *env) deliver(event, delivery string, payload any, sign bool) *httptest.
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/github/hooks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", event)
 	req.Header.Set("X-GitHub-Delivery", delivery)

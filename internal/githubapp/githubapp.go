@@ -1,5 +1,5 @@
-// Package githubapp authenticates as the Switchboard GitHub App and exposes the
-// small set of GitHub API operations Switchboard needs.
+// Package githubapp authenticates as the Octomatron GitHub App and exposes the
+// small set of GitHub API operations Octomatron needs.
 package githubapp
 
 import (
@@ -53,7 +53,7 @@ type CheckRunUpdate struct {
 	Actions     []*github.CheckRunAction `json:"actions,omitempty"`
 }
 
-// Client is the set of GitHub operations Switchboard performs on behalf of one installation.
+// Client is the set of GitHub operations Octomatron performs on behalf of one installation.
 type Client interface {
 	// GetFile returns the content of a file at ref, or ErrNotFound.
 	GetFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
@@ -184,7 +184,7 @@ func newGitHubClient(rt http.RoundTripper, baseURL string) (*github.Client, erro
 	return github.NewClient(
 		github.WithHTTPClient(&http.Client{Transport: rt, Timeout: requestTimeout}),
 		github.WithURLs(&baseURL, &baseURL),
-		github.WithUserAgent("switchboard"),
+		github.WithUserAgent("octomatron"),
 	)
 }
 

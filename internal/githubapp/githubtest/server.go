@@ -1,5 +1,5 @@
 // Package githubtest provides an in-process fake of the GitHub REST endpoints
-// Switchboard uses, for tests. It verifies App JWTs and installation tokens and
+// Octomatron uses, for tests. It verifies App JWTs and installation tokens and
 // records everything it is asked to do.
 package githubtest
 

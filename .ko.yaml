@@ -4,9 +4,9 @@ defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
 defaultPlatforms:
   - linux/amd64
 builds:
-  - id: switchboard
+  - id: octomatron
     dir: .
-    main: ./cmd/switchboard
+    main: ./cmd/octomatron
     env:
       - CGO_ENABLED=0
     flags:

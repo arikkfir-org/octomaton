@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/config"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/switchboard/internal/metrics"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/config"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,7 +51,7 @@ namespaces: {template: "ci-{{ .Repository.Name }}"}
 
 // ciConfig runs "ci" on pull requests, pushes to main and the merge queue.
 const ciConfig = `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml
@@ -157,9 +157,9 @@ func (h *harness) setNow(t time.Time) {
 	h.now = t
 }
 
-// files stores .switchboard.yaml and the ci PipelineRun at a ref.
+// files stores .octomatron.yaml and the ci PipelineRun at a ref.
 func (h *harness) files(ref, cfg, run string) {
-	h.gh.AddFile(fullName, ref, ".switchboard.yaml", cfg)
+	h.gh.AddFile(fullName, ref, ".octomatron.yaml", cfg)
 	if run != "" {
 		h.gh.AddFile(fullName, ref, ".tekton/ci.yaml", run)
 	}

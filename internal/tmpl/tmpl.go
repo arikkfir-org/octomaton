@@ -1,5 +1,5 @@
 // Package tmpl defines the data model exposed to Go templates (pipeline params in
-// .switchboard.yaml and the namespace template in the server configuration) and
+// .octomatron.yaml and the namespace template in the server configuration) and
 // helpers that parse and execute such templates strictly.
 package tmpl
 
@@ -70,7 +70,7 @@ type Context struct {
 	Branch      string // branch under test (push: pushed branch; pull_request, comment: head branch; merge_group: merge group branch; schedule: default branch)
 	Tag         string // pushed tag (push events only)
 	Sender      string // login of the user that triggered the event
-	Pipeline    string // pipeline name from .switchboard.yaml
+	Pipeline    string // pipeline name from .octomatron.yaml
 	Push        *Push
 	PullRequest *PullRequest
 	MergeGroup  *MergeGroup

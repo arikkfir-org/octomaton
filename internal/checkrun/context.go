@@ -1,4 +1,4 @@
-// Package checkrun holds what Switchboard stores on GitHub check runs: the trigger
+// Package checkrun holds what Octomatron stores on GitHub check runs: the trigger
 // context (serialized into a hidden marker so a check can be re-run after its
 // PipelineRun is gone), output size limits and Tekton Dashboard links.
 package checkrun
@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arikkfir-org/switchboard/internal/tmpl"
+	"github.com/arikkfir-org/octomatron/internal/tmpl"
 )
 
 // ConfigCheckName is the name of the check run that reports problems which are not
-// specific to one pipeline, such as an invalid .switchboard.yaml.
-const ConfigCheckName = "switchboard"
+// specific to one pipeline, such as an invalid .octomatron.yaml.
+const ConfigCheckName = "octomatron"
 
-// Event names Switchboard triggers pipelines for.
+// Event names Octomatron triggers pipelines for.
 const (
 	EventPush        = "push"
 	EventPullRequest = "pull_request"
@@ -81,7 +81,7 @@ type Schedule struct {
 }
 
 // Context is everything needed to evaluate (or re-evaluate) an event for a
-// repository: it is stored on every check run and PipelineRun Switchboard creates.
+// repository: it is stored on every check run and PipelineRun Octomatron creates.
 type Context struct {
 	Version        int          `json:"v"`
 	Event          string       `json:"event"`
@@ -100,7 +100,7 @@ type Context struct {
 	MergeGroup     *MergeGroup  `json:"mergeGroup,omitempty"`
 	Comment        *Comment     `json:"comment,omitempty"`
 	Schedule       *Schedule    `json:"schedule,omitempty"`
-	// ConfigRef is the ref .switchboard.yaml and PipelineRun files are read at:
+	// ConfigRef is the ref .octomatron.yaml and PipelineRun files are read at:
 	// the default branch for comment commands, the revision otherwise.
 	ConfigRef  string `json:"configRef,omitempty"`
 	ApprovedBy string `json:"approvedBy,omitempty"`

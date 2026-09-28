@@ -1,5 +1,5 @@
-# Switchboard's own CI and release, run by Switchboard. Schema: README.md.
-apiVersion: switchboard.kfirs.com/v1
+# Octomatron's own CI and release, run by Octomatron. Schema: README.md.
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   # Lint, vet, test and build every pull request into main and every merge queue group.
   - name: ci

@@ -1,5 +1,5 @@
-// Package repoconfig parses and validates .switchboard.yaml, the only file
-// Switchboard reads from a repository, and decides which pipelines an event triggers.
+// Package repoconfig parses and validates .octomatron.yaml, the only file
+// Octomatron reads from a repository, and decides which pipelines an event triggers.
 package repoconfig
 
 import (
@@ -13,8 +13,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/tmpl"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/tmpl"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
@@ -22,11 +22,11 @@ import (
 
 const (
 	// FileName is the repository configuration file, always read from the repository root.
-	FileName = ".switchboard.yaml"
+	FileName = ".octomatron.yaml"
 	// APIVersion is the only supported configuration version.
-	APIVersion = "switchboard.kfirs.com/v1"
+	APIVersion = "octomatron.kfirs.com/v1"
 	// ReservedName is used for configuration-level check runs and cannot name a pipeline.
-	ReservedName  = "switchboard"
+	ReservedName  = "octomatron"
 	maxNameLength = 63
 )
 
@@ -54,7 +54,7 @@ var (
 	paramNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
 )
 
-// Config is a parsed and validated .switchboard.yaml.
+// Config is a parsed and validated .octomatron.yaml.
 type Config struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Pipelines  []Pipeline `yaml:"pipelines"`

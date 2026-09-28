@@ -32,7 +32,7 @@ func TestMarkerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marker: %v", err)
 	}
-	if !strings.HasPrefix(m, "<!-- switchboard:context:") || !strings.HasSuffix(m, " -->") || strings.Count(m, "-->") != 1 {
+	if !strings.HasPrefix(m, "<!-- octomatron:context:") || !strings.HasSuffix(m, " -->") || strings.Count(m, "-->") != 1 {
 		t.Fatalf("marker is not a single HTML comment: %q", m)
 	}
 	got, found, err := DecodeMarker("Some text\n\n" + m)
@@ -62,10 +62,10 @@ func TestDecodeMarkerProblems(t *testing.T) {
 		wantErr   string
 	}{
 		{name: "no marker", text: "plain text"},
-		{name: "unterminated", text: "<!-- switchboard:context:abc", wantFound: true, wantErr: "unterminated"},
-		{name: "bad base64", text: "<!-- switchboard:context:!!! -->", wantFound: true, wantErr: "decoding"},
-		{name: "bad JSON", text: "<!-- switchboard:context:" + enc("nope") + " -->", wantFound: true, wantErr: "parsing"},
-		{name: "unknown version", text: "<!-- switchboard:context:" + enc(`{"v":99}`) + " -->", wantFound: true, wantErr: "unsupported"},
+		{name: "unterminated", text: "<!-- octomatron:context:abc", wantFound: true, wantErr: "unterminated"},
+		{name: "bad base64", text: "<!-- octomatron:context:!!! -->", wantFound: true, wantErr: "decoding"},
+		{name: "bad JSON", text: "<!-- octomatron:context:" + enc("nope") + " -->", wantFound: true, wantErr: "parsing"},
+		{name: "unknown version", text: "<!-- octomatron:context:" + enc(`{"v":99}`) + " -->", wantFound: true, wantErr: "unsupported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

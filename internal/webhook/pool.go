@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
 )
 
 // Job is a unit of asynchronous webhook processing.

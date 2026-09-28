@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/metrics"
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -22,7 +22,7 @@ import (
 // maxNameTries bounds retries when another delivery takes a run name first.
 const maxNameTries = 10
 
-// Refusal is a pipeline Switchboard would not start. The reason is reported on
+// Refusal is a pipeline Octomatron would not start. The reason is reported on
 // a failed check run (for comment commands, in the reply instead).
 type Refusal struct {
 	Pipeline string
@@ -454,7 +454,7 @@ func (s *Service) abort(ctx context.Context, gh githubapp.Client, c checkrun.Con
 	}
 	if checkID != 0 {
 		s.failCheckRun(ctx, gh, c, checkID, "The run could not be started",
-			fmt.Sprintf("Switchboard could not start PipelineRun `%s/%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.", ns, name, cause))
+			fmt.Sprintf("Octomatron could not start PipelineRun `%s/%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.", ns, name, cause))
 	}
 	// The failure is reported; the reporter must not report the cancellation over it.
 	if err := s.Runs.Label(ctx, ns, name, map[string]string{tekton.LabelDone: "true"}, map[string]string{tekton.AnnotationReported: tekton.ReportedCompleted}); err != nil {

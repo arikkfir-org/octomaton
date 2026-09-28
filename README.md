@@ -1,12 +1,12 @@
-# Switchboard
+# Octomatron
 
-Switchboard replaces GitHub Actions for the `arikkfir-org` organization. A GitHub App sends every webhook to
-Switchboard (running in GKE); Switchboard reads the repository's root `.switchboard.yaml`, creates the Tekton
+Octomatron replaces GitHub Actions for the `arikkfir-org` organization. A GitHub App sends every webhook to
+Octomatron (running in GKE); Octomatron reads the repository's root `.octomatron.yaml`, creates the Tekton
 `PipelineRun`s it maps the event to, and reports each run back to GitHub as a check run.
 
-Switchboard is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
-only repository files it reads are `.switchboard.yaml` and the PipelineRun files that file points to. PipelineRun files
-are plain Tekton YAML; Switchboard injects event context only through `params` and an optional GitHub token workspace.
+Octomatron is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
+only repository files it reads are `.octomatron.yaml` and the PipelineRun files that file points to. PipelineRun files
+are plain Tekton YAML; Octomatron injects event context only through `params` and an optional GitHub token workspace.
 
 ## How it works
 
@@ -14,11 +14,11 @@ are plain Tekton YAML; Switchboard injects event context only through `params` a
 sequenceDiagram
   autonumber
   participant GH as GitHub
-  participant SB as Switchboard
+  participant SB as Octomatron
   participant K8s as Kubernetes / Tekton
   GH->>SB: webhook (push, pull_request, merge_group, issue_comment, check_run, check_suite)
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
-  SB->>GH: read .switchboard.yaml (and the PipelineRun file)
+  SB->>GH: read .octomatron.yaml (and the PipelineRun file)
   SB->>SB: match events, branches, tags and paths; apply trust rules
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
@@ -42,13 +42,13 @@ sequenceDiagram
 5. The elected leader watches the runs and keeps their checks up to date, refreshes GitHub tokens of long runs, fires
    cron schedules and deletes PVCs of finished runs.
 
-## Repository configuration (`.switchboard.yaml`)
+## Repository configuration (`.octomatron.yaml`)
 
-The only file Switchboard reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
+The only file Octomatron reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
 no quoting, and strictly: unknown fields, duplicate keys and type mismatches are errors.
 
 ```yaml
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: ci                           # check-run name; unique; [a-z0-9][a-z0-9-]*
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
@@ -100,7 +100,7 @@ comparison `before...after` for pushes; `base...head` for merge groups). A file 
 changed files cannot be determined (a new branch or tag, an API error, more files than GitHub lists), the filters are
 ignored and the pipeline runs.
 
-**Where definitions are read:** pull requests, merge groups and pushes read `.switchboard.yaml` and the PipelineRun file
+**Where definitions are read:** pull requests, merge groups and pushes read `.octomatron.yaml` and the PipelineRun file
 at the commit under test; comment commands and schedules read them from the default branch (comment commands still run
 against the pull request's head commit, so a pull request cannot change what its own commands run).
 
@@ -108,7 +108,7 @@ against the pull request's head commit, so a pull request cannot change what its
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Check-run name, unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `switchboard` is reserved. |
+| `name` | Check-run name, unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomatron` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`. Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
@@ -151,7 +151,7 @@ environment variables, never by interpolating `$(params.…)` into a script.
 ### Examples
 
 ```yaml
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: ci                                 # required check on pull requests and in the merge queue
     pipelineRun: .tekton/ci.yaml
@@ -184,7 +184,7 @@ pipelines:
       slot: "{{ .Schedule.Slot }}"
 ```
 
-Validate a configuration and the PipelineRun files it references with `switchboard lint [--render] PATH...` (PATH is
+Validate a configuration and the PipelineRun files it references with `octomatron lint [--render] PATH...` (PATH is
 the file or its directory); it renders every param for every triggering event with placeholder values, so a template
 that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
 
@@ -197,11 +197,11 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;
   `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log.
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
-- Problems that prevent a run (an invalid `.switchboard.yaml`, a missing namespace or file, a template error, a
-  refused Secret) are reported as failed checks: `switchboard` for configuration errors, the pipeline's name otherwise.
+- Problems that prevent a run (an invalid `.octomatron.yaml`, a missing namespace or file, a template error, a
+  refused Secret) are reported as failed checks: `octomatron` for configuration errors, the pipeline's name otherwise.
 - Every check stores its trigger context in a hidden marker in its output, so **Re-run** works even after the
   PipelineRun was pruned. Re-running a pipeline's check always runs it (path filters are not re-applied; the requester
-  needs write access); re-running `switchboard` re-evaluates the whole event.
+  needs write access); re-running `octomatron` re-evaluates the whole event.
 - Comment commands get a 👀 reaction when started, a 👎 and a reply when declined, and a reply with the result when done.
 
 ## Security
@@ -210,21 +210,21 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - Pull requests run automatically when their author is an owner, member or collaborator, or their branch is in the
   repository itself. Other pull requests need **Approve and run** (or a re-run) from someone with write access, for
   every new commit.
-- A run may mount no Secret other than the token Switchboard binds (volumes, workspaces, projected sources, `env` and
+- A run may mount no Secret other than the token Octomatron binds (volumes, workspaces, projected sources, `env` and
   `envFrom` are checked). Tokens are scoped to the event's repository with least permissions.
 - Namespaces, not pipelines, are the isolation boundary: trusted pull requests can change their own pipeline files and
   thereby use their namespace's service account.
 
 ## Server configuration
 
-Read from `/etc/switchboard/config.yaml` (flag `--config`, env `SWITCHBOARD_CONFIG`); unknown fields are errors and the
+Read from `/etc/octomatron/config.yaml` (flag `--config`, env `OCTOMATRON_CONFIG`); unknown fields are errors and the
 process exits with every problem listed.
 
 ```yaml
 github:
-  appIDFile: /etc/switchboard/github/app-id
-  privateKeyFile: /etc/switchboard/github/private-key
-  webhookSecretFile: /etc/switchboard/github/webhook-secret
+  appIDFile: /etc/octomatron/github/app-id
+  privateKeyFile: /etc/octomatron/github/private-key
+  webhookSecretFile: /etc/octomatron/github/webhook-secret
   allowedOwners: [arikkfir-org]        # installations on other owners are ignored
 tekton:
   dashboardURL: https://tekton.kfirs.com
@@ -245,17 +245,17 @@ retention:
 
 | Flag / environment | Default | Meaning |
 | --- | --- | --- |
-| `--config`, `SWITCHBOARD_CONFIG` | `/etc/switchboard/config.yaml` | server configuration |
+| `--config`, `OCTOMATRON_CONFIG` | `/etc/octomatron/config.yaml` | server configuration |
 | `--listen` | `:8080` | address of `/webhook`, `/healthz`, `/readyz`, `/metrics` |
 | `--workers`, `--queue-size` | `8`, `256` | webhook worker pool |
-| `SWITCHBOARD_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
-| `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `switchboard` namespace and holder identity |
+| `OCTOMATRON_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
+| `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `octomatron` namespace and holder identity |
 | `KUBECONFIG` | in-cluster config | used when not running in a cluster |
 
 ## GitHub App
 
-`arikkfir-switchboard`, installed on all `arikkfir-org` repositories, webhook URL
-`https://switchboard.kfirs.com/webhook`.
+`octomatron`, installed on all `arikkfir-org` repositories, webhook URL
+`https://octomatron.kfirs.com/webhook`.
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
@@ -263,30 +263,30 @@ retention:
 
 ## Deployment
 
-Switchboard is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
-`switchboard`, Deployment/ServiceAccount/Service `switchboard` (Service port 80 → container 8080), ConfigMap
-`switchboard` (key `config.yaml`) at `/etc/switchboard/config.yaml`, Secret `switchboard-github` (keys `app-id`,
-`private-key`, `webhook-secret`) at `/etc/switchboard/github/`. Every replica serves webhooks; the replica holding the
-Lease `switchboard` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
+Octomatron is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
+`octomatron`, Deployment/ServiceAccount/Service `octomatron` (Service port 80 → container 8080), ConfigMap
+`octomatron` (key `config.yaml`) at `/etc/octomatron/config.yaml`, Secret `octomatron-github` (keys `app-id`,
+`private-key`, `webhook-secret`) at `/etc/octomatron/github/`. Every replica serves webhooks; the replica holding the
+Lease `octomatron` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
 
 Endpoints (all on 8080): `POST /webhook`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced); `GET /metrics`.
 
-**RBAC Switchboard needs:**
+**RBAC Octomatron needs:**
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (`ClusterRole switchboard-tenant`, RoleBinding `switchboard` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
+| Tenant namespaces (`ClusterRole octomatron-tenant`, RoleBinding `octomatron` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
 | Cluster | PipelineRuns: get, list, watch (the reporter's informer, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
-| `switchboard` namespace | Leases: get, create, update |
+| `octomatron` namespace | Leases: get, create, update |
 
-**Metrics:** `switchboard_webhooks_received_total{event}`, `switchboard_webhooks_rejected_total{event,reason}`,
-`switchboard_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
-`switchboard_github_checkrun_errors_total{operation}`, `switchboard_reconcile_duration_seconds{result}`,
-`switchboard_webhook_queue_depth`, `switchboard_leader`, plus Go and process collectors.
+**Metrics:** `octomatron_webhooks_received_total{event}`, `octomatron_webhooks_rejected_total{event,reason}`,
+`octomatron_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
+`octomatron_github_checkrun_errors_total{operation}`, `octomatron_reconcile_duration_seconds{result}`,
+`octomatron_webhook_queue_depth`, `octomatron_leader`, plus Go and process collectors.
 
-**Bookkeeping:** objects Switchboard creates carry the label `app.kubernetes.io/managed-by: switchboard` and labels and
-annotations under `switchboard.kfirs.com/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
+**Bookkeeping:** objects Octomatron creates carry the label `app.kubernetes.io/managed-by: octomatron` and labels and
+annotations under `octomatron.kfirs.com/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
 `repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, …). They are never read as
 configuration.
 
@@ -296,22 +296,22 @@ Requirements: Go 1.27, and [ko](https://ko.build) for images.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
-make lint      # switchboard lint . (this repository's own .switchboard.yaml)
-make build     # bin/switchboard
+make lint      # octomatron lint . (this repository's own .octomatron.yaml)
+make build     # bin/octomatron
 ```
 
 Run locally against a cluster (the current `KUBECONFIG` context) with a configuration pointing at local copies of the
 App ID, private key and webhook secret:
 
 ```bash
-go run ./cmd/switchboard --config ./config.local.yaml --listen :8080
+go run ./cmd/octomatron --config ./config.local.yaml --listen :8080
 ```
 
 Tests use an in-process fake of the GitHub API (`internal/githubapp/githubtest`) and client-go's fake clients;
 `internal/e2e` drives signed webhooks through the whole service.
 
-Layout: `cmd/switchboard` (serve, lint, version); `internal/config` (server configuration, namespaces),
-`internal/repoconfig` (`.switchboard.yaml` schema and matching), `internal/tmpl` (template context),
+Layout: `cmd/octomatron` (serve, lint, version); `internal/config` (server configuration, namespaces),
+`internal/repoconfig` (`.octomatron.yaml` schema and matching), `internal/tmpl` (template context),
 `internal/githubapp` (App auth and GitHub API), `internal/webhook` (signatures, dedupe, worker pool),
 `internal/trigger` (events → held runs, concurrency, re-runs, comments, schedules, maintenance), `internal/tekton`
 (PipelineRun rendering and client), `internal/reporter` (check-run reporting), `internal/checkrun` (trigger context
@@ -319,16 +319,16 @@ marker), `internal/relay`, `internal/lint`, `internal/metrics`.
 
 ## Releases
 
-Switchboard builds itself: `.switchboard.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the
+Octomatron builds itself: `.octomatron.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the
 merge queue, and `release` on pushes to `main` (image tags `sha-<short>` and `main`) and `v*` tags (the tag name). Images
-go to `me-west1-docker.pkg.dev/arikkfir/images/switchboard`.
+go to `me-west1-docker.pkg.dev/arikkfir/images/octomatron`.
 
-The first image has to come from a workstation, before Switchboard runs:
+The first image has to come from a workstation, before Octomatron runs:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev
 git tag v0.1.0 && git push origin v0.1.0
-KO_DOCKER_REPO=me-west1-docker.pkg.dev/arikkfir/images/switchboard ko build --bare --tags=v0.1.0 ./cmd/switchboard
+KO_DOCKER_REPO=me-west1-docker.pkg.dev/arikkfir/images/octomatron ko build --bare --tags=v0.1.0 ./cmd/octomatron
 ```
 
 (`make image` does the same with the version from `git describe`.)

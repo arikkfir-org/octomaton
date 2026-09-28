@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 

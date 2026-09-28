@@ -37,7 +37,7 @@ func (c *Client) runs(namespace string) dynamic.ResourceInterface {
 }
 
 // NamespaceExists reports whether a namespace exists. Reading namespaces is a
-// cluster-scoped permission Switchboard may lack; then the namespace is assumed
+// cluster-scoped permission Octomatron may lack; then the namespace is assumed
 // to exist and creating the run reports the problem instead.
 func (c *Client) NamespaceExists(ctx context.Context, namespace string) (bool, error) {
 	_, err := c.Kube.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})

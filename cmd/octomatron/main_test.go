@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/reporter"
+	"github.com/arikkfir-org/octomatron/internal/reporter"
 )
 
 func TestDispatchSubcommands(t *testing.T) {
@@ -23,7 +23,7 @@ func TestDispatchSubcommands(t *testing.T) {
 		t.Fatalf("version: %d %q", code, stdout.String())
 	}
 	stdout.Reset()
-	if code := dispatch([]string{"help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "switchboard lint") {
+	if code := dispatch([]string{"help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "octomatron lint") {
 		t.Fatalf("help: %d %q", code, stdout.String())
 	}
 	if code := dispatch([]string{"lint"}, &stdout, &stderr); code != 2 {
@@ -31,9 +31,9 @@ func TestDispatchSubcommands(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cfg := "apiVersion: switchboard.kfirs.com/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {branches: [main]}}, params: {revision: \"{{ .Revision }}\"}}\n"
+	cfg := "apiVersion: octomatron.kfirs.com/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {branches: [main]}}, params: {revision: \"{{ .Revision }}\"}}\n"
 	run := "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n"
-	if err := os.WriteFile(filepath.Join(dir, ".switchboard.yaml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".octomatron.yaml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "run.yaml"), []byte(run), 0o600); err != nil {

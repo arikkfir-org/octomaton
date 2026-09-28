@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"k8s.io/apimachinery/pkg/types"
 )
 

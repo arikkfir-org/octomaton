@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/arikkfir-org/switchboard/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
 	"github.com/google/go-github/v92/github"
 )
 

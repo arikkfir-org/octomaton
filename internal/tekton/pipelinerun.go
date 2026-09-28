@@ -22,77 +22,77 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Tekton resources Switchboard works with.
+// Tekton resources Octomatron works with.
 var (
 	PipelineRuns = schema.GroupVersionResource{Group: "tekton.dev", Version: "v1", Resource: "pipelineruns"}
 	TaskRuns     = schema.GroupVersionResource{Group: "tekton.dev", Version: "v1", Resource: "taskruns"}
 )
 
 const (
-	// APIVersion is the only PipelineRun API version Switchboard accepts.
+	// APIVersion is the only PipelineRun API version Octomatron accepts.
 	APIVersion = "tekton.dev/v1"
-	// KindPipelineRun is the only kind Switchboard accepts in a pipelineRun file.
+	// KindPipelineRun is the only kind Octomatron accepts in a pipelineRun file.
 	KindPipelineRun = "PipelineRun"
 )
 
-// Values of spec.status Switchboard writes: a pending run is held until the
+// Values of spec.status Octomatron writes: a pending run is held until the
 // field is cleared; a cancelled one stops, running its finally tasks.
 const (
 	SpecStatusPending   = "PipelineRunPending"
 	SpecStatusCancelled = "CancelledRunFinally"
 )
 
-// Labels Switchboard writes on the objects it creates (bookkeeping only; they
+// Labels Octomatron writes on the objects it creates (bookkeeping only; they
 // are never read as configuration).
 const (
 	LabelManagedBy    = "app.kubernetes.io/managed-by"
-	ManagedByValue    = "switchboard"
-	LabelPipeline     = "switchboard.kfirs.com/pipeline"
-	LabelEvent        = "switchboard.kfirs.com/event"
-	LabelRepositoryID = "switchboard.kfirs.com/repository-id"
-	LabelSHA          = "switchboard.kfirs.com/sha"
+	ManagedByValue    = "octomatron"
+	LabelPipeline     = "octomatron.kfirs.com/pipeline"
+	LabelEvent        = "octomatron.kfirs.com/event"
+	LabelRepositoryID = "octomatron.kfirs.com/repository-id"
+	LabelSHA          = "octomatron.kfirs.com/sha"
 	// LabelConcurrencyGroup holds a hash of the repository and the concurrency group.
-	LabelConcurrencyGroup = "switchboard.kfirs.com/concurrency-group"
-	LabelComment          = "switchboard.kfirs.com/comment"
-	LabelSlot             = "switchboard.kfirs.com/slot"
-	// LabelDone marks a run Switchboard has finished reporting on.
-	LabelDone = "switchboard.kfirs.com/done"
+	LabelConcurrencyGroup = "octomatron.kfirs.com/concurrency-group"
+	LabelComment          = "octomatron.kfirs.com/comment"
+	LabelSlot             = "octomatron.kfirs.com/slot"
+	// LabelDone marks a run Octomatron has finished reporting on.
+	LabelDone = "octomatron.kfirs.com/done"
 	// LabelPVCsFreed marks a finished run whose PVCs were deleted.
-	LabelPVCsFreed = "switchboard.kfirs.com/pvcs-freed"
+	LabelPVCsFreed = "octomatron.kfirs.com/pvcs-freed"
 )
 
-// Annotations Switchboard writes on the objects it creates.
+// Annotations Octomatron writes on the objects it creates.
 const (
-	AnnotationRepository        = "switchboard.kfirs.com/repository"
-	AnnotationSHA               = "switchboard.kfirs.com/sha"
-	AnnotationCheckRunID        = "switchboard.kfirs.com/check-run-id"
-	AnnotationInstallationID    = "switchboard.kfirs.com/installation-id"
-	AnnotationConcurrencyGroup  = "switchboard.kfirs.com/concurrency-group"
-	AnnotationConcurrencyPolicy = "switchboard.kfirs.com/concurrency-policy"
-	AnnotationDeliveryID        = "switchboard.kfirs.com/delivery-id"
+	AnnotationRepository        = "octomatron.kfirs.com/repository"
+	AnnotationSHA               = "octomatron.kfirs.com/sha"
+	AnnotationCheckRunID        = "octomatron.kfirs.com/check-run-id"
+	AnnotationInstallationID    = "octomatron.kfirs.com/installation-id"
+	AnnotationConcurrencyGroup  = "octomatron.kfirs.com/concurrency-group"
+	AnnotationConcurrencyPolicy = "octomatron.kfirs.com/concurrency-policy"
+	AnnotationDeliveryID        = "octomatron.kfirs.com/delivery-id"
 	// AnnotationContext holds the serialized trigger context (JSON).
-	AnnotationContext = "switchboard.kfirs.com/context"
+	AnnotationContext = "octomatron.kfirs.com/context"
 	// AnnotationHead identifies the branch (or tag) the run is for.
-	AnnotationHead    = "switchboard.kfirs.com/head"
-	AnnotationAttempt = "switchboard.kfirs.com/attempt"
+	AnnotationHead    = "octomatron.kfirs.com/head"
+	AnnotationAttempt = "octomatron.kfirs.com/attempt"
 	// AnnotationToken holds the GitHub token settings (JSON) for resuming and refreshing.
-	AnnotationToken      = "switchboard.kfirs.com/token"
-	AnnotationTaskChecks = "switchboard.kfirs.com/task-checks"
+	AnnotationToken      = "octomatron.kfirs.com/token"
+	AnnotationTaskChecks = "octomatron.kfirs.com/task-checks"
 	// AnnotationReported records what was last reported: queued, in_progress, concluded or completed.
-	AnnotationReported        = "switchboard.kfirs.com/reported"
-	AnnotationProgress        = "switchboard.kfirs.com/progress"
-	AnnotationTaskCheckIDs    = "switchboard.kfirs.com/task-check-ids"
-	AnnotationTaskCheckStates = "switchboard.kfirs.com/task-check-states"
+	AnnotationReported        = "octomatron.kfirs.com/reported"
+	AnnotationProgress        = "octomatron.kfirs.com/progress"
+	AnnotationTaskCheckIDs    = "octomatron.kfirs.com/task-check-ids"
+	AnnotationTaskCheckStates = "octomatron.kfirs.com/task-check-states"
 	// AnnotationSupersededBy names the run (or "head:<sha>") that superseded this one.
-	AnnotationSupersededBy = "switchboard.kfirs.com/superseded-by"
+	AnnotationSupersededBy = "octomatron.kfirs.com/superseded-by"
 	// AnnotationWaitingFor names a same-commit rival a held run waits for.
-	AnnotationWaitingFor = "switchboard.kfirs.com/waiting-for"
-	// AnnotationCancelReason explains why Switchboard cancelled a run.
-	AnnotationCancelReason = "switchboard.kfirs.com/cancel-reason"
+	AnnotationWaitingFor = "octomatron.kfirs.com/waiting-for"
+	// AnnotationCancelReason explains why Octomatron cancelled a run.
+	AnnotationCancelReason = "octomatron.kfirs.com/cancel-reason"
 	// AnnotationExpiresAt is the token expiry on a token Secret (RFC 3339).
-	AnnotationExpiresAt = "switchboard.kfirs.com/expires-at"
+	AnnotationExpiresAt = "octomatron.kfirs.com/expires-at"
 	// AnnotationPermissions lists the token permissions on a token Secret (JSON).
-	AnnotationPermissions = "switchboard.kfirs.com/permissions"
+	AnnotationPermissions = "octomatron.kfirs.com/permissions"
 )
 
 // Reported states.
@@ -205,7 +205,7 @@ func TokenSecretName(pipelineRunName string) string {
 	return pipelineRunName + TokenSecretSuffix
 }
 
-// RenderInput describes how Switchboard customizes a PipelineRun.
+// RenderInput describes how Octomatron customizes a PipelineRun.
 type RenderInput struct {
 	Namespace string
 	Name      string

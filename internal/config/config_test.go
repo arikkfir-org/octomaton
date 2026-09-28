@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/tmpl"
+	"github.com/arikkfir-org/octomatron/internal/tmpl"
 )
 
 // referenceConfig is the server configuration from the hub reference.
 const referenceConfig = `
 github:
-  appIDFile: /etc/switchboard/github/app-id
-  privateKeyFile: /etc/switchboard/github/private-key
-  webhookSecretFile: /etc/switchboard/github/webhook-secret
+  appIDFile: /etc/octomatron/github/app-id
+  privateKeyFile: /etc/octomatron/github/private-key
+  webhookSecretFile: /etc/octomatron/github/webhook-secret
   allowedOwners: [arikkfir-org]        # installations on other owners are ignored
 tekton:
   dashboardURL: https://tekton.kfirs.com
@@ -38,7 +38,7 @@ func TestParseReferenceConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.GitHub.AppIDFile != "/etc/switchboard/github/app-id" || cfg.Tekton.DashboardURL != "https://tekton.kfirs.com" {
+	if cfg.GitHub.AppIDFile != "/etc/octomatron/github/app-id" || cfg.Tekton.DashboardURL != "https://tekton.kfirs.com" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	if !cfg.GitHub.OwnerAllowed("arikkfir-org") || !cfg.GitHub.OwnerAllowed("ARIKKFIR-ORG") || cfg.GitHub.OwnerAllowed("someone-else") {
@@ -178,7 +178,7 @@ func TestLoadCredentialsProblems(t *testing.T) {
 
 func TestSanitizeDNSLabel(t *testing.T) {
 	tests := []struct{ in, want string }{
-		{"ci-switchboard", "ci-switchboard"},
+		{"ci-octomatron", "ci-octomatron"},
 		{"CI-Docs", "ci-docs"},
 		{".github", "github"},
 		{"...dots", "dots"},
@@ -210,7 +210,7 @@ func TestResolveNamespace(t *testing.T) {
 		repo tmpl.Repository
 		want string
 	}{
-		{tmpl.Repository{Owner: "arikkfir-org", Name: "switchboard", FullName: "arikkfir-org/switchboard"}, "ci-switchboard"},
+		{tmpl.Repository{Owner: "arikkfir-org", Name: "octomatron", FullName: "arikkfir-org/octomatron"}, "ci-octomatron"},
 		{tmpl.Repository{Owner: "arikkfir-org", Name: ".github", FullName: "arikkfir-org/.github"}, "ci-github"},
 		{tmpl.Repository{Owner: "Arikkfir-Org", Name: ".GitHub", FullName: "Arikkfir-Org/.GitHub"}, "ci-github"},
 		{tmpl.Repository{Owner: "arikkfir-org", Name: "My_Repo", FullName: "arikkfir-org/My_Repo"}, "ci-my-repo"},

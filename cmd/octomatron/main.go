@@ -1,12 +1,12 @@
-// Command switchboard receives GitHub App webhooks, creates the Tekton
-// PipelineRuns that repositories declare in .switchboard.yaml, and reports their
+// Command octomatron receives GitHub App webhooks, creates the Tekton
+// PipelineRuns that repositories declare in .octomatron.yaml, and reports their
 // progress back to GitHub as check runs.
 //
 // Usage:
 //
-//	switchboard [serve] [--config FILE] [--listen ADDR]
-//	switchboard lint [--render] PATH...
-//	switchboard version
+//	octomatron [serve] [--config FILE] [--listen ADDR]
+//	octomatron lint [--render] PATH...
+//	octomatron version
 package main
 
 import (
@@ -27,15 +27,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/config"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/lint"
-	"github.com/arikkfir-org/switchboard/internal/metrics"
-	"github.com/arikkfir-org/switchboard/internal/relay"
-	"github.com/arikkfir-org/switchboard/internal/reporter"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
-	"github.com/arikkfir-org/switchboard/internal/trigger"
-	"github.com/arikkfir-org/switchboard/internal/webhook"
+	"github.com/arikkfir-org/octomatron/internal/config"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/lint"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/relay"
+	"github.com/arikkfir-org/octomatron/internal/reporter"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/trigger"
+	"github.com/arikkfir-org/octomatron/internal/webhook"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
@@ -51,7 +51,7 @@ import (
 var version = "dev"
 
 const (
-	leaseName           = "switchboard"
+	leaseName           = "octomatron"
 	serviceAccountNSDir = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
 
@@ -79,9 +79,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  switchboard [serve] [--config FILE] [--listen ADDR] [--workers N] [--queue-size N]
-  switchboard lint [--render] PATH...   validate .switchboard.yaml (PATH is the file or its directory)
-  switchboard version
+  octomatron [serve] [--config FILE] [--listen ADDR] [--workers N] [--queue-size N]
+  octomatron lint [--render] PATH...   validate .octomatron.yaml (PATH is the file or its directory)
+  octomatron version
 `)
 }
 
@@ -90,7 +90,7 @@ func runLint(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	render := fs.Bool("render", false, "print every PipelineRun rendered with placeholder values, as a YAML stream")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "usage: switchboard lint [--render] PATH...\n\nPATH is a .switchboard.yaml file or the directory holding it.\n")
+		fmt.Fprint(stderr, "usage: octomatron lint [--render] PATH...\n\nPATH is a .octomatron.yaml file or the directory holding it.\n")
 	}
 	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
 		fs.Usage()
@@ -101,11 +101,11 @@ func runLint(args []string, stdout, stderr io.Writer) int {
 
 func serve(args []string) int {
 	defaultConfig := config.DefaultPath
-	if v := os.Getenv("SWITCHBOARD_CONFIG"); v != "" {
+	if v := os.Getenv("OCTOMATRON_CONFIG"); v != "" {
 		defaultConfig = v
 	}
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", defaultConfig, "path to the server configuration file (env SWITCHBOARD_CONFIG)")
+	configPath := fs.String("config", defaultConfig, "path to the server configuration file (env OCTOMATRON_CONFIG)")
 	listen := fs.String("listen", ":8080", "address to serve /webhook, /healthz, /readyz and /metrics on")
 	workers := fs.Int("workers", 8, "number of webhook worker goroutines")
 	queueSize := fs.Int("queue-size", 256, "number of accepted webhook deliveries that may wait for a worker")
@@ -113,10 +113,10 @@ func serve(args []string) int {
 		return 2
 	}
 
-	logger := newLogger(os.Getenv("SWITCHBOARD_LOG_LEVEL"))
+	logger := newLogger(os.Getenv("OCTOMATRON_LOG_LEVEL"))
 	slog.SetDefault(logger)
 	klog.SetSlogLogger(logger.With("component", "client-go"))
-	logger.Info("Starting Switchboard", "version", version, "config", *configPath)
+	logger.Info("Starting Octomatron", "version", version, "config", *configPath)
 
 	cfg, creds, err := config.Load(*configPath)
 	if err != nil {
@@ -128,7 +128,7 @@ func serve(args []string) int {
 		logger.Error("Cannot configure the Kubernetes client", "error", err)
 		return 1
 	}
-	restConfig.UserAgent = "switchboard/" + version
+	restConfig.UserAgent = "octomatron/" + version
 	restConfig.QPS, restConfig.Burst = 20, 50
 	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
@@ -294,7 +294,7 @@ func kubeConfig() (*rest.Config, error) {
 }
 
 // podNamespace is where the leader election Lease lives: POD_NAMESPACE, else the
-// service account's namespace, else "switchboard".
+// service account's namespace, else "octomatron".
 func podNamespace() string {
 	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
 		return ns
@@ -304,7 +304,7 @@ func podNamespace() string {
 			return ns
 		}
 	}
-	return "switchboard"
+	return "octomatron"
 }
 
 func identity() string {

@@ -5,15 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 const commentConfig = `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: deploy
     pipelineRun: .tekton/ci.yaml
@@ -28,9 +28,9 @@ pipelines:
 // setupComment serves the comment configuration from the default branch only,
 // and an open pull request #5 into main whose head is sha1.
 func setupComment(h *harness) {
-	h.gh.AddFile(fullName, "main", ".switchboard.yaml", commentConfig)
+	h.gh.AddFile(fullName, "main", ".octomatron.yaml", commentConfig)
 	h.gh.AddFile(fullName, "main", ".tekton/ci.yaml", ciRun)
-	h.gh.AddFile(fullName, sha1, ".switchboard.yaml", "apiVersion: switchboard.kfirs.com/v1\npipelines: []\n") // the pull request's own copy is ignored
+	h.gh.AddFile(fullName, sha1, ".octomatron.yaml", "apiVersion: octomatron.kfirs.com/v1\npipelines: []\n") // the pull request's own copy is ignored
 	h.gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 5, State: "open", HeadSHA: sha1, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: "stranger/demo", Author: "stranger", AuthorAssociation: "NONE"})
 }
 

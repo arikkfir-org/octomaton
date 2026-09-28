@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -23,7 +23,7 @@ const (
 )
 
 // Scheduler fires the schedule triggers of every repository the App is
-// installed on. Schedules are read from each repository's .switchboard.yaml on
+// installed on. Schedules are read from each repository's .octomatron.yaml on
 // its default branch, every RefreshEvery and when a push to the default branch
 // is seen by this replica; each slot fires one run of the pipeline at the head
 // of the default branch, up to CatchUp late. It runs on the leader only.

@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 )
 
 func commentDedupe(id int64) map[string]string {
@@ -71,7 +71,7 @@ func (s *Service) HandleComment(ctx context.Context, req CommentRequest) {
 	switch {
 	case err != nil:
 		log.Error("Could not read the pull request", "error", err)
-		decline("Switchboard could not read the pull request; see its logs")
+		decline("Octomatron could not read the pull request; see its logs")
 		return
 	case pr.State != "open":
 		decline("the pull request is closed")
@@ -83,7 +83,7 @@ func (s *Service) HandleComment(ctx context.Context, req CommentRequest) {
 	level, err := gh.PermissionLevel(ctx, owner, repo, req.Author)
 	if err != nil {
 		log.Error("Could not verify the commenter's permission", "error", err)
-		decline("Switchboard could not verify your permission; see its logs")
+		decline("Octomatron could not verify your permission; see its logs")
 		return
 	}
 	if !githubapp.CanWrite(level) {
@@ -116,7 +116,7 @@ func (s *Service) HandleComment(ctx context.Context, req CommentRequest) {
 		case errors.As(err, &refusal):
 			decline(refusal.Reason)
 		case err != nil:
-			decline("Switchboard could not start it; see its logs")
+			decline("Octomatron could not start it; see its logs")
 		default:
 			started = true
 		}

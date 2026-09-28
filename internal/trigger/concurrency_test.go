@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 )
 
 func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {
@@ -70,7 +70,7 @@ func TestSupersedeOfSameCommitKeepsTheNewestCheck(t *testing.T) {
 }
 
 const queueConfig = `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml

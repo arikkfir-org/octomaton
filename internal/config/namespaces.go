@@ -5,7 +5,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/arikkfir-org/switchboard/internal/tmpl"
+	"github.com/arikkfir-org/octomatron/internal/tmpl"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 

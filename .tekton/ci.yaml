@@ -1,9 +1,9 @@
-# Switchboard's CI: lint its own .switchboard.yaml, vet, test (with the race
-# detector) and build. A plain Tekton PipelineRun; Switchboard sets the params.
+# Octomatron's CI: lint its own .octomatron.yaml, vet, test (with the race
+# detector) and build. A plain Tekton PipelineRun; Octomatron sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: switchboard-ci-
+  generateName: octomatron-ci-
 spec:
   taskRunTemplate:
     serviceAccountName: pipeline
@@ -76,7 +76,7 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go run ./cmd/switchboard lint .
+                go run ./cmd/octomatron lint .
             - name: vet
               image: golang:1.27.1
               script: |
@@ -97,5 +97,5 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go build -trimpath -o /tmp/switchboard ./cmd/switchboard
-                /tmp/switchboard version
+                go build -trimpath -o /tmp/octomatron ./cmd/octomatron
+                /tmp/octomatron version

@@ -5,15 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
 )
 
 func checkRunFor(cr githubtest.CheckRun) *github.CheckRun {
-	// Webhook payloads may carry the output text; pass none so that Switchboard
+	// Webhook payloads may carry the output text; pass none so that Octomatron
 	// has to fetch the check run, as it must when GitHub leaves it out.
 	return &github.CheckRun{ID: new(cr.ID), Name: new(cr.Name), HeadSHA: new(cr.HeadSHA), Conclusion: new(cr.Conclusion)}
 }

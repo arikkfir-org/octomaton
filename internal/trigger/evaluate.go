@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/metrics"
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
 	"github.com/google/go-github/v92/github"
 )
 
 // EvalOptions tunes Evaluate.
 type EvalOptions struct {
-	// ReportConfigErrors creates a failed "switchboard" check run when
-	// .switchboard.yaml cannot be read or is invalid.
+	// ReportConfigErrors creates a failed "octomatron" check run when
+	// .octomatron.yaml cannot be read or is invalid.
 	ReportConfigErrors bool
 	// Draft is set for events of draft pull requests.
 	Draft bool
@@ -27,7 +27,7 @@ type EvalOptions struct {
 	RerunBy string
 }
 
-// Evaluate reads .switchboard.yaml at the commit under test and starts every
+// Evaluate reads .octomatron.yaml at the commit under test and starts every
 // pipeline the event matches. A repository without the file is ignored.
 func (s *Service) Evaluate(ctx context.Context, c checkrun.Context, opts EvalOptions) {
 	log := s.logFor(c)
@@ -86,9 +86,9 @@ func (s *Service) Evaluate(ctx context.Context, c checkrun.Context, opts EvalOpt
 	log.Info("Evaluated event", "action", c.Action, "pipelines", len(cfg.Pipelines), "matched", matched)
 }
 
-// loadConfig fetches and parses .switchboard.yaml at c.ConfigAt(). It returns
+// loadConfig fetches and parses .octomatron.yaml at c.ConfigAt(). It returns
 // false when there is nothing to do (no file) or the file is unusable, in which
-// case the problem is reported on a "switchboard" check run when report is set.
+// case the problem is reported on a "octomatron" check run when report is set.
 func (s *Service) loadConfig(ctx context.Context, gh githubapp.Client, c checkrun.Context, report bool) (*repoconfig.Config, bool) {
 	log := s.logFor(c)
 	data, err := gh.GetFile(ctx, c.Repository.Owner, c.Repository.Name, repoconfig.FileName, c.ConfigAt())
@@ -100,7 +100,7 @@ func (s *Service) loadConfig(ctx context.Context, gh githubapp.Client, c checkru
 		log.Error("Could not read "+repoconfig.FileName, "error", err)
 		if report {
 			s.reportConfigProblem(ctx, gh, c, "Could not read "+repoconfig.FileName,
-				fmt.Sprintf("Switchboard could not read `%s` at `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.",
+				fmt.Sprintf("Octomatron could not read `%s` at `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.",
 					repoconfig.FileName, checkrun.ShortSHA(c.ConfigAt()), err))
 		}
 		return nil, false

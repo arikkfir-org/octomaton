@@ -6,7 +6,7 @@ import (
 )
 
 const matchConfig = `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - {name: any-push, pipelineRun: a.yaml, on: {push: {}}}
   - {name: main-only, pipelineRun: a.yaml, on: {push: {branches: [main, "release/**"]}}}
@@ -91,7 +91,7 @@ func TestPathFilter(t *testing.T) {
 
 func TestMatchReturnsPathFilter(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - {name: ci, pipelineRun: a.yaml, on: {pull_request: {paths: ["src/**"], pathsIgnore: ["**/*.md"]}}}
 `)

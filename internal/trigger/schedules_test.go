@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 )
 
 const scheduleConfig = `
-apiVersion: switchboard.kfirs.com/v1
+apiVersion: octomatron.kfirs.com/v1
 pipelines:
   - name: nightly
     pipelineRun: .tekton/ci.yaml
@@ -28,7 +28,7 @@ func setupSchedules(h *harness) {
 		githubtest.Repository{ID: 2, Owner: owner, Name: "archived", DefaultBranch: "main", Archived: true},
 	)
 	h.gh.AddInstallation(8, "someone-else", githubtest.Repository{ID: 3, Owner: "someone-else", Name: "x", DefaultBranch: "main"})
-	h.gh.AddFile(fullName, "main", ".switchboard.yaml", scheduleConfig)
+	h.gh.AddFile(fullName, "main", ".octomatron.yaml", scheduleConfig)
 	h.gh.SetBranch(fullName, "main", sha1)
 	h.files(sha1, scheduleConfig, ciRun)
 }
@@ -73,7 +73,7 @@ func TestSchedulerFiresOncePerSlot(t *testing.T) {
 
 	h.setNow(time.Date(2026, 5, 1, 11, 20, 0, 0, time.UTC).Add(-11 * time.Minute)) // 11:09: slot 11:05 due
 	h.gh.SetBranch(fullName, "main", sha2)
-	h.gh.AddFile(fullName, sha2, ".switchboard.yaml", "apiVersion: switchboard.kfirs.com/v1\npipelines: []\n")
+	h.gh.AddFile(fullName, sha2, ".octomatron.yaml", "apiVersion: octomatron.kfirs.com/v1\npipelines: []\n")
 	sc.FireDue(ctx)
 	if len(h.allRuns()) != 2 {
 		t.Fatalf("a schedule removed from the head's configuration does not fire")
@@ -98,7 +98,7 @@ func TestSchedulerNotify(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	h.gh.AddFile(fullName, "main", ".switchboard.yaml", "apiVersion: switchboard.kfirs.com/v1\npipelines: []\n")
+	h.gh.AddFile(fullName, "main", ".octomatron.yaml", "apiVersion: octomatron.kfirs.com/v1\npipelines: []\n")
 	sc.Notify(installationID, repo())
 	for {
 		sc.mu.Lock()

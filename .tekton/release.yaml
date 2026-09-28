@@ -1,11 +1,11 @@
-# Switchboard's release: build and push the image with ko. Pushes to main are
+# Octomatron's release: build and push the image with ko. Pushes to main are
 # tagged sha-<short> and main; v* tags are tagged with the tag name. The pod
 # authenticates to Artifact Registry through Workload Identity (ko's Google
-# keychain uses Application Default Credentials). Switchboard sets the params.
+# keychain uses Application Default Credentials). Octomatron sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: switchboard-release-
+  generateName: octomatron-release-
 spec:
   taskRunTemplate:
     serviceAccountName: pipeline
@@ -85,7 +85,7 @@ spec:
                 - name: REF
                   value: $(params.ref)
                 - name: KO_DOCKER_REPO
-                  value: me-west1-docker.pkg.dev/arikkfir/images/switchboard
+                  value: me-west1-docker.pkg.dev/arikkfir/images/octomatron
               script: |
                 #!/bin/sh
                 set -eu
@@ -107,4 +107,4 @@ spec:
                 esac
                 export VERSION
                 echo "Publishing $KO_DOCKER_REPO with tags $tags"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$tags" ./cmd/switchboard
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$tags" ./cmd/octomatron

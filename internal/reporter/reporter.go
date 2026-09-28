@@ -1,4 +1,4 @@
-// Package reporter watches the PipelineRuns Switchboard created and mirrors their
+// Package reporter watches the PipelineRuns Octomatron created and mirrors their
 // state onto GitHub: the check run goes in_progress when the run starts, shows a
 // per-task progress table while it runs, and completes with the run's conclusion;
 // task checks follow their TaskRuns; a comment command gets a reply. Finished runs
@@ -18,10 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/metrics"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/metrics"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -112,7 +112,7 @@ func (r *Reporter) Run(ctx context.Context) error {
 	informer := factory.ForResource(tekton.PipelineRuns).Informer()
 	queue := workqueue.NewTypedRateLimitingQueueWithConfig(
 		workqueue.DefaultTypedControllerRateLimiter[string](),
-		workqueue.TypedRateLimitingQueueConfig[string]{Name: "switchboard-reporter"},
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "octomatron-reporter"},
 	)
 	defer queue.ShutDown()
 

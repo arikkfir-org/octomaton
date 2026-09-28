@@ -1,5 +1,5 @@
-// Package lint validates a .switchboard.yaml and the PipelineRun files it
-// references the way Switchboard would at run time, without GitHub or a cluster.
+// Package lint validates a .octomatron.yaml and the PipelineRun files it
+// references the way Octomatron would at run time, without GitHub or a cluster.
 package lint
 
 import (
@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
-	"github.com/arikkfir-org/switchboard/internal/tekton"
-	"github.com/arikkfir-org/switchboard/internal/tmpl"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/tekton"
+	"github.com/arikkfir-org/octomatron/internal/tmpl"
 	"sigs.k8s.io/yaml"
 )
 
@@ -47,7 +47,7 @@ type Rendered struct {
 }
 
 // ConfigPath returns the configuration file for a path argument: the file
-// itself, or .switchboard.yaml in a directory.
+// itself, or .octomatron.yaml in a directory.
 func ConfigPath(path string) (string, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -140,7 +140,7 @@ func Lint(configPath string) Result {
 	return res
 }
 
-// Run implements "switchboard lint [--render] PATH...": it prints problems to
+// Run implements "octomatron lint [--render] PATH...": it prints problems to
 // stderr (or rendered PipelineRuns to stdout with render) and returns the exit code.
 func Run(paths []string, render bool, stdout, stderr io.Writer) int {
 	if len(paths) == 0 {

@@ -1,4 +1,4 @@
-module github.com/arikkfir-org/switchboard
+module github.com/arikkfir-org/octomatron
 
 go 1.27.0
 

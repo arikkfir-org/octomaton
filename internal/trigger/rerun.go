@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arikkfir-org/switchboard/internal/checkrun"
-	"github.com/arikkfir-org/switchboard/internal/githubapp"
-	"github.com/arikkfir-org/switchboard/internal/repoconfig"
+	"github.com/arikkfir-org/octomatron/internal/checkrun"
+	"github.com/arikkfir-org/octomatron/internal/githubapp"
+	"github.com/arikkfir-org/octomatron/internal/repoconfig"
 	"github.com/google/go-github/v92/github"
 )
 
@@ -30,7 +30,7 @@ type RerunRequest struct {
 // Rerun replays the trigger context stored on each check run as a new attempt.
 // Re-running a pipeline's check (or one of its task checks) always runs the
 // pipeline: path filters are not re-applied and the requester's write access
-// stands in for pull request trust. Re-running the "switchboard" check
+// stands in for pull request trust. Re-running the "octomatron" check
 // re-evaluates the whole event.
 func (s *Service) Rerun(ctx context.Context, req RerunRequest) {
 	owner, repo := req.Repository.Owner, req.Repository.Name

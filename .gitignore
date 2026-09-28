@@ -1,0 +1,20 @@
+# Build output
+/bin/
+/dist/
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Local configuration and credentials
+.env
+*.pem
+kubeconfig
+/config.local.yaml
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store

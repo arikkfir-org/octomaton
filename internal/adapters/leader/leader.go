@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 )
 
 const (

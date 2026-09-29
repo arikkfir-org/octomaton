@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 )
 
 // Metrics are metrics.Metrics whose recorded values tests can read.

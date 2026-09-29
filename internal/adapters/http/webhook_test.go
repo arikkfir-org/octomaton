@@ -1,4 +1,4 @@
-package webhook
+package http
 
 import (
 	"bytes"
@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-	"octomaton.dev/internal/metrics"
-	"octomaton.dev/internal/metrics/metricstest"
+	"octomaton.dev/internal/system/metrics"
+	"octomaton.dev/internal/system/metrics/metricstest"
 )
 
 var testSecret = []byte("s3cr3t")

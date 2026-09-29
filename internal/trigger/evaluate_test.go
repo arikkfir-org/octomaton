@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 )
 

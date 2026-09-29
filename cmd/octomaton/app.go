@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"octomaton.dev/internal/buildinfo"
-	"octomaton.dev/internal/config"
+	octohttp "octomaton.dev/internal/adapters/http"
+	webhook "octomaton.dev/internal/adapters/http"
+	"octomaton.dev/internal/adapters/kube"
+	"octomaton.dev/internal/adapters/leader"
+	"octomaton.dev/internal/adapters/relay"
 	"octomaton.dev/internal/githubapp"
-	octohttp "octomaton.dev/internal/http"
-	"octomaton.dev/internal/kube"
-	"octomaton.dev/internal/leader"
-	"octomaton.dev/internal/metrics"
-	"octomaton.dev/internal/relay"
 	"octomaton.dev/internal/reporter"
+	"octomaton.dev/internal/system/buildinfo"
+	"octomaton.dev/internal/system/config"
+	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/trigger"
-	"octomaton.dev/internal/webhook"
 )
 
 const (

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"octomaton.dev/internal/config"
+	"octomaton.dev/internal/system/config"
 )
 
 // testConfig loads a configuration for a Kubernetes API server that knows no resources.

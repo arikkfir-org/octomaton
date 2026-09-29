@@ -20,7 +20,7 @@ import (
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics/metricstest"
+	"octomaton.dev/internal/system/metrics/metricstest"
 	"octomaton.dev/internal/tekton"
 )
 

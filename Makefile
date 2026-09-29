@@ -19,7 +19,7 @@ lint:
 
 ## build: static binaries in bin/: octomaton (the server) and octomaton-lint
 build:
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X octomaton.dev/internal/buildinfo.version=$(VERSION)" -o bin/ ./cmd/...
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X octomaton.dev/internal/system/buildinfo.version=$(VERSION)" -o bin/ ./cmd/...
 
 ## image: build and push the image with ko (needs registry credentials)
 image:

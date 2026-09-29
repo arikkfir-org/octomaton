@@ -17,8 +17,8 @@ import (
 	"io"
 	"os"
 
-	"octomaton.dev/internal/buildinfo"
 	"octomaton.dev/internal/lint"
+	"octomaton.dev/internal/system/buildinfo"
 )
 
 func main() {

@@ -9,8 +9,8 @@ import (
 	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/metrics"
 	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/system/metrics"
 )
 
 // EvalOptions tunes Evaluate.

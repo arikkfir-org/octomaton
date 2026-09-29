@@ -20,7 +20,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 )
 
 // memMetrics keeps what the periodic reader exports: each metric's data points and the resource.

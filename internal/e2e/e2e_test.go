@@ -24,15 +24,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	webhook "octomaton.dev/internal/adapters/http"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/config"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics/metricstest"
 	"octomaton.dev/internal/reporter"
+	"octomaton.dev/internal/system/config"
+	"octomaton.dev/internal/system/metrics/metricstest"
 	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/trigger"
-	"octomaton.dev/internal/webhook"
 )
 
 const (

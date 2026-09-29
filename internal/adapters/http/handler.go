@@ -1,6 +1,6 @@
 // Package webhook receives GitHub App webhooks: it verifies signatures, drops
 // duplicate deliveries and hands accepted events to a bounded worker pool.
-package webhook
+package http
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"net/http"
 
 	"github.com/google/go-github/v92/github"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 )
 
 // MaxBodyBytes is the largest payload accepted (GitHub caps payloads at 25 MB).

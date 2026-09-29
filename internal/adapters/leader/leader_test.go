@@ -10,7 +10,7 @@ import (
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubefake "k8s.io/client-go/kubernetes/fake"
-	"octomaton.dev/internal/metrics/metricstest"
+	"octomaton.dev/internal/system/metrics/metricstest"
 )
 
 func newElector(t *testing.T, client *kubefake.Clientset, jobs func(context.Context)) (*Elector, *metricstest.Metrics) {

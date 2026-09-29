@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"octomaton.dev/internal/buildinfo"
+	"octomaton.dev/internal/system/buildinfo"
 )
 
 func TestRun(t *testing.T) {

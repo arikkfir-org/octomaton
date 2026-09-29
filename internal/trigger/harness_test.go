@@ -21,10 +21,10 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/config"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics/metricstest"
+	"octomaton.dev/internal/system/config"
+	"octomaton.dev/internal/system/metrics/metricstest"
 	"octomaton.dev/internal/tekton"
 )
 

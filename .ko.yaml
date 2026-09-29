@@ -14,4 +14,4 @@ builds:
     ldflags:
       - -s -w
       # VERSION when set (the release pipeline sets it), else the git tag, else "dev".
-      - -X octomaton.dev/internal/buildinfo.version={{ or (index .Env "VERSION") .Git.Tag "dev" }}
+      - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") .Git.Tag "dev" }}

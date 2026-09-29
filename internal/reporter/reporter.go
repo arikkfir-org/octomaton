@@ -27,7 +27,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 )
 

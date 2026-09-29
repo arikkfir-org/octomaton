@@ -15,13 +15,13 @@ import (
 	"github.com/google/go-github/v92/github"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	webhook "octomaton.dev/internal/adapters/http"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/metrics"
 	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/tmpl"
-	"octomaton.dev/internal/webhook"
 )
 
 // ApproveAction is the identifier of the "Approve and run" check-run action.

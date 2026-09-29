@@ -1,4 +1,4 @@
-package webhook
+package http
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/system/metrics"
 )
 
 // Job is a unit of asynchronous webhook processing.

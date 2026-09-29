@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"octomaton.dev/internal/buildinfo"
-	"octomaton.dev/internal/config"
-	"octomaton.dev/internal/telemetry"
+	"octomaton.dev/internal/system/buildinfo"
+	"octomaton.dev/internal/system/config"
+	"octomaton.dev/internal/system/telemetry"
 )
 
 // service names the process in its telemetry and prefixes its environment variables.

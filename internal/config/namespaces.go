@@ -5,8 +5,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/arikkfir-org/octomatron/internal/tmpl"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"octomaton.dev/internal/tmpl"
 )
 
 // Namespaces maps repositories to the Kubernetes namespaces their PipelineRuns run in.

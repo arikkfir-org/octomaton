@@ -22,77 +22,77 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Tekton resources Octomatron works with.
+// Tekton resources Octomaton works with.
 var (
 	PipelineRuns = schema.GroupVersionResource{Group: "tekton.dev", Version: "v1", Resource: "pipelineruns"}
 	TaskRuns     = schema.GroupVersionResource{Group: "tekton.dev", Version: "v1", Resource: "taskruns"}
 )
 
 const (
-	// APIVersion is the only PipelineRun API version Octomatron accepts.
+	// APIVersion is the only PipelineRun API version Octomaton accepts.
 	APIVersion = "tekton.dev/v1"
-	// KindPipelineRun is the only kind Octomatron accepts in a pipelineRun file.
+	// KindPipelineRun is the only kind Octomaton accepts in a pipelineRun file.
 	KindPipelineRun = "PipelineRun"
 )
 
-// Values of spec.status Octomatron writes: a pending run is held until the
+// Values of spec.status Octomaton writes: a pending run is held until the
 // field is cleared; a cancelled one stops, running its finally tasks.
 const (
 	SpecStatusPending   = "PipelineRunPending"
 	SpecStatusCancelled = "CancelledRunFinally"
 )
 
-// Labels Octomatron writes on the objects it creates (bookkeeping only; they
+// Labels Octomaton writes on the objects it creates (bookkeeping only; they
 // are never read as configuration).
 const (
 	LabelManagedBy    = "app.kubernetes.io/managed-by"
-	ManagedByValue    = "octomatron"
-	LabelPipeline     = "octomatron.kfirs.com/pipeline"
-	LabelEvent        = "octomatron.kfirs.com/event"
-	LabelRepositoryID = "octomatron.kfirs.com/repository-id"
-	LabelSHA          = "octomatron.kfirs.com/sha"
+	ManagedByValue    = "octomaton"
+	LabelPipeline     = "octomaton.dev/pipeline"
+	LabelEvent        = "octomaton.dev/event"
+	LabelRepositoryID = "octomaton.dev/repository-id"
+	LabelSHA          = "octomaton.dev/sha"
 	// LabelConcurrencyGroup holds a hash of the repository and the concurrency group.
-	LabelConcurrencyGroup = "octomatron.kfirs.com/concurrency-group"
-	LabelComment          = "octomatron.kfirs.com/comment"
-	LabelSlot             = "octomatron.kfirs.com/slot"
-	// LabelDone marks a run Octomatron has finished reporting on.
-	LabelDone = "octomatron.kfirs.com/done"
+	LabelConcurrencyGroup = "octomaton.dev/concurrency-group"
+	LabelComment          = "octomaton.dev/comment"
+	LabelSlot             = "octomaton.dev/slot"
+	// LabelDone marks a run Octomaton has finished reporting on.
+	LabelDone = "octomaton.dev/done"
 	// LabelPVCsFreed marks a finished run whose PVCs were deleted.
-	LabelPVCsFreed = "octomatron.kfirs.com/pvcs-freed"
+	LabelPVCsFreed = "octomaton.dev/pvcs-freed"
 )
 
-// Annotations Octomatron writes on the objects it creates.
+// Annotations Octomaton writes on the objects it creates.
 const (
-	AnnotationRepository        = "octomatron.kfirs.com/repository"
-	AnnotationSHA               = "octomatron.kfirs.com/sha"
-	AnnotationCheckRunID        = "octomatron.kfirs.com/check-run-id"
-	AnnotationInstallationID    = "octomatron.kfirs.com/installation-id"
-	AnnotationConcurrencyGroup  = "octomatron.kfirs.com/concurrency-group"
-	AnnotationConcurrencyPolicy = "octomatron.kfirs.com/concurrency-policy"
-	AnnotationDeliveryID        = "octomatron.kfirs.com/delivery-id"
+	AnnotationRepository        = "octomaton.dev/repository"
+	AnnotationSHA               = "octomaton.dev/sha"
+	AnnotationCheckRunID        = "octomaton.dev/check-run-id"
+	AnnotationInstallationID    = "octomaton.dev/installation-id"
+	AnnotationConcurrencyGroup  = "octomaton.dev/concurrency-group"
+	AnnotationConcurrencyPolicy = "octomaton.dev/concurrency-policy"
+	AnnotationDeliveryID        = "octomaton.dev/delivery-id"
 	// AnnotationContext holds the serialized trigger context (JSON).
-	AnnotationContext = "octomatron.kfirs.com/context"
+	AnnotationContext = "octomaton.dev/context"
 	// AnnotationHead identifies the branch (or tag) the run is for.
-	AnnotationHead    = "octomatron.kfirs.com/head"
-	AnnotationAttempt = "octomatron.kfirs.com/attempt"
+	AnnotationHead    = "octomaton.dev/head"
+	AnnotationAttempt = "octomaton.dev/attempt"
 	// AnnotationToken holds the GitHub token settings (JSON) for resuming and refreshing.
-	AnnotationToken      = "octomatron.kfirs.com/token"
-	AnnotationTaskChecks = "octomatron.kfirs.com/task-checks"
+	AnnotationToken      = "octomaton.dev/token"
+	AnnotationTaskChecks = "octomaton.dev/task-checks"
 	// AnnotationReported records what was last reported: queued, in_progress, concluded or completed.
-	AnnotationReported        = "octomatron.kfirs.com/reported"
-	AnnotationProgress        = "octomatron.kfirs.com/progress"
-	AnnotationTaskCheckIDs    = "octomatron.kfirs.com/task-check-ids"
-	AnnotationTaskCheckStates = "octomatron.kfirs.com/task-check-states"
+	AnnotationReported        = "octomaton.dev/reported"
+	AnnotationProgress        = "octomaton.dev/progress"
+	AnnotationTaskCheckIDs    = "octomaton.dev/task-check-ids"
+	AnnotationTaskCheckStates = "octomaton.dev/task-check-states"
 	// AnnotationSupersededBy names the run (or "head:<sha>") that superseded this one.
-	AnnotationSupersededBy = "octomatron.kfirs.com/superseded-by"
+	AnnotationSupersededBy = "octomaton.dev/superseded-by"
 	// AnnotationWaitingFor names a same-commit rival a held run waits for.
-	AnnotationWaitingFor = "octomatron.kfirs.com/waiting-for"
-	// AnnotationCancelReason explains why Octomatron cancelled a run.
-	AnnotationCancelReason = "octomatron.kfirs.com/cancel-reason"
+	AnnotationWaitingFor = "octomaton.dev/waiting-for"
+	// AnnotationCancelReason explains why Octomaton cancelled a run.
+	AnnotationCancelReason = "octomaton.dev/cancel-reason"
 	// AnnotationExpiresAt is the token expiry on a token Secret (RFC 3339).
-	AnnotationExpiresAt = "octomatron.kfirs.com/expires-at"
+	AnnotationExpiresAt = "octomaton.dev/expires-at"
 	// AnnotationPermissions lists the token permissions on a token Secret (JSON).
-	AnnotationPermissions = "octomatron.kfirs.com/permissions"
+	AnnotationPermissions = "octomaton.dev/permissions"
 )
 
 // Reported states.
@@ -205,7 +205,7 @@ func TokenSecretName(pipelineRunName string) string {
 	return pipelineRunName + TokenSecretSuffix
 }
 
-// RenderInput describes how Octomatron customizes a PipelineRun.
+// RenderInput describes how Octomaton customizes a PipelineRun.
 type RenderInput struct {
 	Namespace string
 	Name      string

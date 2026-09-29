@@ -1,4 +1,4 @@
-module github.com/arikkfir-org/octomatron
+module octomaton.dev
 
 go 1.27.0
 

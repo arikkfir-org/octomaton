@@ -33,7 +33,7 @@ type SkippedTask struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// PipelineRunStatus is the subset of a PipelineRun's status Octomatron reads.
+// PipelineRunStatus is the subset of a PipelineRun's status Octomaton reads.
 type PipelineRunStatus struct {
 	Conditions      []Condition      `json:"conditions,omitempty"`
 	StartTime       *metav1.Time     `json:"startTime,omitempty"`
@@ -56,7 +56,7 @@ type StepState struct {
 	Terminated *StepTerminated `json:"terminated,omitempty"`
 }
 
-// TaskRunStatus is the subset of a TaskRun's status Octomatron reads.
+// TaskRunStatus is the subset of a TaskRun's status Octomaton reads.
 type TaskRunStatus struct {
 	Conditions     []Condition  `json:"conditions,omitempty"`
 	PodName        string       `json:"podName,omitempty"`
@@ -158,7 +158,7 @@ func OutcomeOf(conditions []Condition) Outcome {
 }
 
 // RunOutcome is OutcomeOf for a PipelineRun, where a finished run that
-// Octomatron superseded concludes as skipped ("Superseded").
+// Octomaton superseded concludes as skipped ("Superseded").
 func RunOutcome(pr *unstructured.Unstructured, st PipelineRunStatus) Outcome {
 	o := OutcomeOf(st.Conditions)
 	if o.Done() && o.Conclusion != ConclusionSuccess && pr.GetAnnotations()[AnnotationSupersededBy] != "" {

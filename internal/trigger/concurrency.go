@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/repoconfig"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/tekton"
 )
 
 // SupersededByHead prefixes the superseded-by annotation of a run stood down

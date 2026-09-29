@@ -1,9 +1,9 @@
-# Octomatron's CI: lint its own .octomatron.yaml, vet, test (with the race
-# detector) and build. A plain Tekton PipelineRun; Octomatron sets the params.
+# Octomaton's CI: lint its own .octomaton.yaml, vet, test (with the race
+# detector) and build. A plain Tekton PipelineRun; Octomaton sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: octomatron-ci-
+  generateName: octomaton-ci-
 spec:
   taskRunTemplate:
     serviceAccountName: pipeline
@@ -76,7 +76,7 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go run ./cmd/octomatron lint .
+                go run ./cmd/octomaton lint .
             - name: vet
               image: golang:1.27.1
               script: |
@@ -97,5 +97,5 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go build -trimpath -o /tmp/octomatron ./cmd/octomatron
-                /tmp/octomatron version
+                go build -trimpath -o /tmp/octomaton ./cmd/octomaton
+                /tmp/octomaton version

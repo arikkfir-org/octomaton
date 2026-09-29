@@ -1,5 +1,5 @@
-// Package config loads and validates the Octomatron server configuration
-// (by default /etc/octomatron/config.yaml) and the GitHub App credentials it points to.
+// Package config loads and validates the Octomaton server configuration
+// (by default /etc/octomaton/config.yaml) and the GitHub App credentials it points to.
 package config
 
 import (
@@ -20,7 +20,7 @@ import (
 )
 
 // DefaultPath is where the server configuration is read from unless overridden.
-const DefaultPath = "/etc/octomatron/config.yaml"
+const DefaultPath = "/etc/octomaton/config.yaml"
 
 // DefaultFreePVCsAfter is how long after a PipelineRun finishes its PVCs are deleted.
 const DefaultFreePVCsAfter = time.Hour
@@ -39,7 +39,7 @@ type Relay struct {
 	URLs []string `yaml:"urls"`
 }
 
-// Retention controls what Octomatron cleans up after runs finish.
+// Retention controls what Octomaton cleans up after runs finish.
 type Retention struct {
 	// FreePVCsAfter is how long after a PipelineRun finished the PVCs it owns are
 	// deleted (default 1h). Pods are kept: the Tekton Dashboard reads logs from them.

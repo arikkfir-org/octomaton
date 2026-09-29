@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"octomaton.dev/internal/metrics"
 )
 
 var testSecret = []byte("s3cr3t")

@@ -1,5 +1,5 @@
-// Package repoconfig parses and validates .octomatron.yaml, the only file
-// Octomatron reads from a repository, and decides which pipelines an event triggers.
+// Package repoconfig parses and validates .octomaton.yaml, the only file
+// Octomaton reads from a repository, and decides which pipelines an event triggers.
 package repoconfig
 
 import (
@@ -13,20 +13,20 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/tmpl"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/tmpl"
 )
 
 const (
 	// FileName is the repository configuration file, always read from the repository root.
-	FileName = ".octomatron.yaml"
+	FileName = ".octomaton.yaml"
 	// APIVersion is the only supported configuration version.
-	APIVersion = "octomatron.kfirs.com/v1"
+	APIVersion = "octomaton.dev/v1"
 	// ReservedName is used for configuration-level check runs and cannot name a pipeline.
-	ReservedName  = "octomatron"
+	ReservedName  = "octomaton"
 	maxNameLength = 63
 )
 
@@ -54,7 +54,7 @@ var (
 	paramNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
 )
 
-// Config is a parsed and validated .octomatron.yaml.
+// Config is a parsed and validated .octomaton.yaml.
 type Config struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Pipelines  []Pipeline `yaml:"pipelines"`

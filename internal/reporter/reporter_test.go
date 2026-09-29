@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/githubapp/githubtest"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/tekton"
 )
 
 const (
@@ -307,9 +307,9 @@ func TestFinishOutcomes(t *testing.T) {
 			wantConclusion: "skipped", wantTitle: "Superseded", wantSummary: []string{"Superseded by a newer run, [`demo-ci-2222222-1`]"},
 		},
 		{
-			name: "cancelled by Octomatron", status: finished("False", "Cancelled", "", start, start.Add(time.Minute)),
+			name: "cancelled by Octomaton", status: finished("False", "Cancelled", "", start, start.Add(time.Minute)),
 			annotations:    map[string]string{tekton.AnnotationCancelReason: "merge group destroyed (dequeued)"},
-			wantConclusion: "cancelled", wantTitle: "Cancelled after 1m0s", wantSummary: []string{"Cancelled by Octomatron: merge group destroyed (dequeued)."},
+			wantConclusion: "cancelled", wantTitle: "Cancelled after 1m0s", wantSummary: []string{"Cancelled by Octomaton: merge group destroyed (dequeued)."},
 		},
 		{
 			name: "timed out", status: finished("False", "PipelineRunTimeout", "PipelineRun timed out", start, start.Add(time.Hour)),

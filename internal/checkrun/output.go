@@ -9,7 +9,7 @@ import (
 // MaxOutputLength is GitHub's limit for a check run's output summary and text.
 const MaxOutputLength = 65535
 
-// MaxSummaryLength caps the summaries Octomatron writes, below GitHub's limit.
+// MaxSummaryLength caps the summaries Octomaton writes, below GitHub's limit.
 const MaxSummaryLength = 60000
 
 const truncationNote = "\n\n_(truncated)_"

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
 	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/githubapp/githubtest"
 )
 
 const (
@@ -32,10 +32,10 @@ func newApp(t *testing.T) (*githubapp.App, *githubtest.Server) {
 
 func TestInstallationTokenIsCached(t *testing.T) {
 	app, srv := newApp(t)
-	srv.AddFile(repo, "abc", ".octomatron.yaml", "hello")
+	srv.AddFile(repo, "abc", ".octomaton.yaml", "hello")
 	gh := app.Installation(installationID)
 	for range 3 {
-		if _, err := gh.GetFile(context.Background(), "octo-org", "octo-repo", ".octomatron.yaml", "abc"); err != nil {
+		if _, err := gh.GetFile(context.Background(), "octo-org", "octo-repo", ".octomaton.yaml", "abc"); err != nil {
 			t.Fatalf("GetFile: %v", err)
 		}
 	}

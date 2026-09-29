@@ -1,4 +1,4 @@
-// Package metrics defines Octomatron's Prometheus metrics.
+// Package metrics defines Octomaton's Prometheus metrics.
 package metrics
 
 import (
@@ -16,7 +16,7 @@ const (
 	RunExisting       = "existing"
 )
 
-// Metrics holds every metric Octomatron exports, registered on its own registry.
+// Metrics holds every metric Octomaton exports, registered on its own registry.
 type Metrics struct {
 	Registry *prometheus.Registry
 
@@ -41,32 +41,32 @@ func New() *Metrics {
 	m := &Metrics{
 		Registry: prometheus.NewRegistry(),
 		WebhooksReceived: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "octomatron_webhooks_received_total",
+			Name: "octomaton_webhooks_received_total",
 			Help: "Webhook deliveries received, by event.",
 		}, []string{"event"}),
 		WebhooksRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "octomatron_webhooks_rejected_total",
+			Name: "octomaton_webhooks_rejected_total",
 			Help: "Webhook deliveries rejected, by event and reason.",
 		}, []string{"event", "reason"}),
 		RunsCreated: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "octomatron_runs_created_total",
+			Name: "octomaton_runs_created_total",
 			Help: "Pipeline trigger outcomes: created, existing (deduplicated), skipped, action_required, failed (reported on a check run) or error.",
 		}, []string{"result"}),
 		CheckRunErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "octomatron_github_checkrun_errors_total",
+			Name: "octomaton_github_checkrun_errors_total",
 			Help: "Failed GitHub check-run API calls, by operation.",
 		}, []string{"operation"}),
 		ReconcileDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "octomatron_reconcile_duration_seconds",
+			Name:    "octomaton_reconcile_duration_seconds",
 			Help:    "Time spent reporting a PipelineRun's state to GitHub, by result.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"result"}),
 		QueueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "octomatron_webhook_queue_depth",
+			Name: "octomaton_webhook_queue_depth",
 			Help: "Webhook jobs waiting for a worker.",
 		}),
 		Leader: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "octomatron_leader",
+			Name: "octomaton_leader",
 			Help: "1 while this replica is the elected reporter leader.",
 		}),
 	}

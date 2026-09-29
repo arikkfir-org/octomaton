@@ -11,12 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/config"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,6 +20,12 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/config"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/githubapp/githubtest"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/tekton"
 )
 
 const (
@@ -51,7 +51,7 @@ namespaces: {template: "ci-{{ .Repository.Name }}"}
 
 // ciConfig runs "ci" on pull requests, pushes to main and the merge queue.
 const ciConfig = `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml
@@ -157,9 +157,9 @@ func (h *harness) setNow(t time.Time) {
 	h.now = t
 }
 
-// files stores .octomatron.yaml and the ci PipelineRun at a ref.
+// files stores .octomaton.yaml and the ci PipelineRun at a ref.
 func (h *harness) files(ref, cfg, run string) {
-	h.gh.AddFile(fullName, ref, ".octomatron.yaml", cfg)
+	h.gh.AddFile(fullName, ref, ".octomaton.yaml", cfg)
 	if run != "" {
 		h.gh.AddFile(fullName, ref, ".tekton/ci.yaml", run)
 	}

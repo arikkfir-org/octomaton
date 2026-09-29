@@ -1,5 +1,5 @@
 // Package trigger decides what a GitHub event means for a repository: it reads
-// .octomatron.yaml, matches pipelines, applies trust and path rules, creates
+// .octomaton.yaml, matches pipelines, applies trust and path rules, creates
 // held PipelineRuns with their check runs and token Secrets, releases them per
 // concurrency policy, and handles re-runs, approvals, comment commands,
 // schedules, token refresh and PVC retention.
@@ -12,16 +12,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/repoconfig"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
-	"github.com/arikkfir-org/octomatron/internal/tmpl"
-	"github.com/arikkfir-org/octomatron/internal/webhook"
 	"github.com/google/go-github/v92/github"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/tekton"
+	"octomaton.dev/internal/tmpl"
+	"octomaton.dev/internal/webhook"
 )
 
 // ApproveAction is the identifier of the "Approve and run" check-run action.

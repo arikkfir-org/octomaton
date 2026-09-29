@@ -1,12 +1,12 @@
-// Command octomatron receives GitHub App webhooks, creates the Tekton
-// PipelineRuns that repositories declare in .octomatron.yaml, and reports their
+// Command octomaton receives GitHub App webhooks, creates the Tekton
+// PipelineRuns that repositories declare in .octomaton.yaml, and reports their
 // progress back to GitHub as check runs.
 //
 // Usage:
 //
-//	octomatron [serve] [--config FILE] [--listen ADDR]
-//	octomatron lint [--render] PATH...
-//	octomatron version
+//	octomaton [serve] [--config FILE] [--listen ADDR]
+//	octomaton lint [--render] PATH...
+//	octomaton version
 package main
 
 import (
@@ -21,21 +21,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/config"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/lint"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/relay"
-	"github.com/arikkfir-org/octomatron/internal/reporter"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
-	"github.com/arikkfir-org/octomatron/internal/trigger"
-	"github.com/arikkfir-org/octomatron/internal/webhook"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
@@ -45,18 +37,39 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
+	"octomaton.dev/internal/config"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/lint"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/relay"
+	"octomaton.dev/internal/reporter"
+	"octomaton.dev/internal/tekton"
+	"octomaton.dev/internal/trigger"
+	"octomaton.dev/internal/webhook"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
+// version is set at build time with -ldflags "-X main.version=..."; see moduleVersion for builds without it.
 var version = "dev"
 
 const (
-	leaseName           = "octomatron"
+	leaseName           = "octomaton"
 	serviceAccountNSDir = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
 
 func main() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		version = moduleVersion(version, info)
+	}
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// moduleVersion returns set, unless the linker left the default: then the main module's version from the build
+// info, which "go install octomaton.dev/cmd/octomaton@v1.2.3" records as v1.2.3 (local builds may record "(devel)").
+func moduleVersion(set string, info *debug.BuildInfo) string {
+	if set != "dev" || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return set
+	}
+	return info.Main.Version
 }
 
 func dispatch(args []string, stdout, stderr io.Writer) int {
@@ -79,9 +92,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  octomatron [serve] [--config FILE] [--listen ADDR] [--workers N] [--queue-size N]
-  octomatron lint [--render] PATH...   validate .octomatron.yaml (PATH is the file or its directory)
-  octomatron version
+  octomaton [serve] [--config FILE] [--listen ADDR] [--workers N] [--queue-size N]
+  octomaton lint [--render] PATH...   validate .octomaton.yaml (PATH is the file or its directory)
+  octomaton version
 `)
 }
 
@@ -90,7 +103,7 @@ func runLint(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	render := fs.Bool("render", false, "print every PipelineRun rendered with placeholder values, as a YAML stream")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "usage: octomatron lint [--render] PATH...\n\nPATH is a .octomatron.yaml file or the directory holding it.\n")
+		fmt.Fprint(stderr, "usage: octomaton lint [--render] PATH...\n\nPATH is a .octomaton.yaml file or the directory holding it.\n")
 	}
 	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
 		fs.Usage()
@@ -114,11 +127,11 @@ func routes(hook, ready, metrics http.Handler) *http.ServeMux {
 
 func serve(args []string) int {
 	defaultConfig := config.DefaultPath
-	if v := os.Getenv("OCTOMATRON_CONFIG"); v != "" {
+	if v := os.Getenv("OCTOMATON_CONFIG"); v != "" {
 		defaultConfig = v
 	}
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", defaultConfig, "path to the server configuration file (env OCTOMATRON_CONFIG)")
+	configPath := fs.String("config", defaultConfig, "path to the server configuration file (env OCTOMATON_CONFIG)")
 	listen := fs.String("listen", ":8080", "address to serve "+webhookPath+", /healthz, /readyz and /metrics on")
 	workers := fs.Int("workers", 8, "number of webhook worker goroutines")
 	queueSize := fs.Int("queue-size", 256, "number of accepted webhook deliveries that may wait for a worker")
@@ -126,10 +139,10 @@ func serve(args []string) int {
 		return 2
 	}
 
-	logger := newLogger(os.Getenv("OCTOMATRON_LOG_LEVEL"))
+	logger := newLogger(os.Getenv("OCTOMATON_LOG_LEVEL"))
 	slog.SetDefault(logger)
 	klog.SetSlogLogger(logger.With("component", "client-go"))
-	logger.Info("Starting Octomatron", "version", version, "config", *configPath)
+	logger.Info("Starting Octomaton", "version", version, "config", *configPath)
 
 	cfg, creds, err := config.Load(*configPath)
 	if err != nil {
@@ -141,7 +154,7 @@ func serve(args []string) int {
 		logger.Error("Cannot configure the Kubernetes client", "error", err)
 		return 1
 	}
-	restConfig.UserAgent = "octomatron/" + version
+	restConfig.UserAgent = "octomaton/" + version
 	restConfig.QPS, restConfig.Burst = 20, 50
 	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
@@ -302,7 +315,7 @@ func kubeConfig() (*rest.Config, error) {
 }
 
 // podNamespace is where the leader election Lease lives: POD_NAMESPACE, else the
-// service account's namespace, else "octomatron".
+// service account's namespace, else "octomaton".
 func podNamespace() string {
 	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
 		return ns
@@ -312,7 +325,7 @@ func podNamespace() string {
 			return ns
 		}
 	}
-	return "octomatron"
+	return "octomaton"
 }
 
 func identity() string {

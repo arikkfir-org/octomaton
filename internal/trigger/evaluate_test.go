@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp/githubtest"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/tekton"
 )
 
 func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {
@@ -51,7 +51,7 @@ func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {
 	}
 	labels := pr.GetLabels()
 	for k, v := range map[string]string{
-		tekton.LabelManagedBy: "octomatron", tekton.LabelPipeline: "ci", tekton.LabelEvent: "pull_request",
+		tekton.LabelManagedBy: "octomaton", tekton.LabelPipeline: "ci", tekton.LabelEvent: "pull_request",
 		tekton.LabelRepositoryID: "1001", tekton.LabelSHA: sha1, tekton.LabelConcurrencyGroup: tekton.GroupLabel(fullName, "ci/pr-5"),
 	} {
 		if labels[k] != v {
@@ -135,20 +135,20 @@ func TestEvaluateWithoutConfigDoesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.svc.Evaluate(context.Background(), trustedPR(sha1), EvalOptions{ReportConfigErrors: true})
 	if len(h.gh.CheckRuns()) != 0 || len(h.allRuns()) != 0 {
-		t.Fatalf("a repository without .octomatron.yaml gets nothing")
+		t.Fatalf("a repository without .octomaton.yaml gets nothing")
 	}
 }
 
 func TestEvaluateInvalidConfig(t *testing.T) {
 	h := newHarness(t)
-	h.files(sha1, "apiVersion: octomatron.kfirs.com/v1\npipelines:\n  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, bogus: 1}\n", "")
+	h.files(sha1, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, bogus: 1}\n", "")
 	h.svc.Evaluate(context.Background(), trustedPR(sha1), EvalOptions{ReportConfigErrors: false})
 	if len(h.gh.CheckRuns()) != 0 {
 		t.Fatalf("configuration errors must not be reported when not asked to")
 	}
 	h.svc.Evaluate(context.Background(), trustedPR(sha1), EvalOptions{ReportConfigErrors: true})
 	check := h.onlyCheck(checkrun.ConfigCheckName)
-	if check.Conclusion != "failure" || check.Title != "Invalid .octomatron.yaml" {
+	if check.Conclusion != "failure" || check.Title != "Invalid .octomaton.yaml" {
 		t.Fatalf("config check = %+v", check)
 	}
 	mustContain(t, check.Summary, "field bogus not found in pipeline")
@@ -163,13 +163,13 @@ func TestEvaluateUnreadableConfig(t *testing.T) {
 	h.gh.SetFailFiles(true)
 	h.svc.Evaluate(context.Background(), trustedPR(sha1), EvalOptions{ReportConfigErrors: true})
 	check := h.onlyCheck(checkrun.ConfigCheckName)
-	if check.Conclusion != "failure" || check.Title != "Could not read .octomatron.yaml" {
+	if check.Conclusion != "failure" || check.Title != "Could not read .octomaton.yaml" {
 		t.Fatalf("config check = %+v", check)
 	}
 }
 
 const pathsConfig = `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml

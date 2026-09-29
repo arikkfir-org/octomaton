@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"k8s.io/apimachinery/pkg/types"
+	"octomaton.dev/internal/tekton"
 )
 
 // Maintenance defaults.

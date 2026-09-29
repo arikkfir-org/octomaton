@@ -9,12 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/reporter"
+	"octomaton.dev/internal/reporter"
 )
 
 func TestDispatchSubcommands(t *testing.T) {
@@ -23,7 +24,7 @@ func TestDispatchSubcommands(t *testing.T) {
 		t.Fatalf("version: %d %q", code, stdout.String())
 	}
 	stdout.Reset()
-	if code := dispatch([]string{"help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "octomatron lint") {
+	if code := dispatch([]string{"help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "octomaton lint") {
 		t.Fatalf("help: %d %q", code, stdout.String())
 	}
 	if code := dispatch([]string{"lint"}, &stdout, &stderr); code != 2 {
@@ -31,9 +32,9 @@ func TestDispatchSubcommands(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cfg := "apiVersion: octomatron.kfirs.com/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {branches: [main]}}, params: {revision: \"{{ .Revision }}\"}}\n"
+	cfg := "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {branches: [main]}}, params: {revision: \"{{ .Revision }}\"}}\n"
 	run := "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n"
-	if err := os.WriteFile(filepath.Join(dir, ".octomatron.yaml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".octomaton.yaml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "run.yaml"), []byte(run), 0o600); err != nil {
@@ -45,6 +46,25 @@ func TestDispatchSubcommands(t *testing.T) {
 	}
 	if code := dispatch([]string{"serve", "--no-such-flag"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("bad serve flag: exit %d, want 2", code)
+	}
+}
+
+func TestModuleVersion(t *testing.T) {
+	tests := []struct {
+		name, set, module, want string
+	}{
+		{name: "linker flag wins", set: "v1.0.0", module: "v2.0.0", want: "v1.0.0"},
+		{name: "go install", set: "dev", module: "v0.1.0", want: "v0.1.0"},
+		{name: "local build", set: "dev", module: "(devel)", want: "dev"},
+		{name: "no module version", set: "dev", module: "", want: "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &debug.BuildInfo{Main: debug.Module{Path: "octomaton.dev", Version: tt.module}}
+			if got := moduleVersion(tt.set, info); got != tt.want {
+				t.Fatalf("moduleVersion(%q, %q) = %q, want %q", tt.set, tt.module, got, tt.want)
+			}
+		})
 	}
 }
 

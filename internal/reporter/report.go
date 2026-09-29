@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/tekton"
 )
 
 const (
@@ -265,7 +265,7 @@ func (r *Reporter) outcome(ctx context.Context, run *unstructured.Unstructured) 
 		}
 		fmt.Fprintf(&b, "\nSuperseded by a newer run, %s.\n", link)
 	case o.Conclusion == tekton.ConclusionCancelled && ann[tekton.AnnotationCancelReason] != "":
-		fmt.Fprintf(&b, "\nCancelled by Octomatron: %s.\n", ann[tekton.AnnotationCancelReason])
+		fmt.Fprintf(&b, "\nCancelled by Octomaton: %s.\n", ann[tekton.AnnotationCancelReason])
 	case o.Conclusion != tekton.ConclusionSuccess && o.Message != "":
 		fmt.Fprintf(&b, "\n> %s\n", oneLine(o.Message))
 	}

@@ -1,4 +1,4 @@
-// Package e2e drives Octomatron end to end: signed webhooks go through the
+// Package e2e drives Octomaton end to end: signed webhooks go through the
 // HTTP handler, worker pool and trigger service into a fake cluster and a fake
 // GitHub, and the reporter reports the runs back.
 package e2e
@@ -17,15 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/config"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/githubapp/githubtest"
-	"github.com/arikkfir-org/octomatron/internal/metrics"
-	"github.com/arikkfir-org/octomatron/internal/reporter"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
-	"github.com/arikkfir-org/octomatron/internal/trigger"
-	"github.com/arikkfir-org/octomatron/internal/webhook"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -33,21 +24,30 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/config"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/githubapp/githubtest"
+	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/reporter"
+	"octomaton.dev/internal/tekton"
+	"octomaton.dev/internal/trigger"
+	"octomaton.dev/internal/webhook"
 )
 
 const (
 	appID    = 4242
 	secret   = "webhook-secret"
 	owner    = "arikkfir-org"
-	repoName = "octomatron"
+	repoName = "octomaton"
 	fullName = owner + "/" + repoName
-	ns       = "ci-octomatron"
+	ns       = "ci-octomaton"
 	headSHA  = "abcdef0123456789abcdef0123456789abcdef01"
 	baseSHA  = "0123456789abcdef0123456789abcdef01234567"
 )
 
-const octomatronYAML = `
-apiVersion: octomatron.kfirs.com/v1
+const octomatonYAML = `
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml
@@ -107,9 +107,9 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	gh := githubtest.NewServer(t, appID)
-	gh.AddFile(fullName, headSHA, ".octomatron.yaml", octomatronYAML)
+	gh.AddFile(fullName, headSHA, ".octomaton.yaml", octomatonYAML)
 	gh.AddFile(fullName, headSHA, ".tekton/ci.yaml", ciYAML)
-	gh.AddFile(fullName, "main", ".octomatron.yaml", octomatronYAML)
+	gh.AddFile(fullName, "main", ".octomaton.yaml", octomatonYAML)
 	gh.AddFile(fullName, "main", ".tekton/ci.yaml", ciYAML)
 	gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: headSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "arikkfir", AuthorAssociation: "OWNER"})
 	gh.SetPermission(fullName, "arikkfir", "admin")
@@ -216,7 +216,7 @@ func TestEndToEnd(t *testing.T) {
 	if rec := e.deliver("pull_request", "d-1", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
 		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
 	}
-	name := "octomatron-ci-abcdef0-1"
+	name := "octomaton-ci-abcdef0-1"
 	pr := e.waitForRun(name)
 	if rec := e.deliver("pull_request", "d-1", pullRequestPayload("opened"), true); !strings.Contains(rec.Body.String(), "duplicate") {
 		t.Fatalf("redelivery must be deduplicated: %s", rec.Body.String())
@@ -230,7 +230,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	checkID, _ := strconv.ParseInt(pr.GetAnnotations()[tekton.AnnotationCheckRunID], 10, 64)
 	check, _ := e.gh.CheckRun(checkID)
-	if check.Name != "ci" || check.Status != "queued" || check.DetailsURL != "https://tekton.dev.kfirs.com/#/namespaces/ci-octomatron/pipelineruns/"+name {
+	if check.Name != "ci" || check.Status != "queued" || check.DetailsURL != "https://tekton.dev.kfirs.com/#/namespaces/ci-octomaton/pipelineruns/"+name {
 		t.Fatalf("check run = %+v", check)
 	}
 
@@ -270,7 +270,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("check_run: %d %s", rec.Code, rec.Body.String())
 	}
 	// Attempts follow the highest one still there; the first run was pruned.
-	second := e.waitForRun("octomatron-ci-abcdef0-1")
+	second := e.waitForRun("octomaton-ci-abcdef0-1")
 	if c := second.GetAnnotations()[tekton.AnnotationContext]; !strings.Contains(c, `"rerunBy":"arikkfir"`) {
 		t.Fatalf("re-run context = %s", c)
 	}
@@ -290,7 +290,7 @@ func TestEndToEnd(t *testing.T) {
 	if rec := e.deliver("issue_comment", "d-3", comment, true); rec.Code != http.StatusAccepted {
 		t.Fatalf("issue_comment: %d %s", rec.Code, rec.Body.String())
 	}
-	preview := e.waitForRun("octomatron-preview-abcdef0-1")
+	preview := e.waitForRun("octomaton-preview-abcdef0-1")
 	params, _, _ = unstructured.NestedSlice(preview.Object, "spec", "params")
 	if fmt.Sprint(params) != fmt.Sprint([]any{map[string]any{"name": "revision", "value": headSHA}, map[string]any{"name": "target", "value": "eu-west"}}) {
 		t.Fatalf("comment run params = %v", params)

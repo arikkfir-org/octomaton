@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	markerPrefix = "<!-- octomatron:context:"
+	markerPrefix = "<!-- octomaton:context:"
 	markerSuffix = " -->"
 )
 
@@ -44,17 +44,17 @@ func DecodeMarker(text string) (c Context, found bool, err error) {
 	rest := text[start+len(markerPrefix):]
 	end := strings.Index(rest, markerSuffix)
 	if end < 0 {
-		return Context{}, true, fmt.Errorf("unterminated octomatron context marker")
+		return Context{}, true, fmt.Errorf("unterminated octomaton context marker")
 	}
 	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rest[:end]))
 	if err != nil {
-		return Context{}, true, fmt.Errorf("decoding octomatron context marker: %w", err)
+		return Context{}, true, fmt.Errorf("decoding octomaton context marker: %w", err)
 	}
 	if err := json.Unmarshal(data, &c); err != nil {
-		return Context{}, true, fmt.Errorf("parsing octomatron context marker: %w", err)
+		return Context{}, true, fmt.Errorf("parsing octomaton context marker: %w", err)
 	}
 	if c.Version != ContextVersion {
-		return Context{}, true, fmt.Errorf("unsupported octomatron context version %d", c.Version)
+		return Context{}, true, fmt.Errorf("unsupported octomaton context version %d", c.Version)
 	}
 	return c, true, nil
 }

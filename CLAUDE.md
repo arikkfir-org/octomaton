@@ -1,26 +1,27 @@
-# Octomatron: rules for agents
+# Octomaton: rules for agents
 
 ## Principles (inviolable)
 
-- Application-agnostic: Octomatron knows nothing about what a repository builds, its language, layout, CI or CD. No
+- Application-agnostic: Octomaton knows nothing about what a repository builds, its language, layout, CI or CD. No
   conventional directories (`.tekton/` is only a path users choose), no defaults that assume a layout, no knowledge of
   specific repositories.
-- The only repository files Octomatron reads are the root `.octomatron.yaml` and the PipelineRun files it references.
-- Configuration lives only in `.octomatron.yaml`, never in Tekton labels or annotations. Labels and annotations under
-  `octomatron.kfirs.com/` (and `app.kubernetes.io/managed-by`) are bookkeeping Octomatron writes on its own objects.
+- The only repository files Octomaton reads are the root `.octomaton.yaml` and the PipelineRun files it references.
+- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. Labels and annotations under
+  `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping Octomaton writes on its own objects.
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
   templates over the documented context) and the optional `githubToken` workspace.
-- The hub reference (`arikkfir-org/docs`, `hub/reference.md` → Octomatron) is the contract with `delivery`: server
-  config, `.octomatron.yaml` schema, template context, names, mount paths, endpoints, App permissions and RBAC. Change
+- The hub reference (`arikkfir-org/docs`, `hub/reference.md` → Octomaton) is the contract with `delivery`: server
+  config, `.octomaton.yaml` schema, template context, names, mount paths, endpoints, App permissions and RBAC. Change
   it there first; keep README.md's schema blocks identical to it.
 
 ## Code
 
-- Go 1.27; module `github.com/arikkfir-org/octomatron`.
-- Layout: `cmd/octomatron` (serve, lint, version); `internal/` packages `config`, `repoconfig`, `tmpl`, `githubapp`
+- Go 1.27; module `octomaton.dev` (a vanity path: `https://octomaton.dev` serves the `go-import` tag pointing at
+  `github.com/arikkfir-org/octomaton`).
+- Layout: `cmd/octomaton` (serve, lint, version); `internal/` packages `config`, `repoconfig`, `tmpl`, `githubapp`
   (+ `githubtest` fake API), `webhook`, `trigger`, `tekton`, `reporter`, `checkrun`, `relay`, `lint`, `metrics`, `e2e`.
 - Tekton objects are `unstructured.Unstructured` with the dynamic client; do not import `github.com/tektoncd/pipeline`.
-- `.octomatron.yaml` is parsed with `go.yaml.in/yaml/v3` (YAML 1.2, `KnownFields(true)`); never with a YAML 1.1 parser
+- `.octomaton.yaml` is parsed with `go.yaml.in/yaml/v3` (YAML 1.2, `KnownFields(true)`); never with a YAML 1.1 parser
   (an unquoted `on` would become `true`). PipelineRun files use the Kubernetes YAML reader.
 - GitHub access goes through `githubapp.Client`/`Provider`; Kubernetes through small interfaces (`trigger.Runs`,
   `reporter.Runs`) implemented by `tekton.Client`. Keep packages small and dependency-injected.
@@ -32,10 +33,10 @@
 
 - Every change needs table-driven tests; run `go vet ./... && go test -race ./...` (or `make test`) before finishing.
 - Use `githubtest.Server` for GitHub and client-go fakes for Kubernetes; `internal/e2e` covers the webhook-to-check path.
-- `make lint` validates this repository's own `.octomatron.yaml` and `.tekton/` files.
+- `make lint` validates this repository's own `.octomaton.yaml` and `.tekton/` files.
 
 ## Commands
 
 - `make test`, `make lint`, `make build`, `make image` (ko; needs registry credentials).
-- `go run ./cmd/octomatron lint --render .` prints the PipelineRuns as Octomatron would create them.
-- Do not add GitHub Actions workflows; CI runs through Octomatron itself (`.octomatron.yaml`).
+- `go run ./cmd/octomaton lint --render .` prints the PipelineRuns as Octomaton would create them.
+- Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

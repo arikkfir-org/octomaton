@@ -9,7 +9,7 @@ import (
 )
 
 const goodConfig = `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml
@@ -37,7 +37,7 @@ spec:
 func repoDir(t *testing.T, cfg string, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".octomatron.yaml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".octomaton.yaml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range files {
@@ -60,7 +60,7 @@ func TestLint(t *testing.T) {
 		want  []string // expected problems (substrings); empty = clean
 	}{
 		{name: "valid", cfg: goodConfig, files: map[string]string{".tekton/ci.yaml": goodRun}},
-		{name: "invalid configuration", cfg: "apiVersion: octomatron.kfirs.com/v1\npipelines:\n  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, unknown: 1}\n", want: []string{"field unknown not found in pipeline"}},
+		{name: "invalid configuration", cfg: "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, unknown: 1}\n", want: []string{"field unknown not found in pipeline"}},
 		{name: "missing PipelineRun file", cfg: goodConfig, want: []string{"pipeline ci: pipelineRun:"}},
 		{name: "two documents", cfg: goodConfig, files: map[string]string{".tekton/ci.yaml": goodRun + "---\n" + goodRun}, want: []string{"exactly one YAML document"}},
 		{
@@ -85,7 +85,7 @@ func TestLint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := repoDir(t, tt.cfg, tt.files)
-			res := Lint(filepath.Join(dir, ".octomatron.yaml"))
+			res := Lint(filepath.Join(dir, ".octomaton.yaml"))
 			var all []string
 			for _, p := range res.Problems {
 				all = append(all, p.String())
@@ -114,11 +114,11 @@ func TestRun(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if code := Run([]string{filepath.Join(dir, ".octomatron.yaml")}, true, &stdout, &stderr); code != ExitOK {
+	if code := Run([]string{filepath.Join(dir, ".octomaton.yaml")}, true, &stdout, &stderr); code != ExitOK {
 		t.Fatalf("render exit %d", code)
 	}
 	out := stdout.String()
-	for _, want := range []string{"# " + filepath.Join(dir, ".octomatron.yaml") + ": pipeline ci on pull_request", "name: octo-repo-ci-0123456-1", "secretName: octo-repo-ci-0123456-1-github-token", "value: \"1\""} {
+	for _, want := range []string{"# " + filepath.Join(dir, ".octomaton.yaml") + ": pipeline ci on pull_request", "name: octo-repo-ci-0123456-1", "secretName: octo-repo-ci-0123456-1-github-token", "value: \"1\""} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered output lacks %q:\n%s", want, out)
 		}

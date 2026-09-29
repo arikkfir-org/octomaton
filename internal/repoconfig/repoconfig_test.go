@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arikkfir-org/octomatron/internal/tmpl"
+	"octomaton.dev/internal/tmpl"
 )
 
-// referenceExample is the .octomatron.yaml example from the hub reference.
+// referenceExample is the .octomaton.yaml example from the hub reference.
 const referenceExample = `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci                           # check-run name; unique; [a-z0-9][a-z0-9-]*
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
@@ -76,11 +76,11 @@ func TestParseReferenceExample(t *testing.T) {
 	}
 }
 
-// TestUnquotedOnKey proves .octomatron.yaml is parsed as YAML 1.2: with YAML 1.1
+// TestUnquotedOnKey proves .octomaton.yaml is parsed as YAML 1.2: with YAML 1.1
 // parsers an unquoted "on" key is the boolean true and every trigger vanishes.
 func TestUnquotedOnKey(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: ci.yaml
@@ -97,7 +97,7 @@ pipelines:
 
 func TestNullTriggersAreEnabled(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: ci.yaml
@@ -113,7 +113,7 @@ pipelines:
 }
 
 func TestParseProblems(t *testing.T) {
-	const head = "apiVersion: octomatron.kfirs.com/v1\npipelines:\n"
+	const head = "apiVersion: octomaton.dev/v1\npipelines:\n"
 	tests := []struct {
 		name string
 		yaml string
@@ -122,7 +122,7 @@ func TestParseProblems(t *testing.T) {
 		{name: "empty file", yaml: "", want: "file is empty"},
 		{name: "comments only", yaml: "# nothing\n", want: "file is empty"},
 		{name: "two documents", yaml: head + "---\nfoo: bar\n", want: "exactly one YAML document"},
-		{name: "wrong apiVersion", yaml: "apiVersion: v1\n", want: `apiVersion must be "octomatron.kfirs.com/v1"`},
+		{name: "wrong apiVersion", yaml: "apiVersion: v1\n", want: `apiVersion must be "octomaton.dev/v1"`},
 		{name: "syntax error", yaml: head + "  - name: [\n", want: "yaml:"},
 		{name: "unknown top-level key", yaml: head + "extra: true\n", want: "field extra not found at the top level"},
 		{name: "unknown pipeline key", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, retries: 3}\n", want: "field retries not found in pipeline"},
@@ -133,7 +133,7 @@ func TestParseProblems(t *testing.T) {
 		{name: "duplicate names", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\n  - {name: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `duplicate pipeline name "ci"`},
 		{name: "missing name", yaml: head + "  - {pipelineRun: a.yaml, on: {push: {}}}\n", want: "name is required"},
 		{name: "bad name", yaml: head + "  - {name: CI_Pipeline, pipelineRun: a.yaml, on: {push: {}}}\n", want: "must match"},
-		{name: "reserved name", yaml: head + "  - {name: octomatron, pipelineRun: a.yaml, on: {push: {}}}\n", want: "is reserved"},
+		{name: "reserved name", yaml: head + "  - {name: octomaton, pipelineRun: a.yaml, on: {push: {}}}\n", want: "is reserved"},
 		{name: "missing pipelineRun", yaml: head + "  - {name: ci, on: {push: {}}}\n", want: "pipelineRun is required"},
 		{name: "absolute pipelineRun", yaml: head + "  - {name: ci, pipelineRun: /etc/passwd, on: {push: {}}}\n", want: "clean repository-relative"},
 		{name: "escaping pipelineRun", yaml: head + "  - {name: ci, pipelineRun: ../x.yaml, on: {push: {}}}\n", want: "clean repository-relative"},
@@ -177,7 +177,7 @@ func TestParseProblems(t *testing.T) {
 
 func TestParseReportsEveryProblem(t *testing.T) {
 	_, err := Parse([]byte(`
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - {name: a, pipelineRun: a.yaml}
   - {name: b, pipelineRun: b.yaml, on: {push: {}}, timeout: x}
@@ -190,7 +190,7 @@ pipelines:
 
 func TestRenderParams(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci
     pipelineRun: a.yaml
@@ -216,7 +216,7 @@ pipelines:
 
 func TestConcurrencyFor(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - {name: ci, pipelineRun: a.yaml, on: {push: {}, pull_request: {}}}
   - {name: docs, pipelineRun: a.yaml, on: {push: {}}, concurrency: {group: "docs-{{ .Branch }}"}}
@@ -243,7 +243,7 @@ pipelines:
 
 func TestScheduleLast(t *testing.T) {
 	cfg := mustParse(t, `
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: "0 3 * * *"}, {cron: "*/15 * * * *"}]}}
 `)

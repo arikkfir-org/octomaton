@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/arikkfir-org/octomatron/internal/metrics"
 	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/metrics"
 )
 
 // MaxBodyBytes is the largest payload accepted (GitHub caps payloads at 25 MB).

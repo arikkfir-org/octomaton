@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/url"
 
-	"github.com/arikkfir-org/octomatron/internal/checkrun"
-	"github.com/arikkfir-org/octomatron/internal/githubapp"
-	"github.com/arikkfir-org/octomatron/internal/tekton"
 	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/checkrun"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/tekton"
 )
 
 // createCompleted creates a completed check run whose output carries the trigger

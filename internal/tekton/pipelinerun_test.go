@@ -111,8 +111,8 @@ kind: PipelineRun
 metadata:
   name: repo-ci-0123456-1
   namespace: ci-repo
-  labels: {team: platform, app.kubernetes.io/managed-by: octomatron, octomatron.kfirs.com/pipeline: ci}
-  annotations: {note: keep, octomatron.kfirs.com/sha: "0123456789"}
+  labels: {team: platform, app.kubernetes.io/managed-by: octomaton, octomaton.dev/pipeline: ci}
+  annotations: {note: keep, octomaton.dev/sha: "0123456789"}
 spec:
   status: PipelineRunPending
   params:
@@ -199,7 +199,7 @@ func TestRunName(t *testing.T) {
 		attempt        int
 		want           string
 	}{
-		{"octomatron", "ci", 1, "octomatron-ci-0123456-1"},
+		{"octomaton", "ci", 1, "octomaton-ci-0123456-1"},
 		{".github", "ci", 2, "github-ci-0123456-2"},
 		{"My_Repo", "release", 10, "my-repo-release-0123456-10"},
 		{strings.Repeat("r", 70), "ci", 3, strings.Repeat("r", 53) + "-0123456-3"},

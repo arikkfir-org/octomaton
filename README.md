@@ -1,12 +1,12 @@
-# Octomatron
+# Octomaton
 
-Octomatron replaces GitHub Actions for the `arikkfir-org` organization. A GitHub App sends every webhook to
-Octomatron (running in GKE); Octomatron reads the repository's root `.octomatron.yaml`, creates the Tekton
+Octomaton replaces GitHub Actions for the `arikkfir-org` organization. A GitHub App sends every webhook to
+Octomaton (running in GKE); Octomaton reads the repository's root `.octomaton.yaml`, creates the Tekton
 `PipelineRun`s it maps the event to, and reports each run back to GitHub as a check run.
 
-Octomatron is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
-only repository files it reads are `.octomatron.yaml` and the PipelineRun files that file points to. PipelineRun files
-are plain Tekton YAML; Octomatron injects event context only through `params` and an optional GitHub token workspace.
+Octomaton is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
+only repository files it reads are `.octomaton.yaml` and the PipelineRun files that file points to. PipelineRun files
+are plain Tekton YAML; Octomaton injects event context only through `params` and an optional GitHub token workspace.
 
 ## How it works
 
@@ -14,11 +14,11 @@ are plain Tekton YAML; Octomatron injects event context only through `params` an
 sequenceDiagram
   autonumber
   participant GH as GitHub
-  participant SB as Octomatron
+  participant SB as Octomaton
   participant K8s as Kubernetes / Tekton
   GH->>SB: webhook (push, pull_request, merge_group, issue_comment, check_run, check_suite)
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
-  SB->>GH: read .octomatron.yaml (and the PipelineRun file)
+  SB->>GH: read .octomaton.yaml (and the PipelineRun file)
   SB->>SB: match events, branches, tags and paths; apply trust rules
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
@@ -42,13 +42,13 @@ sequenceDiagram
 5. The elected leader watches the runs and keeps their checks up to date, refreshes GitHub tokens of long runs, fires
    cron schedules and deletes PVCs of finished runs.
 
-## Repository configuration (`.octomatron.yaml`)
+## Repository configuration (`.octomaton.yaml`)
 
-The only file Octomatron reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
+The only file Octomaton reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
 no quoting, and strictly: unknown fields, duplicate keys and type mismatches are errors.
 
 ```yaml
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci                           # check-run name; unique; [a-z0-9][a-z0-9-]*
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
@@ -100,7 +100,7 @@ comparison `before...after` for pushes; `base...head` for merge groups). A file 
 changed files cannot be determined (a new branch or tag, an API error, more files than GitHub lists), the filters are
 ignored and the pipeline runs.
 
-**Where definitions are read:** pull requests, merge groups and pushes read `.octomatron.yaml` and the PipelineRun file
+**Where definitions are read:** pull requests, merge groups and pushes read `.octomaton.yaml` and the PipelineRun file
 at the commit under test; comment commands and schedules read them from the default branch (comment commands still run
 against the pull request's head commit, so a pull request cannot change what its own commands run).
 
@@ -108,7 +108,7 @@ against the pull request's head commit, so a pull request cannot change what its
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Check-run name, unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomatron` is reserved. |
+| `name` | Check-run name, unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`. Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
@@ -151,7 +151,7 @@ environment variables, never by interpolating `$(params.…)` into a script.
 ### Examples
 
 ```yaml
-apiVersion: octomatron.kfirs.com/v1
+apiVersion: octomaton.dev/v1
 pipelines:
   - name: ci                                 # required check on pull requests and in the merge queue
     pipelineRun: .tekton/ci.yaml
@@ -184,7 +184,7 @@ pipelines:
       slot: "{{ .Schedule.Slot }}"
 ```
 
-Validate a configuration and the PipelineRun files it references with `octomatron lint [--render] PATH...` (PATH is
+Validate a configuration and the PipelineRun files it references with `octomaton lint [--render] PATH...` (PATH is
 the file or its directory); it renders every param for every triggering event with placeholder values, so a template
 that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
 
@@ -197,11 +197,11 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;
   `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log.
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
-- Problems that prevent a run (an invalid `.octomatron.yaml`, a missing namespace or file, a template error, a
-  refused Secret) are reported as failed checks: `octomatron` for configuration errors, the pipeline's name otherwise.
+- Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
+  refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's name otherwise.
 - Every check stores its trigger context in a hidden marker in its output, so **Re-run** works even after the
   PipelineRun was pruned. Re-running a pipeline's check always runs it (path filters are not re-applied; the requester
-  needs write access); re-running `octomatron` re-evaluates the whole event.
+  needs write access); re-running `octomaton` re-evaluates the whole event.
 - Comment commands get a 👀 reaction when started, a 👎 and a reply when declined, and a reply with the result when done.
 
 ## Security
@@ -210,21 +210,21 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - Pull requests run automatically when their author is an owner, member or collaborator, or their branch is in the
   repository itself. Other pull requests need **Approve and run** (or a re-run) from someone with write access, for
   every new commit.
-- A run may mount no Secret other than the token Octomatron binds (volumes, workspaces, projected sources, `env` and
+- A run may mount no Secret other than the token Octomaton binds (volumes, workspaces, projected sources, `env` and
   `envFrom` are checked). Tokens are scoped to the event's repository with least permissions.
 - Namespaces, not pipelines, are the isolation boundary: trusted pull requests can change their own pipeline files and
   thereby use their namespace's service account.
 
 ## Server configuration
 
-Read from `/etc/octomatron/config.yaml` (flag `--config`, env `OCTOMATRON_CONFIG`); unknown fields are errors and the
+Read from `/etc/octomaton/config.yaml` (flag `--config`, env `OCTOMATON_CONFIG`); unknown fields are errors and the
 process exits with every problem listed.
 
 ```yaml
 github:
-  appIDFile: /etc/octomatron/github/app-id
-  privateKeyFile: /etc/octomatron/github/private-key
-  webhookSecretFile: /etc/octomatron/github/webhook-secret
+  appIDFile: /etc/octomaton/github/app-id
+  privateKeyFile: /etc/octomaton/github/private-key
+  webhookSecretFile: /etc/octomaton/github/webhook-secret
   allowedOwners: [arikkfir-org]        # installations on other owners are ignored
 tekton:
   dashboardURL: https://tekton.dev.kfirs.com
@@ -245,17 +245,17 @@ retention:
 
 | Flag / environment | Default | Meaning |
 | --- | --- | --- |
-| `--config`, `OCTOMATRON_CONFIG` | `/etc/octomatron/config.yaml` | server configuration |
+| `--config`, `OCTOMATON_CONFIG` | `/etc/octomaton/config.yaml` | server configuration |
 | `--listen` | `:8080` | address of `/github/hooks`, `/healthz`, `/readyz`, `/metrics` |
 | `--workers`, `--queue-size` | `8`, `256` | webhook worker pool |
-| `OCTOMATRON_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
-| `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `octomatron` namespace and holder identity |
+| `OCTOMATON_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
+| `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `octomaton` namespace and holder identity |
 | `KUBECONFIG` | in-cluster config | used when not running in a cluster |
 
 ## GitHub App
 
-`octomatron`, installed on all `arikkfir-org` repositories, webhook URL
-`https://octomatron.dev.kfirs.com/github/hooks`.
+`octomaton-dev` (the name `octomaton` belongs to a GitHub user), installed on all `arikkfir-org` repositories,
+homepage `https://octomaton.dev`, webhook URL `https://octomaton.dev/github/hooks`.
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
@@ -263,55 +263,62 @@ retention:
 
 ## Deployment
 
-Octomatron is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
-`octomatron`, Deployment/ServiceAccount/Service `octomatron` (Service port 80 → container 8080), ConfigMap
-`octomatron` (key `config.yaml`) at `/etc/octomatron/config.yaml`, Secret `octomatron-github` (keys `app-id`,
-`private-key`, `webhook-secret`) at `/etc/octomatron/github/`. Every replica serves webhooks; the replica holding the
-Lease `octomatron` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
+Octomaton is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
+`octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap
+`octomaton` (key `config.yaml`) at `/etc/octomaton/config.yaml`, Secret `octomaton-github` (keys `app-id`,
+`private-key`, `webhook-secret`) at `/etc/octomaton/github/`. Every replica serves webhooks; the replica holding the
+Lease `octomaton` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced); `GET /metrics`.
 
-**RBAC Octomatron needs:**
+**RBAC Octomaton needs:**
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (`ClusterRole octomatron-tenant`, RoleBinding `octomatron` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
+| Tenant namespaces (`ClusterRole octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
 | Cluster | PipelineRuns: get, list, watch (the reporter's informer, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
-| `octomatron` namespace | Leases: get, create, update |
+| `octomaton` namespace | Leases: get, create, update |
 
-**Metrics:** `octomatron_webhooks_received_total{event}`, `octomatron_webhooks_rejected_total{event,reason}`,
-`octomatron_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
-`octomatron_github_checkrun_errors_total{operation}`, `octomatron_reconcile_duration_seconds{result}`,
-`octomatron_webhook_queue_depth`, `octomatron_leader`, plus Go and process collectors.
+**Metrics:** `octomaton_webhooks_received_total{event}`, `octomaton_webhooks_rejected_total{event,reason}`,
+`octomaton_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
+`octomaton_github_checkrun_errors_total{operation}`, `octomaton_reconcile_duration_seconds{result}`,
+`octomaton_webhook_queue_depth`, `octomaton_leader`, plus Go and process collectors.
 
-**Bookkeeping:** objects Octomatron creates carry the label `app.kubernetes.io/managed-by: octomatron` and labels and
-annotations under `octomatron.kfirs.com/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
+**Bookkeeping:** objects Octomaton creates carry the label `app.kubernetes.io/managed-by: octomaton` and labels and
+annotations under `octomaton.dev/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
 `repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, …). They are never read as
 configuration.
 
 ## Development
 
+The module path is `octomaton.dev`: `https://octomaton.dev` answers `go get` with a `go-import` tag pointing at this
+repository, so the CLI installs with:
+
+```bash
+go install octomaton.dev/cmd/octomaton@latest
+```
+
 Requirements: Go 1.27, and [ko](https://ko.build) for images.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
-make lint      # octomatron lint . (this repository's own .octomatron.yaml)
-make build     # bin/octomatron
+make lint      # octomaton lint . (this repository's own .octomaton.yaml)
+make build     # bin/octomaton
 ```
 
 Run locally against a cluster (the current `KUBECONFIG` context) with a configuration pointing at local copies of the
 App ID, private key and webhook secret:
 
 ```bash
-go run ./cmd/octomatron --config ./config.local.yaml --listen :8080
+go run ./cmd/octomaton --config ./config.local.yaml --listen :8080
 ```
 
 Tests use an in-process fake of the GitHub API (`internal/githubapp/githubtest`) and client-go's fake clients;
 `internal/e2e` drives signed webhooks through the whole service.
 
-Layout: `cmd/octomatron` (serve, lint, version); `internal/config` (server configuration, namespaces),
-`internal/repoconfig` (`.octomatron.yaml` schema and matching), `internal/tmpl` (template context),
+Layout: `cmd/octomaton` (serve, lint, version); `internal/config` (server configuration, namespaces),
+`internal/repoconfig` (`.octomaton.yaml` schema and matching), `internal/tmpl` (template context),
 `internal/githubapp` (App auth and GitHub API), `internal/webhook` (signatures, dedupe, worker pool),
 `internal/trigger` (events → held runs, concurrency, re-runs, comments, schedules, maintenance), `internal/tekton`
 (PipelineRun rendering and client), `internal/reporter` (check-run reporting), `internal/checkrun` (trigger context
@@ -319,16 +326,16 @@ marker), `internal/relay`, `internal/lint`, `internal/metrics`.
 
 ## Releases
 
-Octomatron builds itself: `.octomatron.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the
+Octomaton builds itself: `.octomaton.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the
 merge queue, and `release` on pushes to `main` (image tags `sha-<short>` and `main`) and `v*` tags (the tag name). Images
-go to `me-west1-docker.pkg.dev/arikkfir/images/octomatron`.
+go to `me-west1-docker.pkg.dev/arikkfir/images/octomaton`.
 
-The first image has to come from a workstation, before Octomatron runs:
+The first image has to come from a workstation, before Octomaton runs:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev
 git tag v0.1.0 && git push origin v0.1.0
-KO_DOCKER_REPO=me-west1-docker.pkg.dev/arikkfir/images/octomatron ko build --bare --tags=v0.1.0 ./cmd/octomatron
+KO_DOCKER_REPO=me-west1-docker.pkg.dev/arikkfir/images/octomaton ko build --bare --tags=v0.1.0 ./cmd/octomaton
 ```
 
 (`make image` does the same with the version from `git describe`.)

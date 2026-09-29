@@ -68,7 +68,7 @@ func (a *app) connect() error {
 	if a.kube, err = kube.NewClients("octomaton/" + buildinfo.Version()); err != nil {
 		return err
 	}
-	if a.github, err = githubapp.New(a.cfg.GitHub.AppID, a.cfg.GitHub.Key()); err != nil {
+	if a.github, err = githubapp.New(int64(a.cfg.GitHub.AppID), a.cfg.GitHub.Key()); err != nil {
 		return fmt.Errorf("creating the GitHub App client: %w", err)
 	}
 	if a.metrics, err = metrics.New(otel.Meter("octomaton.dev")); err != nil {

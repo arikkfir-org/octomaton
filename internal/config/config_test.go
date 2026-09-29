@@ -26,7 +26,7 @@ func testKeyPEM(t *testing.T) string {
 func setReferenceEnv(t *testing.T) {
 	t.Helper()
 	for name, value := range map[string]string{
-		"OCTOMATON_GITHUB_APP_ID":             "123",
+		"OCTOMATON_GITHUB_APP_ID":             "123\n",
 		"OCTOMATON_GITHUB_PRIVATE_KEY":        testKeyPEM(t),
 		"OCTOMATON_GITHUB_WEBHOOK_SECRET":     "s3cret\n",
 		"OCTOMATON_GITHUB_ALLOWED_OWNERS":     "arikkfir-org",
@@ -94,10 +94,11 @@ func TestLoadProblems(t *testing.T) {
 	tests := []struct {
 		name, variable, value, want string
 	}{
-		{name: "missing app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "", want: "OCTOMATON_GITHUB_APP_ID"},
-		{name: "non-positive app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "0", want: "positive GitHub App ID"},
+		{name: "empty app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "", want: "OCTOMATON_GITHUB_APP_ID"},
+		{name: "non-numeric app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "octomaton", want: "OCTOMATON_GITHUB_APP_ID"},
+		{name: "negative app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "-1", want: "positive GitHub App ID"},
 		{name: "bad private key", variable: "OCTOMATON_GITHUB_PRIVATE_KEY", value: "not a key", want: "OCTOMATON_GITHUB_PRIVATE_KEY: no PEM data"},
-		{name: "blank webhook secret", variable: "OCTOMATON_GITHUB_WEBHOOK_SECRET", value: " \n", want: "OCTOMATON_GITHUB_WEBHOOK_SECRET is empty"},
+		{name: "blank webhook secret", variable: "OCTOMATON_GITHUB_WEBHOOK_SECRET", value: " \n", want: "OCTOMATON_GITHUB_WEBHOOK_SECRET is required"},
 		{name: "repository as owner", variable: "OCTOMATON_GITHUB_ALLOWED_OWNERS", value: "arikkfir-org/docs", want: "not a GitHub user or organization"},
 		{name: "relative dashboard URL", variable: "OCTOMATON_TEKTON_DASHBOARD_URL", value: "tekton.dev.kfirs.com", want: "OCTOMATON_TEKTON_DASHBOARD_URL"},
 		{name: "bad relay URL", variable: "OCTOMATON_RELAY_URLS", value: "ftp://x", want: "OCTOMATON_RELAY_URLS"},
@@ -118,6 +119,21 @@ func TestLoadProblems(t *testing.T) {
 				t.Fatalf("Load() error = %v, want it to mention %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadListsEveryMissingCredential(t *testing.T) {
+	setReferenceEnv(t)
+	for _, name := range []string{"OCTOMATON_GITHUB_APP_ID", "OCTOMATON_GITHUB_PRIVATE_KEY", "OCTOMATON_GITHUB_WEBHOOK_SECRET"} {
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := Load()
+	for _, want := range []string{"OCTOMATON_GITHUB_APP_ID is required", "OCTOMATON_GITHUB_PRIVATE_KEY is required", "OCTOMATON_GITHUB_WEBHOOK_SECRET is required"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() error = %v, want it to say %q", err, want)
+		}
 	}
 }
 

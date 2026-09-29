@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,17 +50,32 @@ type Webhook struct {
 	QueueSize int `envconfig:"QUEUE_SIZE" default:"256"`
 }
 
-// GitHub holds the GitHub App's credentials and the owners it serves.
+// GitHub holds the GitHub App's credentials and the owners it serves. The credentials are required;
+// validate reports them missing, because envconfig names a missing variable without its prefix.
 type GitHub struct {
-	AppID int64 `envconfig:"APP_ID" required:"true"`
+	AppID AppID `envconfig:"APP_ID"`
 	// PrivateKey is the App's PEM-encoded RSA private key (PKCS#1, as GitHub issues it, or PKCS#8).
-	PrivateKey    string `envconfig:"PRIVATE_KEY" required:"true"`
-	WebhookSecret string `envconfig:"WEBHOOK_SECRET" required:"true"`
+	PrivateKey    string `envconfig:"PRIVATE_KEY"`
+	WebhookSecret string `envconfig:"WEBHOOK_SECRET"`
 	// AllowedOwners are the users and organizations whose installations are served; empty serves
 	// every installation.
 	AllowedOwners []string `envconfig:"ALLOWED_OWNERS"`
 
 	key *rsa.PrivateKey
+}
+
+// AppID is a GitHub App ID. Surrounding whitespace, like the newline a secret often ends with, is
+// ignored.
+type AppID int64
+
+// Decode implements envconfig.Decoder.
+func (id *AppID) Decode(value string) error {
+	n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return errors.New("not a number")
+	}
+	*id = AppID(n)
+	return nil
 }
 
 // Tekton configures links to Tekton.
@@ -140,16 +156,20 @@ func checkURL(name, u string) []string {
 
 func (g *GitHub) validate() []string {
 	var problems []string
-	if g.AppID <= 0 {
+	if g.AppID == 0 {
+		problems = append(problems, "OCTOMATON_GITHUB_APP_ID is required")
+	} else if g.AppID < 0 {
 		problems = append(problems, "OCTOMATON_GITHUB_APP_ID must be a positive GitHub App ID")
 	}
-	if key, err := ParsePrivateKey([]byte(g.PrivateKey)); err != nil {
+	if strings.TrimSpace(g.PrivateKey) == "" {
+		problems = append(problems, "OCTOMATON_GITHUB_PRIVATE_KEY is required")
+	} else if key, err := ParsePrivateKey([]byte(g.PrivateKey)); err != nil {
 		problems = append(problems, "OCTOMATON_GITHUB_PRIVATE_KEY: "+err.Error())
 	} else {
 		g.key = key
 	}
 	if g.WebhookSecret = strings.TrimSpace(g.WebhookSecret); g.WebhookSecret == "" {
-		problems = append(problems, "OCTOMATON_GITHUB_WEBHOOK_SECRET is empty")
+		problems = append(problems, "OCTOMATON_GITHUB_WEBHOOK_SECRET is required")
 	}
 	for _, owner := range g.AllowedOwners {
 		if strings.TrimSpace(owner) == "" || strings.Contains(owner, "/") {

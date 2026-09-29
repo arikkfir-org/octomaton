@@ -1,7 +1,4 @@
-// Package tmpl defines the data model exposed to Go templates (pipeline params in
-// .octomaton.yaml and the namespace template in the server configuration) and
-// helpers that parse and execute such templates strictly.
-package tmpl
+package pipelines
 
 import (
 	"bytes"
@@ -9,6 +6,9 @@ import (
 	"strings"
 	"text/template"
 )
+
+// The template context is the data Go templates see: pipeline params and concurrency groups in
+// .octomaton.yaml, and the namespace template of the server configuration.
 
 // Repository describes the repository an event belongs to.
 type Repository struct {
@@ -60,8 +60,8 @@ type Schedule struct {
 	Slot string // the scheduled time the run was fired for, RFC 3339 in UTC
 }
 
-// Context is the data passed to pipeline param templates.
-type Context struct {
+// TemplateContext is the data passed to pipeline param and concurrency group templates.
+type TemplateContext struct {
 	Event       string // push, pull_request, merge_group, comment or schedule
 	Action      string // event action, empty for push and schedule
 	Repository  Repository
@@ -83,14 +83,14 @@ type NamespaceContext struct {
 	Repository Repository
 }
 
-// Parse parses text as a template in which references to missing map keys are errors.
-func Parse(name, text string) (*template.Template, error) {
+// ParseTemplate parses text as a template in which references to missing map keys are errors.
+func ParseTemplate(name, text string) (*template.Template, error) {
 	return template.New(name).Option("missingkey=error").Parse(text)
 }
 
-// Execute renders t with data, adding hints to errors caused by event-specific
+// ExecuteTemplate renders t with data, adding hints to errors caused by event-specific
 // objects that are nil for the current event.
-func Execute(t *template.Template, data any) (string, error) {
+func ExecuteTemplate(t *template.Template, data any) (string, error) {
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, data); err != nil {
 		return "", explain(err)
@@ -99,11 +99,11 @@ func Execute(t *template.Template, data any) (string, error) {
 }
 
 var nilHints = []struct{ typeName, hint string }{
-	{"*tmpl.Push", ".Push is only set for push events"},
-	{"*tmpl.PullRequest", ".PullRequest is only set for pull_request events"},
-	{"*tmpl.MergeGroup", ".MergeGroup is only set for merge_group events"},
-	{"*tmpl.Comment", ".Comment is only set for comment events"},
-	{"*tmpl.Schedule", ".Schedule is only set for schedule events"},
+	{"*pipelines.Push", ".Push is only set for push events"},
+	{"*pipelines.PullRequest", ".PullRequest is only set for pull_request events"},
+	{"*pipelines.MergeGroup", ".MergeGroup is only set for merge_group events"},
+	{"*pipelines.Comment", ".Comment is only set for comment events"},
+	{"*pipelines.Schedule", ".Schedule is only set for schedule events"},
 }
 
 func explain(err error) error {
@@ -118,8 +118,8 @@ func explain(err error) error {
 
 // Sample returns a context in which every field, including every event-specific
 // object, is populated. It is used to validate templates when configuration is loaded.
-func Sample() Context {
-	return Context{
+func Sample() TemplateContext {
+	return TemplateContext{
 		Event:  "pull_request",
 		Action: "synchronize",
 		Repository: Repository{
@@ -147,7 +147,7 @@ func Sample() Context {
 
 // SampleFor returns a placeholder context for one event: only that event's
 // objects are set, as they would be at run time.
-func SampleFor(event string) Context {
+func SampleFor(event string) TemplateContext {
 	c := Sample()
 	c.Event = event
 	c.Push, c.PullRequest, c.MergeGroup, c.Comment, c.Schedule = nil, nil, nil, nil, nil

@@ -9,7 +9,7 @@ import (
 	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/system/metrics"
 )
 
@@ -89,27 +89,27 @@ func (s *Service) Evaluate(ctx context.Context, c checkrun.Context, opts EvalOpt
 // loadConfig fetches and parses .octomaton.yaml at c.ConfigAt(). It returns
 // false when there is nothing to do (no file) or the file is unusable, in which
 // case the problem is reported on a "octomaton" check run when report is set.
-func (s *Service) loadConfig(ctx context.Context, gh githubapp.Client, c checkrun.Context, report bool) (*repoconfig.Config, bool) {
+func (s *Service) loadConfig(ctx context.Context, gh githubapp.Client, c checkrun.Context, report bool) (*pipelines.Config, bool) {
 	log := s.logFor(c)
-	data, err := gh.GetFile(ctx, c.Repository.Owner, c.Repository.Name, repoconfig.FileName, c.ConfigAt())
+	data, err := gh.GetFile(ctx, c.Repository.Owner, c.Repository.Name, pipelines.FileName, c.ConfigAt())
 	if errors.Is(err, githubapp.ErrNotFound) {
-		log.Debug("Repository has no " + repoconfig.FileName)
+		log.Debug("Repository has no " + pipelines.FileName)
 		return nil, false
 	}
 	if err != nil {
-		log.Error("Could not read "+repoconfig.FileName, "error", err)
+		log.Error("Could not read "+pipelines.FileName, "error", err)
 		if report {
-			s.reportConfigProblem(ctx, gh, c, "Could not read "+repoconfig.FileName,
+			s.reportConfigProblem(ctx, gh, c, "Could not read "+pipelines.FileName,
 				fmt.Sprintf("Octomaton could not read `%s` at `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.",
-					repoconfig.FileName, checkrun.ShortSHA(c.ConfigAt()), err))
+					pipelines.FileName, checkrun.ShortSHA(c.ConfigAt()), err))
 		}
 		return nil, false
 	}
-	cfg, err := repoconfig.Parse(data)
+	cfg, err := pipelines.Parse(data, githubapp.CheckPermissions)
 	if err != nil {
-		log.Warn("Invalid "+repoconfig.FileName, "error", err)
+		log.Warn("Invalid "+pipelines.FileName, "error", err)
 		if report {
-			s.reportConfigProblem(ctx, gh, c, "Invalid "+repoconfig.FileName, describeConfigError(c, err))
+			s.reportConfigProblem(ctx, gh, c, "Invalid "+pipelines.FileName, describeConfigError(c, err))
 		}
 		return nil, false
 	}
@@ -118,8 +118,8 @@ func (s *Service) loadConfig(ctx context.Context, gh githubapp.Client, c checkru
 
 func describeConfigError(c checkrun.Context, err error) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "`%s` at `%s` is invalid, so no pipeline was started:\n\n", repoconfig.FileName, checkrun.ShortSHA(c.ConfigAt()))
-	var ce *repoconfig.Error
+	fmt.Fprintf(&b, "`%s` at `%s` is invalid, so no pipeline was started:\n\n", pipelines.FileName, checkrun.ShortSHA(c.ConfigAt()))
+	var ce *pipelines.Error
 	if errors.As(err, &ce) {
 		for _, p := range ce.Problems {
 			fmt.Fprintf(&b, "- %s\n", markdownLine(p))
@@ -142,7 +142,7 @@ func (s *Service) reportConfigProblem(ctx context.Context, gh githubapp.Client, 
 	s.createCompleted(ctx, gh, c, checkrun.ConfigCheckName, "failure", title, summary, nil, "")
 }
 
-func (s *Service) reportSkipped(ctx context.Context, gh githubapp.Client, c checkrun.Context, f repoconfig.PathFilter, changed int) {
+func (s *Service) reportSkipped(ctx context.Context, gh githubapp.Client, c checkrun.Context, f pipelines.PathFilter, changed int) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "None of the %d file(s) changed by this %s are relevant to pipeline `%s`, so it did not run.\n\n", changed, eventNoun(c), c.Pipeline)
 	if len(f.Paths) > 0 {

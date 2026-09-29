@@ -1,6 +1,7 @@
-// Package repoconfig parses and validates .octomaton.yaml, the only file
-// Octomaton reads from a repository, and decides which pipelines an event triggers.
-package repoconfig
+// Package pipelines reads .octomaton.yaml, the only file Octomaton reads from a repository besides
+// the pipeline definitions it names: its schema and validation, which pipelines an event triggers,
+// and the Go templates of params and concurrency groups over the documented template context.
+package pipelines
 
 import (
 	"bytes"
@@ -16,8 +17,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
-	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/tmpl"
+	"octomaton.dev/internal/services/ci"
 )
 
 const (
@@ -25,16 +25,9 @@ const (
 	FileName = ".octomaton.yaml"
 	// APIVersion is the only supported configuration version.
 	APIVersion = "octomaton.dev/v1"
-	// ReservedName is used for configuration-level check runs and cannot name a pipeline.
-	ReservedName  = "octomaton"
+	// ReservedName names the configuration's own report, so it cannot name a pipeline.
+	ReservedName  = ci.ConfigReportName
 	maxNameLength = 63
-)
-
-// Concurrency policies.
-const (
-	PolicySupersede = "supersede"
-	PolicyQueue     = "queue"
-	PolicyLatest    = "latest"
 )
 
 // DefaultPullRequestTypes are the pull_request actions that trigger a pipeline when `types` is omitted.
@@ -157,10 +150,15 @@ func (e *Error) Error() string {
 	return "invalid " + FileName + ": " + strings.Join(e.Problems, "; ")
 }
 
+// PermissionCheck reports githubToken permissions the code host cannot grant (ci.CodeHost's
+// CheckPermissions).
+type PermissionCheck func(permissions map[string]string) error
+
 // Parse decodes data with a YAML 1.2 parser (so an unquoted `on:` key is the
 // string "on", not a boolean), strictly: unknown fields, duplicate keys and type
-// mismatches are errors. It then validates the result. Problems are reported as *Error.
-func Parse(data []byte) (*Config, error) {
+// mismatches are errors. It then validates the result, checking githubToken
+// permissions with check when it is set. Problems are reported as *Error.
+func Parse(data []byte, check PermissionCheck) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var cfg Config
@@ -178,23 +176,23 @@ func Parse(data []byte) (*Config, error) {
 	if err := yaml.Unmarshal(data, &root); err == nil {
 		enableNullTriggers(&root, &cfg)
 	}
-	if problems := cfg.validate(); len(problems) > 0 {
+	if problems := cfg.validate(check); len(problems) > 0 {
 		return nil, &Error{Problems: problems}
 	}
 	return &cfg, nil
 }
 
 var typeNames = strings.NewReplacer(
-	"in type repoconfig.Config", "at the top level",
-	"in type repoconfig.Pipeline", "in pipeline",
-	"in type repoconfig.Triggers", "in on",
-	"in type repoconfig.PullRequestTrigger", "in on.pull_request",
-	"in type repoconfig.MergeGroupTrigger", "in on.merge_group",
-	"in type repoconfig.PushTrigger", "in on.push",
-	"in type repoconfig.CommentTrigger", "in on.comment",
-	"in type repoconfig.ScheduleTrigger", "in on.schedule",
-	"in type repoconfig.Concurrency", "in concurrency",
-	"in type repoconfig.GitHubToken", "in githubToken",
+	"in type pipelines.Config", "at the top level",
+	"in type pipelines.Pipeline", "in pipeline",
+	"in type pipelines.Triggers", "in on",
+	"in type pipelines.PullRequestTrigger", "in on.pull_request",
+	"in type pipelines.MergeGroupTrigger", "in on.merge_group",
+	"in type pipelines.PushTrigger", "in on.push",
+	"in type pipelines.CommentTrigger", "in on.comment",
+	"in type pipelines.ScheduleTrigger", "in on.schedule",
+	"in type pipelines.Concurrency", "in concurrency",
+	"in type pipelines.GitHubToken", "in githubToken",
 )
 
 func yamlProblems(err error) []string {
@@ -259,7 +257,7 @@ func mappingValue(n *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-func (c *Config) validate() []string {
+func (c *Config) validate(check PermissionCheck) []string {
 	var problems []string
 	if c.APIVersion != APIVersion {
 		problems = append(problems, fmt.Sprintf("apiVersion must be %q (got %q)", APIVersion, c.APIVersion))
@@ -271,7 +269,7 @@ func (c *Config) validate() []string {
 		if p.Name != "" {
 			prefix = fmt.Sprintf("pipelines[%d] (%s)", i, p.Name)
 		}
-		for _, problem := range p.validate() {
+		for _, problem := range p.validate(check) {
 			problems = append(problems, prefix+": "+problem)
 		}
 		if p.Name != "" {
@@ -284,7 +282,7 @@ func (c *Config) validate() []string {
 	return problems
 }
 
-func (p *Pipeline) validate() []string {
+func (p *Pipeline) validate(check PermissionCheck) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
@@ -364,7 +362,7 @@ func (p *Pipeline) validate() []string {
 		}
 	}
 
-	sample := tmpl.Sample()
+	sample := Sample()
 	sample.Pipeline = p.Name
 	p.params = make(map[string]*template.Template, len(p.Params))
 	for _, name := range sortedKeys(p.Params) {
@@ -388,10 +386,10 @@ func (p *Pipeline) validate() []string {
 		} else {
 			c.group = t
 		}
-		switch c.Policy {
+		switch ci.Policy(c.Policy) {
 		case "":
-			c.Policy = PolicyQueue
-		case PolicySupersede, PolicyQueue, PolicyLatest:
+			c.Policy = string(ci.Queue)
+		case ci.Supersede, ci.Queue, ci.Latest:
 		default:
 			add("concurrency.policy %q must be supersede, queue or latest", c.Policy)
 		}
@@ -401,8 +399,8 @@ func (p *Pipeline) validate() []string {
 		if strings.TrimSpace(gt.Workspace) == "" {
 			add("githubToken.workspace is required")
 		}
-		if len(gt.Permissions) > 0 {
-			if _, err := githubapp.ParsePermissions(gt.Permissions); err != nil {
+		if len(gt.Permissions) > 0 && check != nil {
+			if err := check(gt.Permissions); err != nil {
 				add("githubToken.permissions: %v", err)
 			}
 		}
@@ -424,12 +422,12 @@ func (p *Pipeline) validate() []string {
 
 // parseTemplate parses a template and dry-runs it against a context in which every
 // field is set, so that references to unknown fields are reported up front.
-func parseTemplate(name, text string, sample tmpl.Context) (*template.Template, error) {
-	t, err := tmpl.Parse(name, text)
+func parseTemplate(name, text string, sample TemplateContext) (*template.Template, error) {
+	t, err := ParseTemplate(name, text)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tmpl.Execute(t, sample); err != nil {
+	if _, err := ExecuteTemplate(t, sample); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -479,10 +477,10 @@ func (c *Config) Pipeline(name string) *Pipeline {
 }
 
 // RenderParams renders every param template against ctx.
-func (p *Pipeline) RenderParams(ctx tmpl.Context) (map[string]string, error) {
+func (p *Pipeline) RenderParams(ctx TemplateContext) (map[string]string, error) {
 	out := make(map[string]string, len(p.params))
 	for _, name := range sortedKeys(p.params) {
-		v, err := tmpl.Execute(p.params[name], ctx)
+		v, err := ExecuteTemplate(p.params[name], ctx)
 		if err != nil {
 			return nil, fmt.Errorf("param %q: %w", name, err)
 		}
@@ -503,6 +501,14 @@ func (p *Pipeline) TokenPermissions() map[string]string {
 	return p.GitHubToken.Permissions
 }
 
+// Token returns what a run of the pipeline asks for its GitHub token; nil without githubToken.
+func (p *Pipeline) Token() *ci.TokenSettings {
+	if p.GitHubToken == nil {
+		return nil
+	}
+	return &ci.TokenSettings{Workspace: p.GitHubToken.Workspace, Permissions: p.TokenPermissions()}
+}
+
 // TokenWorkspace returns the workspace the GitHub token is bound to, or "".
 func (p *Pipeline) TokenWorkspace() string {
 	if p.GitHubToken == nil {
@@ -511,35 +517,26 @@ func (p *Pipeline) TokenWorkspace() string {
 	return p.GitHubToken.Workspace
 }
 
-// ConcurrencySettings is a run's resolved concurrency group and policy.
-type ConcurrencySettings struct {
-	// Group is the rendered group name ("" = unconstrained).
-	Group string
-	// Key identifies the group within the repository.
-	Key    string
-	Policy string
-}
-
 // ConcurrencyFor resolves the run's concurrency group for ctx. Without a
 // concurrency setting, pull_request runs of the same pipeline and pull request
 // share the group "pr-<number>" (scoped to the pipeline) with policy supersede,
 // and other runs are unconstrained.
-func (p *Pipeline) ConcurrencyFor(ctx tmpl.Context) (ConcurrencySettings, error) {
+func (p *Pipeline) ConcurrencyFor(ctx TemplateContext) (ci.Concurrency, error) {
 	if c := p.Concurrency; c != nil && c.group != nil {
-		group, err := tmpl.Execute(c.group, ctx)
+		group, err := ExecuteTemplate(c.group, ctx)
 		if err != nil {
-			return ConcurrencySettings{}, fmt.Errorf("concurrency.group: %w", err)
+			return ci.Concurrency{}, fmt.Errorf("concurrency.group: %w", err)
 		}
 		if strings.TrimSpace(group) == "" {
-			return ConcurrencySettings{}, nil
+			return ci.Concurrency{}, nil
 		}
-		return ConcurrencySettings{Group: group, Key: group, Policy: c.Policy}, nil
+		return ci.Concurrency{Group: group, Key: group, Policy: ci.Policy(c.Policy)}, nil
 	}
-	if ctx.Event == "pull_request" && ctx.PullRequest != nil {
+	if ctx.Event == ci.EventPullRequest && ctx.PullRequest != nil {
 		group := fmt.Sprintf("pr-%d", ctx.PullRequest.Number)
-		return ConcurrencySettings{Group: group, Key: p.Name + "/" + group, Policy: PolicySupersede}, nil
+		return ci.Concurrency{Group: group, Key: p.Name + "/" + group, Policy: ci.Supersede}, nil
 	}
-	return ConcurrencySettings{}, nil
+	return ci.Concurrency{}, nil
 }
 
 // Schedules returns the pipeline's schedule triggers.

@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/tekton"
-	"octomaton.dev/internal/tmpl"
 	"sigs.k8s.io/yaml"
 )
 
@@ -54,7 +54,7 @@ func ConfigPath(path string) (string, error) {
 		return "", err
 	}
 	if st.IsDir() {
-		return filepath.Join(path, repoconfig.FileName), nil
+		return filepath.Join(path, pipelines.FileName), nil
 	}
 	return path, nil
 }
@@ -73,9 +73,9 @@ func Lint(configPath string) Result {
 		add(configPath, "%v", err)
 		return res
 	}
-	cfg, err := repoconfig.Parse(data)
+	cfg, err := pipelines.Parse(data, githubapp.CheckPermissions)
 	if err != nil {
-		var ce *repoconfig.Error
+		var ce *pipelines.Error
 		if errors.As(err, &ce) {
 			for _, p := range ce.Problems {
 				add(configPath, "%s", p)
@@ -103,7 +103,7 @@ func Lint(configPath string) Result {
 			add(file, "pipeline %s sets taskChecks, which needs the PipelineRun's own spec.pipelineSpec to list its tasks", p.Name)
 		}
 		for _, event := range p.Events() {
-			ctx := tmpl.SampleFor(event)
+			ctx := pipelines.SampleFor(event)
 			ctx.Pipeline = p.Name
 			params, err := p.RenderParams(ctx)
 			if err != nil {

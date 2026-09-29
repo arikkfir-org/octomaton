@@ -1,11 +1,11 @@
-package tmpl
+package pipelines
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestExecute(t *testing.T) {
+func TestExecuteTemplate(t *testing.T) {
 	tests := []struct {
 		name    string
 		text    string
@@ -26,11 +26,11 @@ func TestExecute(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tpl, err := Parse(tt.name, tt.text)
+			tpl, err := ParseTemplate(tt.name, tt.text)
 			if err != nil {
-				t.Fatalf("Parse: %v", err)
+				t.Fatalf("ParseTemplate: %v", err)
 			}
-			got, err := Execute(tpl, tt.data)
+			got, err := ExecuteTemplate(tpl, tt.data)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want one containing %q", err, tt.wantErr)
@@ -38,7 +38,7 @@ func TestExecute(t *testing.T) {
 				return
 			}
 			if err != nil || got != tt.want {
-				t.Fatalf("Execute = %q, %v; want %q", got, err, tt.want)
+				t.Fatalf("ExecuteTemplate = %q, %v; want %q", got, err, tt.want)
 			}
 		})
 	}

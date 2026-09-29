@@ -11,7 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/ci"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/tekton"
 )
 
@@ -33,9 +34,9 @@ func (s *Service) release(ctx context.Context, run *unstructured.Unstructured) e
 		return s.Runs.SetStatus(ctx, ns, name, "")
 	}
 	switch run.GetAnnotations()[tekton.AnnotationConcurrencyPolicy] {
-	case repoconfig.PolicySupersede:
+	case string(ci.Supersede):
 		return s.supersede(ctx, ns, key, name)
-	case repoconfig.PolicyLatest:
+	case string(ci.Latest):
 		waits, err := s.keepLatest(ctx, ns, key, name)
 		if err != nil || !waits {
 			return err
@@ -254,7 +255,7 @@ func (s *Service) currentHead(ctx context.Context, run *unstructured.Unstructure
 // ReleaseNext starts the next held run of a finished run's queue or latest group.
 func (s *Service) ReleaseNext(ctx context.Context, run *unstructured.Unstructured) error {
 	key := run.GetLabels()[tekton.LabelConcurrencyGroup]
-	if key == "" || run.GetAnnotations()[tekton.AnnotationConcurrencyPolicy] == repoconfig.PolicySupersede {
+	if key == "" || run.GetAnnotations()[tekton.AnnotationConcurrencyPolicy] == string(ci.Supersede) {
 		return nil
 	}
 	next, err := s.queueHead(ctx, run.GetNamespace(), key)
@@ -316,7 +317,7 @@ func (s *Service) Resume(ctx context.Context, run *unstructured.Unstructured) er
 // CancelMergeGroup cancels the unfinished runs of a destroyed merge group.
 func (s *Service) CancelMergeGroup(ctx context.Context, c checkrun.Context, reason string) {
 	log := s.logFor(c)
-	ns, err := s.Namespaces.Resolve(c.TemplateRepository())
+	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(c.Repository))
 	if err != nil {
 		log.Error("Could not resolve namespace", "error", err)
 		return

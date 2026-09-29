@@ -14,7 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/ci"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 )
@@ -51,13 +52,13 @@ type prepared struct {
 	namespace   string
 	pipelineRun *unstructured.Unstructured
 	params      map[string]string
-	concurrency repoconfig.ConcurrencySettings
+	concurrency ci.Concurrency
 }
 
 // prepare resolves the namespace, loads the PipelineRun file and renders params
 // and the concurrency group. Problems are returned as Markdown for the check run.
-func (s *Service) prepare(ctx context.Context, gh githubapp.Client, c checkrun.Context, p *repoconfig.Pipeline) (*prepared, string) {
-	ns, err := s.Namespaces.Resolve(c.TemplateRepository())
+func (s *Service) prepare(ctx context.Context, gh githubapp.Client, c checkrun.Context, p *pipelines.Pipeline) (*prepared, string) {
+	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(c.Repository))
 	if err != nil {
 		return nil, fmt.Sprintf("Could not determine the namespace for %s: %v", c.Repository.FullName, err)
 	}
@@ -85,7 +86,7 @@ func (s *Service) prepare(ctx context.Context, gh githubapp.Client, c checkrun.C
 	if p.TaskChecks && len(tekton.TaskNames(pr)) == 0 {
 		return nil, fmt.Sprintf("Pipeline `%s` sets `taskChecks`, which needs the PipelineRun's own `spec.pipelineSpec` to list its tasks.", p.Name)
 	}
-	tc := c.Template()
+	tc := pipelines.ContextOf(c)
 	params, err := p.RenderParams(tc)
 	if err != nil {
 		return nil, fmt.Sprintf("Could not render the params of pipeline `%s`: %v", p.Name, err)
@@ -103,7 +104,7 @@ func (s *Service) prepare(ctx context.Context, gh githubapp.Client, c checkrun.C
 // then its check run, task checks and token Secret are created, and it is
 // released per its concurrency policy. Any failure after creation cancels the
 // run and fails its check.
-func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Context, p *repoconfig.Pipeline, opts startOptions) (string, bool, error) {
+func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Context, p *pipelines.Pipeline, opts startOptions) (string, bool, error) {
 	log := s.logFor(c)
 	refuse := func(title, reason string) (string, bool, error) {
 		log.Warn("Pipeline refused", "title", title, "reason", reason)
@@ -254,7 +255,7 @@ func outranks(a, b *unstructured.Unstructured) bool {
 	return attemptOf(a) > attemptOf(b)
 }
 
-func runLabels(c checkrun.Context, p *repoconfig.Pipeline, prep *prepared, opts startOptions) map[string]string {
+func runLabels(c checkrun.Context, p *pipelines.Pipeline, prep *prepared, opts startOptions) map[string]string {
 	l := map[string]string{
 		tekton.LabelManagedBy:    tekton.ManagedByValue,
 		tekton.LabelPipeline:     p.Name,
@@ -271,7 +272,7 @@ func runLabels(c checkrun.Context, p *repoconfig.Pipeline, prep *prepared, opts 
 	return l
 }
 
-func runAnnotations(c checkrun.Context, p *repoconfig.Pipeline, prep *prepared, attempt int) map[string]string {
+func runAnnotations(c checkrun.Context, p *pipelines.Pipeline, prep *prepared, attempt int) map[string]string {
 	a := map[string]string{
 		tekton.AnnotationRepository:     c.Repository.FullName,
 		tekton.AnnotationSHA:            c.Revision,
@@ -285,7 +286,7 @@ func runAnnotations(c checkrun.Context, p *repoconfig.Pipeline, prep *prepared, 
 	}
 	if prep.concurrency.Group != "" {
 		a[tekton.AnnotationConcurrencyGroup] = prep.concurrency.Group
-		a[tekton.AnnotationConcurrencyPolicy] = prep.concurrency.Policy
+		a[tekton.AnnotationConcurrencyPolicy] = string(prep.concurrency.Policy)
 	}
 	if p.GitHubToken != nil {
 		if data, err := json.Marshal(tokenConfig{Workspace: p.GitHubToken.Workspace, Permissions: p.TokenPermissions()}); err == nil {

@@ -18,10 +18,9 @@ import (
 	webhook "octomaton.dev/internal/adapters/http"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
-	"octomaton.dev/internal/tmpl"
 )
 
 // ApproveAction is the identifier of the "Approve and run" check-run action.
@@ -48,7 +47,7 @@ var _ Runs = (*tekton.Client)(nil)
 
 // NamespaceResolver maps a repository to its namespace; *config.Namespaces implements it.
 type NamespaceResolver interface {
-	Resolve(repo tmpl.Repository) (string, error)
+	Resolve(repo pipelines.Repository) (string, error)
 }
 
 // ScheduleNotifier is told when a repository's default branch changes, so its
@@ -120,7 +119,7 @@ func (s *Service) Route(event, delivery string, payload any) (webhook.Job, strin
 		}
 		// Configuration errors are reported only for the actions that normally run
 		// pipelines, so that labeling or editing a pull request does not add failures.
-		return s.evaluateJob(c, EvalOptions{Draft: draft, ReportConfigErrors: slices.Contains(repoconfig.DefaultPullRequestTypes, c.Action)})
+		return s.evaluateJob(c, EvalOptions{Draft: draft, ReportConfigErrors: slices.Contains(pipelines.DefaultPullRequestTypes, c.Action)})
 
 	case *github.MergeGroupEvent:
 		c, reason := mergeGroupContext(ev, delivery)

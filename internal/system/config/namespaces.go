@@ -6,7 +6,7 @@ import (
 	"text/template"
 
 	"k8s.io/apimachinery/pkg/util/validation"
-	"octomaton.dev/internal/tmpl"
+	"octomaton.dev/internal/services/pipelines"
 )
 
 // Namespaces maps repositories to the Kubernetes namespaces their PipelineRuns run in.
@@ -34,12 +34,12 @@ func (n *Namespaces) init() []string {
 	var problems []string
 	if strings.TrimSpace(n.Template) == "" {
 		problems = append(problems, "OCTOMATON_NAMESPACE_TEMPLATE is required")
-	} else if t, err := tmpl.Parse("OCTOMATON_NAMESPACE_TEMPLATE", n.Template); err != nil {
+	} else if t, err := pipelines.ParseTemplate("OCTOMATON_NAMESPACE_TEMPLATE", n.Template); err != nil {
 		problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: %v", err))
 	} else {
 		n.compiled = t
-		sample := tmpl.Sample().Repository
-		if out, err := tmpl.Execute(t, tmpl.NamespaceContext{Repository: sample}); err != nil {
+		sample := pipelines.Sample().Repository
+		if out, err := pipelines.ExecuteTemplate(t, pipelines.NamespaceContext{Repository: sample}); err != nil {
 			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: %v", err))
 		} else if SanitizeDNSLabel(out) == "" {
 			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: renders %q for repository %s, which is not usable as a namespace", out, sample.FullName))
@@ -63,14 +63,14 @@ func (n *Namespaces) init() []string {
 
 // Resolve returns the namespace for repo: an explicit override, or the rendered
 // and sanitized template.
-func (n *Namespaces) Resolve(repo tmpl.Repository) (string, error) {
+func (n *Namespaces) Resolve(repo pipelines.Repository) (string, error) {
 	if ns, ok := n.overrides[strings.ToLower(repo.FullName)]; ok {
 		return ns, nil
 	}
 	if n.compiled == nil {
 		return "", fmt.Errorf("namespace template is not configured")
 	}
-	out, err := tmpl.Execute(n.compiled, tmpl.NamespaceContext{Repository: repo})
+	out, err := pipelines.ExecuteTemplate(n.compiled, pipelines.NamespaceContext{Repository: repo})
 	if err != nil {
 		return "", fmt.Errorf("rendering namespace template: %w", err)
 	}

@@ -274,6 +274,12 @@ func ParsePermissions(m map[string]string) (*github.InstallationPermissions, err
 	return &perms, nil
 }
 
+// CheckPermissions reports permissions ParsePermissions rejects.
+func CheckPermissions(m map[string]string) error {
+	_, err := ParsePermissions(m)
+	return err
+}
+
 type client struct {
 	gh    *github.Client
 	appID int64

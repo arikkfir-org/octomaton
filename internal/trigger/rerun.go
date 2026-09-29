@@ -8,7 +8,7 @@ import (
 	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 )
 
 // RerunRequest asks to re-run check runs, from check_run.rerequested,
@@ -56,7 +56,7 @@ func (s *Service) Rerun(ctx context.Context, req RerunRequest) {
 		}
 	}
 
-	configs := map[string]*repoconfig.Config{}
+	configs := map[string]*pipelines.Config{}
 	done := map[string]bool{}
 	for _, cr := range runs {
 		c, ok := s.checkRunContext(ctx, gh, req, cr)
@@ -92,7 +92,7 @@ func (s *Service) Rerun(ctx context.Context, req RerunRequest) {
 		p := cfg.Pipeline(c.Pipeline)
 		if p == nil {
 			s.createCompleted(ctx, gh, c, c.Pipeline, "failure", "Pipeline not found",
-				fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", repoconfig.FileName, checkrun.ShortSHA(c.ConfigAt()), c.Pipeline), nil, "")
+				fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", pipelines.FileName, checkrun.ShortSHA(c.ConfigAt()), c.Pipeline), nil, "")
 			continue
 		}
 		opts := startOptions{Rerun: true}

@@ -11,7 +11,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/labels"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/tekton"
 )
 
@@ -54,7 +54,7 @@ type scheduledRepo struct {
 
 type scheduledPipeline struct {
 	name      string
-	schedules []repoconfig.ScheduleTrigger
+	schedules []pipelines.ScheduleTrigger
 }
 
 var _ ScheduleNotifier = (*Scheduler)(nil)
@@ -227,11 +227,11 @@ func (sc *Scheduler) FireDue(ctx context.Context) {
 
 // fire starts one run of a pipeline for a schedule slot, at the head of the
 // repository's default branch, unless a run for the slot exists already.
-func (sc *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline string, sched repoconfig.ScheduleTrigger, slot time.Time) error {
+func (sc *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline string, sched pipelines.ScheduleTrigger, slot time.Time) error {
 	s := sc.Service
 	gh := s.GitHub.Installation(entry.installationID)
 	repo := entry.repo
-	ns, err := s.Namespaces.Resolve(checkrun.Context{Repository: repo}.TemplateRepository())
+	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(repo))
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func (sc *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline st
 	return err
 }
 
-func hasCron(p *repoconfig.Pipeline, cron string) bool {
+func hasCron(p *pipelines.Pipeline, cron string) bool {
 	for _, s := range p.Schedules() {
 		if s.Cron == cron {
 			return true

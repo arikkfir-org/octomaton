@@ -1,12 +1,13 @@
-package repoconfig
+package pipelines
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
-	"octomaton.dev/internal/tmpl"
+	"octomaton.dev/internal/services/ci"
 )
 
 // referenceExample is the .octomaton.yaml example from the hub reference.
@@ -46,9 +47,22 @@ pipelines:
     taskChecks: false                  # optional: also report each pipeline task as "<name> / <task>"
 `
 
+// checkPermissions stands in for the code host's check of githubToken permissions.
+func checkPermissions(m map[string]string) error {
+	for name, level := range m {
+		switch {
+		case level != "read" && level != "write" && level != "admin":
+			return fmt.Errorf("permission %q: access level must be read, write or admin (got %q)", name, level)
+		case name != "contents" && name != "pull_requests" && name != "checks":
+			return fmt.Errorf("unknown permission %q", name)
+		}
+	}
+	return nil
+}
+
 func mustParse(t *testing.T, doc string) *Config {
 	t.Helper()
-	cfg, err := Parse([]byte(doc))
+	cfg, err := Parse([]byte(doc), checkPermissions)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -68,7 +82,7 @@ func TestParseReferenceExample(t *testing.T) {
 	if p.TimeoutDuration() != time.Hour || p.TokenWorkspace() != "github-token" || p.TokenPermissions()["contents"] != "read" {
 		t.Fatalf("pipeline settings: timeout %v, workspace %q, permissions %v", p.TimeoutDuration(), p.TokenWorkspace(), p.TokenPermissions())
 	}
-	if p.Concurrency.Policy != PolicyLatest || p.TaskChecks {
+	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks {
 		t.Fatalf("concurrency %+v, taskChecks %v", p.Concurrency, p.TaskChecks)
 	}
 	if got := p.Events(); strings.Join(got, ",") != "push,pull_request,merge_group,comment,schedule" {
@@ -163,7 +177,7 @@ func TestParseProblems(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse([]byte(tt.yaml))
+			_, err := Parse([]byte(tt.yaml), checkPermissions)
 			var ce *Error
 			if !errors.As(err, &ce) {
 				t.Fatalf("error = %v, want *Error", err)
@@ -181,7 +195,7 @@ apiVersion: octomaton.dev/v1
 pipelines:
   - {name: a, pipelineRun: a.yaml}
   - {name: b, pipelineRun: b.yaml, on: {push: {}}, timeout: x}
-`))
+`), nil)
 	var ce *Error
 	if !errors.As(err, &ce) || len(ce.Problems) != 2 {
 		t.Fatalf("want 2 problems, got %v", err)
@@ -201,11 +215,11 @@ pipelines:
       safe-pr: "{{ if .PullRequest }}{{ .PullRequest.Number }}{{ else }}none{{ end }}"
 `)
 	p := cfg.Pipeline("ci")
-	got, err := p.RenderParams(tmpl.SampleFor("pull_request"))
+	got, err := p.RenderParams(SampleFor("pull_request"))
 	if err != nil || got["pr"] != "1" || got["safe-pr"] != "1" || got["revision"] == "" {
 		t.Fatalf("RenderParams(pull_request) = %v, %v", got, err)
 	}
-	_, err = p.RenderParams(tmpl.SampleFor("push"))
+	_, err = p.RenderParams(SampleFor("push"))
 	if err == nil || !strings.Contains(err.Error(), `param "pr"`) || !strings.Contains(err.Error(), ".PullRequest is only set for pull_request events") {
 		t.Fatalf("RenderParams(push) error = %v, want a clear nil-object error for param pr", err)
 	}
@@ -224,17 +238,18 @@ pipelines:
   - {name: off, pipelineRun: a.yaml, on: {pull_request: {}}, concurrency: {group: "{{ if false }}x{{ end }}"}}
 `)
 	tests := []struct {
-		pipeline, event          string
-		wantGroup, wantKey, want string
+		pipeline, event    string
+		wantGroup, wantKey string
+		want               ci.Policy
 	}{
-		{"ci", "pull_request", "pr-1", "ci/pr-1", PolicySupersede},
+		{"ci", "pull_request", "pr-1", "ci/pr-1", ci.Supersede},
 		{"ci", "push", "", "", ""},
-		{"docs", "push", "docs-main", "docs-main", PolicyQueue},
-		{"deploy", "push", "deploy", "deploy", PolicySupersede},
+		{"docs", "push", "docs-main", "docs-main", ci.Queue},
+		{"deploy", "push", "deploy", "deploy", ci.Supersede},
 		{"off", "pull_request", "", "", ""},
 	}
 	for _, tt := range tests {
-		got, err := cfg.Pipeline(tt.pipeline).ConcurrencyFor(tmpl.SampleFor(tt.event))
+		got, err := cfg.Pipeline(tt.pipeline).ConcurrencyFor(SampleFor(tt.event))
 		if err != nil || got.Group != tt.wantGroup || got.Key != tt.wantKey || got.Policy != tt.want {
 			t.Errorf("%s on %s: ConcurrencyFor = %+v, %v; want group %q key %q policy %q", tt.pipeline, tt.event, got, err, tt.wantGroup, tt.wantKey, tt.want)
 		}

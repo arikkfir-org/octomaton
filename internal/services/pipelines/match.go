@@ -1,4 +1,4 @@
-package repoconfig
+package pipelines
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"octomaton.dev/internal/services/ci"
 )
 
 // Event is the part of an event that decides which pipelines it triggers.
@@ -61,7 +62,7 @@ func (f PathFilter) Matches(files []string) bool {
 // branches filters the base branch and omitting it matches every base branch.
 func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 	switch ev.Name {
-	case "push":
+	case ci.EventPush:
 		t := p.On.Push
 		if t == nil {
 			return PathFilter{}, false
@@ -83,7 +84,7 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 		}
 		return PathFilter{Paths: t.Paths, PathsIgnore: t.PathsIgnore}, ok
 
-	case "pull_request":
+	case ci.EventPullRequest:
 		t := p.On.PullRequest
 		if t == nil {
 			return PathFilter{}, false
@@ -103,7 +104,7 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 		}
 		return PathFilter{Paths: t.Paths, PathsIgnore: t.PathsIgnore}, true
 
-	case "merge_group":
+	case ci.EventMergeGroup:
 		t := p.On.MergeGroup
 		if t == nil {
 			return PathFilter{}, false
@@ -150,19 +151,19 @@ func anyGlob(patterns []string, name string) bool {
 func (p *Pipeline) Events() []string {
 	var out []string
 	if p.On.Push != nil {
-		out = append(out, "push")
+		out = append(out, ci.EventPush)
 	}
 	if p.On.PullRequest != nil {
-		out = append(out, "pull_request")
+		out = append(out, ci.EventPullRequest)
 	}
 	if p.On.MergeGroup != nil {
-		out = append(out, "merge_group")
+		out = append(out, ci.EventMergeGroup)
 	}
 	if p.On.Comment != nil {
-		out = append(out, "comment")
+		out = append(out, ci.EventComment)
 	}
 	if len(p.On.Schedule) > 0 {
-		out = append(out, "schedule")
+		out = append(out, ci.EventSchedule)
 	}
 	return out
 }

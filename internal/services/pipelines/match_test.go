@@ -1,4 +1,4 @@
-package repoconfig
+package pipelines
 
 import (
 	"strings"

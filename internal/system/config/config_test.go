@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"octomaton.dev/internal/tmpl"
+	"octomaton.dev/internal/services/pipelines"
 )
 
 func testKeyPEM(t *testing.T) string {
@@ -177,13 +177,13 @@ func TestResolveNamespace(t *testing.T) {
 		t.Fatalf("NewNamespaces: %v", err)
 	}
 	tests := []struct {
-		repo tmpl.Repository
+		repo pipelines.Repository
 		want string
 	}{
-		{tmpl.Repository{Owner: "arikkfir-org", Name: "octomaton", FullName: "arikkfir-org/octomaton"}, "ci-octomaton"},
-		{tmpl.Repository{Owner: "arikkfir-org", Name: ".github", FullName: "arikkfir-org/.github"}, "ci-github"},
-		{tmpl.Repository{Owner: "Arikkfir-Org", Name: ".GitHub", FullName: "Arikkfir-Org/.GitHub"}, "ci-github"},
-		{tmpl.Repository{Owner: "arikkfir-org", Name: "My_Repo", FullName: "arikkfir-org/My_Repo"}, "ci-my-repo"},
+		{pipelines.Repository{Owner: "arikkfir-org", Name: "octomaton", FullName: "arikkfir-org/octomaton"}, "ci-octomaton"},
+		{pipelines.Repository{Owner: "arikkfir-org", Name: ".github", FullName: "arikkfir-org/.github"}, "ci-github"},
+		{pipelines.Repository{Owner: "Arikkfir-Org", Name: ".GitHub", FullName: "Arikkfir-Org/.GitHub"}, "ci-github"},
+		{pipelines.Repository{Owner: "arikkfir-org", Name: "My_Repo", FullName: "arikkfir-org/My_Repo"}, "ci-my-repo"},
 	}
 	for _, tt := range tests {
 		got, err := n.Resolve(tt.repo)

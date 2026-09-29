@@ -9,7 +9,7 @@ import (
 
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/tekton"
 )
 
@@ -45,7 +45,7 @@ func (s *Service) HandleComment(ctx context.Context, req CommentRequest) {
 	if !ok {
 		return
 	}
-	var asked []*repoconfig.Pipeline
+	var asked []*pipelines.Pipeline
 	for i := range cfg.Pipelines {
 		if cfg.Pipelines[i].IsCommand(req.Line) {
 			asked = append(asked, &cfg.Pipelines[i])

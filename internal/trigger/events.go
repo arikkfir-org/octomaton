@@ -8,7 +8,7 @@ import (
 	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/repoconfig"
+	"octomaton.dev/internal/services/pipelines"
 )
 
 func isZeroSHA(sha string) bool {
@@ -208,8 +208,8 @@ func commentRequest(ev *github.IssueCommentEvent, delivery string) (CommentReque
 }
 
 // matchEvent extracts what pipeline matching looks at.
-func matchEvent(c checkrun.Context, draft bool) repoconfig.Event {
-	ev := repoconfig.Event{Name: c.Event, Action: c.Action, Draft: draft}
+func matchEvent(c checkrun.Context, draft bool) pipelines.Event {
+	ev := pipelines.Event{Name: c.Event, Action: c.Action, Draft: draft}
 	switch {
 	case c.PullRequest != nil:
 		ev.Branch = c.PullRequest.BaseRef

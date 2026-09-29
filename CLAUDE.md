@@ -24,7 +24,7 @@
 - `cmd/octomaton` only coordinates startup and shutdown: signals, telemetry, configuration, wiring. Logic goes into an
   `internal/` package; keep functions short.
 - The server is configured by environment variables only, read with `github.com/kelseyhightower/envconfig`
-  (`internal/config`; `internal/telemetry` reads `OCTOMATON_LOG_*`): no flags, no configuration files. Configuration
+  (`internal/config`; `internal/telemetry` reads `OCTOMATON_LOG_LEVEL`): no flags, no configuration files. Configuration
   errors never print secret values.
 - Tekton objects are `unstructured.Unstructured` with the dynamic client; do not import `github.com/tektoncd/pipeline`.
 - `.octomaton.yaml` is parsed with `go.yaml.in/yaml/v3` (YAML 1.2, `KnownFields(true)`); never with a YAML 1.1 parser
@@ -33,9 +33,10 @@
   `reporter.Runs`) implemented by `tekton.Client`. Keep packages small and dependency-injected.
 - Runs are created held, then check run, task checks, token Secret, then released per concurrency policy; any failure
   in between cancels the run and fails its check. Keep every step idempotent (Resume replays them).
-- Logs: `log/slog`, set up by `internal/telemetry` (JSON with the fields Cloud Logging reads); messages start with a
-  capital letter, errors logged once where handled. Metrics go through OpenTelemetry (`internal/metrics`) and are
-  served for Prometheus; traces and logs are exported only when the standard `OTEL_*_EXPORTER` variables ask.
+- Logs: `log/slog`, set up by `internal/telemetry`: JSON with the fields Cloud Logging reads on GKE, text elsewhere.
+  Messages start with a capital letter; errors are logged once, where handled, with the request's context so they link
+  to its trace. Metrics (`internal/metrics`) and traces go through OpenTelemetry to Cloud Monitoring and Cloud Trace
+  (the Telemetry API), on GKE only.
 
 ## Tests
 

@@ -46,7 +46,7 @@ func run() int {
 		return 1
 	}
 	slog.InfoContext(ctx, "Starting Octomaton", "version", buildinfo.Version())
-	a, err := newApp(cfg, tel.MetricsHandler())
+	a, err := newApp(cfg)
 	if err != nil {
 		slog.ErrorContext(ctx, "Cannot start Octomaton", "error", err)
 		return 1

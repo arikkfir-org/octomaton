@@ -52,14 +52,14 @@ type app struct {
 }
 
 // newApp connects to Kubernetes and GitHub, then wires the components.
-func newApp(cfg *config.Config, metricsHandler http.Handler) (*app, error) {
+func newApp(cfg *config.Config) (*app, error) {
 	a := &app{cfg: cfg}
 	if err := a.connect(); err != nil {
 		return nil, err
 	}
 	a.wireTrigger()
 	a.wireLeader()
-	a.wireServer(metricsHandler)
+	a.wireServer()
 	return a, nil
 }
 
@@ -116,9 +116,9 @@ func (a *app) wireLeader() {
 	}
 }
 
-func (a *app) wireServer(metricsHandler http.Handler) {
+func (a *app) wireServer() {
 	readiness := &octohttp.Readiness{Ping: a.kube.Ping, Leading: a.elector.Leading, Synced: a.reporter.Synced, TTL: readinessTTL}
-	a.server = octohttp.NewServer(a.cfg.HTTP.Address, a.wireWebhook(), readiness, metricsHandler)
+	a.server = octohttp.NewServer(a.cfg.HTTP.Address, a.wireWebhook(), readiness)
 }
 
 // wireWebhook returns the handler of GitHub's deliveries. It verifies them and queues them for the

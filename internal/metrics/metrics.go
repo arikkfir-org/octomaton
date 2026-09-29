@@ -1,6 +1,5 @@
-// Package metrics records Octomaton's metrics through OpenTelemetry. The telemetry package serves
-// them for Prometheus, where an instrument named octomaton.runs.created becomes the counter
-// octomaton_runs_created_total.
+// Package metrics records Octomaton's metrics through OpenTelemetry. On GKE, the telemetry package
+// exports them to Cloud Monitoring.
 package metrics
 
 import (

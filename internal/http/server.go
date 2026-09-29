@@ -1,5 +1,4 @@
-// Package http serves Octomaton's endpoints: GitHub's webhook deliveries, the Kubernetes probes and
-// the Prometheus metrics.
+// Package http serves Octomaton's endpoints: GitHub's webhook deliveries and the Kubernetes probes.
 package http
 
 import (
@@ -19,7 +18,7 @@ const WebhookPath = "/github/hooks"
 // shutdownTimeout bounds the wait for requests in flight when the server stops.
 const shutdownTimeout = 10 * time.Second
 
-// Server serves the webhook, the probes and the metrics on one address.
+// Server serves the webhook and the probes on one address.
 type Server struct {
 	http      *http.Server
 	readiness *Readiness
@@ -27,12 +26,12 @@ type Server struct {
 
 // NewServer returns a server for address. Webhook requests are traced and measured with
 // OpenTelemetry.
-func NewServer(address string, webhook http.Handler, readiness *Readiness, metrics http.Handler) *Server {
+func NewServer(address string, webhook http.Handler, readiness *Readiness) *Server {
 	return &Server{
 		readiness: readiness,
 		http: &http.Server{
 			Addr:              address,
-			Handler:           routes(otelhttp.NewHandler(webhook, "webhook"), readiness, metrics),
+			Handler:           routes(otelhttp.NewHandler(webhook, "webhook"), readiness),
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       60 * time.Second,
 			WriteTimeout:      60 * time.Second,
@@ -43,12 +42,11 @@ func NewServer(address string, webhook http.Handler, readiness *Readiness, metri
 	}
 }
 
-func routes(webhook, readiness, metrics http.Handler) *http.ServeMux {
+func routes(webhook, readiness http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle(WebhookPath, webhook)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprintln(w, "ok") })
 	mux.Handle("/readyz", readiness)
-	mux.Handle("/metrics", metrics)
 	return mux
 }
 

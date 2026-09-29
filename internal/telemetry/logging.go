@@ -8,14 +8,17 @@ import (
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/klog/v2"
 )
 
-func newLogHandler(c Config, w io.Writer) slog.Handler {
-	if c.LogFormat == "text" {
+// newLogHandler writes text for people, or, on GKE (in project), JSON for Cloud Logging.
+func newLogHandler(c Config, w io.Writer, project string) slog.Handler {
+	if project == "" {
 		return slog.NewTextHandler(w, &slog.HandlerOptions{Level: c.LogLevel})
 	}
-	return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: c.LogLevel, AddSource: true, ReplaceAttr: cloudLoggingAttr})
+	json := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: c.LogLevel, AddSource: true, ReplaceAttr: cloudLoggingAttr})
+	return traceFields{Handler: json, project: project}
 }
 
 // cloudLoggingAttr renames slog's built-in attributes to the fields Cloud Logging reads from JSON
@@ -52,6 +55,33 @@ func severity(level slog.Level) string {
 	default:
 		return "ERROR"
 	}
+}
+
+// traceFields adds, to records logged with a span in their context, the fields with which Cloud
+// Logging links an entry to its trace in Cloud Trace.
+type traceFields struct {
+	slog.Handler
+	project string
+}
+
+func (h traceFields) Handle(ctx context.Context, r slog.Record) error {
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		r = r.Clone()
+		r.AddAttrs(
+			slog.String("logging.googleapis.com/trace", "projects/"+h.project+"/traces/"+sc.TraceID().String()),
+			slog.String("logging.googleapis.com/spanId", sc.SpanID().String()),
+			slog.Bool("logging.googleapis.com/trace_sampled", sc.IsSampled()),
+		)
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h traceFields) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return traceFields{Handler: h.Handler.WithAttrs(attrs), project: h.project}
+}
+
+func (h traceFields) WithGroup(name string) slog.Handler {
+	return traceFields{Handler: h.Handler.WithGroup(name), project: h.project}
 }
 
 // installLogger makes h the handler of slog's default logger, of client-go (klog) and of

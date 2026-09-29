@@ -231,13 +231,11 @@ The server takes no arguments: environment variables configure it, and it exits 
 | `OCTOMATON_NAMESPACE_OVERRIDES` | none | `owner/name:namespace` pairs, comma-separated; they win over the template |
 | `OCTOMATON_RELAY_URLS` | none | URLs that receive verified `push` and `pull_request` deliveries, comma-separated |
 | `OCTOMATON_RETENTION_FREE_PVCS_AFTER` | `1h` | delay after which the PVCs of finished runs are deleted; runs and pods stay |
-| `OCTOMATON_HTTP_ADDRESS` | `:8080` | address of `/github/hooks`, `/healthz`, `/readyz` and `/metrics` |
+| `OCTOMATON_HTTP_ADDRESS` | `:8080` | address of `/github/hooks`, `/healthz` and `/readyz` |
 | `OCTOMATON_WEBHOOK_WORKERS`, `OCTOMATON_WEBHOOK_QUEUE_SIZE` | `8`, `256` | webhook worker pool |
 | `OCTOMATON_POD_NAME`, `OCTOMATON_POD_NAMESPACE` | host name, service account namespace | holder identity and namespace of the Lease `octomaton` |
 | `OCTOMATON_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
-| `OCTOMATON_LOG_FORMAT` | `json` | `json` (the fields Cloud Logging reads) or `text`, on stdout |
-| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER` | none | `otlp` (with the `OTEL_EXPORTER_OTLP_*` variables) or `console` to export traces and logs |
-| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `octomaton` | the resource of exported telemetry, e.g. `k8s.pod.name=…` |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `octomaton` | added to the resource of exported metrics and traces, e.g. `k8s.pod.name=…` |
 | `KUBECONFIG` | in-cluster config | used when not running in a cluster |
 
 - `OCTOMATON_NAMESPACE_TEMPLATE` is rendered over `.Repository`, then sanitized: lowercased, leading dots stripped,
@@ -246,6 +244,13 @@ The server takes no arguments: environment variables configure it, and it exits 
   onboarded".
 - `OCTOMATON_RELAY_URLS` receive the original body and GitHub headers (signatures included), asynchronously, with a
   10 s timeout.
+
+Telemetry follows where the server runs. On GKE (a Kubernetes pod with a GCP metadata server), logs are JSON on stdout
+with the fields Cloud Logging reads, including the links to traces, and metrics and traces go to Cloud Monitoring and
+Cloud Trace through the Telemetry API (`telemetry.googleapis.com`). They are sent as the pod's Kubernetes
+ServiceAccount, which needs `roles/telemetry.metricsWriter`, `roles/telemetry.tracesWriter` and
+`roles/serviceusage.serviceUsageConsumer` (the project is the quota project). Anywhere else, logs are text and nothing
+is exported.
 
 ## GitHub App
 
@@ -266,7 +271,7 @@ Every replica serves webhooks; the replica holding the Lease `octomaton` in its 
 token refresher and PVC retention.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
-the leader, the PipelineRun informer synced); `GET /metrics`.
+the leader, the PipelineRun informer synced).
 
 **RBAC Octomaton needs:**
 
@@ -276,11 +281,12 @@ the leader, the PipelineRun informer synced); `GET /metrics`.
 | Cluster | PipelineRuns: get, list, watch (the reporter's informer, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace | Leases: get, create, update |
 
-**Metrics:** `octomaton_webhooks_received_total{event}`, `octomaton_webhooks_rejected_total{event,reason}`,
-`octomaton_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
-`octomaton_github_checkrun_errors_total{operation}`, `octomaton_reconcile_duration_seconds{result}`,
-`octomaton_webhook_queue_depth`, `octomaton_leader`; OpenTelemetry's HTTP server metrics for `/github/hooks`
-(`http_server_request_duration_seconds{http_route,http_response_status_code,…}`); Go and process collectors.
+**Metrics** (in Cloud Monitoring under `prometheus.googleapis.com/`): counters `octomaton.webhooks.received{event}`,
+`octomaton.webhooks.rejected{event,reason}`, `octomaton.runs.created{result}` (`created`, `existing`, `skipped`,
+`action_required`, `failed`, `error`) and `octomaton.github.checkrun.errors{operation}`; histogram
+`octomaton.reconcile.duration{result}` (seconds); gauges `octomaton.webhook.queue.depth` and `octomaton.leader`; and
+OpenTelemetry's HTTP server metrics for `/github/hooks` (`http.server.request.duration`, …). **Traces:** a span per
+webhook request.
 
 **Bookkeeping:** objects Octomaton creates carry the label `app.kubernetes.io/managed-by: octomaton` and labels and
 annotations under `octomaton.dev/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
@@ -308,7 +314,7 @@ Run locally against a cluster (the current `KUBECONFIG` context):
 
 ```bash
 export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pem)" OCTOMATON_GITHUB_WEBHOOK_SECRET=…
-OCTOMATON_LOG_FORMAT=text go run ./cmd/octomaton
+go run ./cmd/octomaton
 ```
 
 Tests use an in-process fake of the GitHub API (`internal/githubapp/githubtest`) and client-go's fake clients;

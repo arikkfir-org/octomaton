@@ -15,7 +15,7 @@ func named(name string) http.Handler {
 }
 
 func TestRoutes(t *testing.T) {
-	mux := routes(named("hook"), named("ready"), named("metrics"))
+	mux := routes(named("hook"), named("ready"))
 	tests := []struct {
 		method, path string
 		wantCode     int
@@ -24,7 +24,7 @@ func TestRoutes(t *testing.T) {
 		{method: http.MethodPost, path: "/github/hooks", wantCode: http.StatusOK, wantBody: "hook"},
 		{method: http.MethodGet, path: "/healthz", wantCode: http.StatusOK, wantBody: "ok\n"},
 		{method: http.MethodGet, path: "/readyz", wantCode: http.StatusOK, wantBody: "ready"},
-		{method: http.MethodGet, path: "/metrics", wantCode: http.StatusOK, wantBody: "metrics"},
+		{method: http.MethodGet, path: "/metrics", wantCode: http.StatusNotFound},
 		{method: http.MethodPost, path: "/webhook", wantCode: http.StatusNotFound},
 		{method: http.MethodPost, path: "/github/hooks/extra", wantCode: http.StatusNotFound},
 	}
@@ -61,7 +61,7 @@ func TestServeFinishesRequestsInFlight(t *testing.T) {
 		_, _ = w.Write([]byte("delivered"))
 	})
 	readiness := &Readiness{Ping: func(context.Context) error { return nil }, Leading: func() bool { return false }}
-	s := NewServer("", webhook, readiness, named("metrics"))
+	s := NewServer("", webhook, readiness)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestRunFailsWhenTheAddressIsTaken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer taken.Close()
-	s := NewServer(taken.Addr().String(), named("hook"), &Readiness{}, named("metrics"))
+	s := NewServer(taken.Addr().String(), named("hook"), &Readiness{})
 	done := make(chan error, 1)
 	go func() { done <- s.Run(context.Background()) }()
 	select {

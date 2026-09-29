@@ -107,7 +107,7 @@ func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Con
 	log := s.logFor(c)
 	refuse := func(title, reason string) (string, bool, error) {
 		log.Warn("Pipeline refused", "title", title, "reason", reason)
-		s.Metrics.RunsCreated.WithLabelValues(metrics.RunFailed).Inc()
+		s.Metrics.RunCreated(ctx, metrics.RunFailed)
 		if c.Comment == nil {
 			s.createCompleted(ctx, gh, c, p.Name, "failure", title, reason, nil, "")
 		}
@@ -125,7 +125,7 @@ func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Con
 		tekton.LabelSHA:          c.Revision,
 	}).String())
 	if err != nil {
-		s.Metrics.RunsCreated.WithLabelValues(metrics.RunError).Inc()
+		s.Metrics.RunCreated(ctx, metrics.RunError)
 		return "", false, err
 	}
 	same := sameRun(c, opts.Dedupe)
@@ -138,7 +138,7 @@ func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Con
 		}
 		if there != nil && !tekton.CancelRequested(there) {
 			log.Info("The run already exists", "name", there.GetName())
-			s.Metrics.RunsCreated.WithLabelValues(metrics.RunExisting).Inc()
+			s.Metrics.RunCreated(ctx, metrics.RunExisting)
 			return there.GetName(), true, nil
 		}
 	}
@@ -172,7 +172,7 @@ func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Con
 			// Another delivery took this attempt meanwhile: it is this run when it
 			// is the same one, otherwise this is the next attempt.
 			if other, gerr := s.Runs.Get(ctx, prep.namespace, name); gerr == nil && other != nil && !opts.Rerun && same(other) && !tekton.CancelRequested(other) {
-				s.Metrics.RunsCreated.WithLabelValues(metrics.RunExisting).Inc()
+				s.Metrics.RunCreated(ctx, metrics.RunExisting)
 				return name, true, nil
 			}
 			attempt++
@@ -195,11 +195,11 @@ func (s *Service) start(ctx context.Context, gh githubapp.Client, c checkrun.Con
 		err = s.release(ctx, created)
 	}
 	if err != nil {
-		s.Metrics.RunsCreated.WithLabelValues(metrics.RunError).Inc()
+		s.Metrics.RunCreated(ctx, metrics.RunError)
 		s.abort(ctx, gh, c, created, checkID, err)
 		return "", false, err
 	}
-	s.Metrics.RunsCreated.WithLabelValues(metrics.RunCreated).Inc()
+	s.Metrics.RunCreated(ctx, metrics.RunCreated)
 	log.Info("Started pipeline", "namespace", created.GetNamespace(), "name", created.GetName(), "checkRunID", checkID,
 		"attempt", attempt, "concurrencyGroup", prep.concurrency.Group, "policy", prep.concurrency.Policy)
 	return created.GetName(), false, nil
@@ -343,7 +343,7 @@ func (s *Service) openCheck(ctx context.Context, gh githubapp.Client, c checkrun
 		}
 		cr, err := gh.CreateCheckRun(ctx, c.Repository.Owner, c.Repository.Name, opts)
 		if err != nil {
-			s.Metrics.CheckRunErrors.WithLabelValues("create").Inc()
+			s.Metrics.CheckRunError(ctx, "create")
 			return 0, err
 		}
 		id = cr.GetID()
@@ -353,7 +353,7 @@ func (s *Service) openCheck(ctx context.Context, gh githubapp.Client, c checkrun
 			upd.DetailsURL = new(details)
 		}
 		if _, err := gh.UpdateCheckRun(ctx, c.Repository.Owner, c.Repository.Name, id, upd); err != nil {
-			s.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+			s.Metrics.CheckRunError(ctx, "update")
 			return id, err
 		}
 	}
@@ -407,7 +407,7 @@ func (s *Service) openTaskChecks(ctx context.Context, gh githubapp.Client, c che
 			}
 			cr, cerr := gh.CreateCheckRun(ctx, c.Repository.Owner, c.Repository.Name, opts)
 			if cerr != nil {
-				s.Metrics.CheckRunErrors.WithLabelValues("create").Inc()
+				s.Metrics.CheckRunError(ctx, "create")
 				err = cerr
 				break
 			}

@@ -32,7 +32,7 @@ func (s *Service) createCompleted(ctx context.Context, gh githubapp.Client, c ch
 		opts.DetailsURL = new(detailsURL)
 	}
 	if _, err := gh.CreateCheckRun(ctx, c.Repository.Owner, c.Repository.Name, opts); err != nil {
-		s.Metrics.CheckRunErrors.WithLabelValues("create").Inc()
+		s.Metrics.CheckRunError(ctx, "create")
 		s.logFor(c).Error("Could not create check run", "check", name, "conclusion", conclusion, "error", err)
 	}
 }
@@ -51,7 +51,7 @@ func (s *Service) failCheckRun(ctx context.Context, gh githubapp.Client, c check
 		},
 	})
 	if err != nil {
-		s.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+		s.Metrics.CheckRunError(ctx, "update")
 		s.logFor(c).Error("Could not update check run", "checkRunID", id, "error", err)
 	}
 }

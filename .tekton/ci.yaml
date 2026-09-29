@@ -76,7 +76,7 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go run ./cmd/octomaton lint .
+                go run ./cmd/octomaton-lint .
             - name: vet
               image: golang:1.27.1
               script: |
@@ -97,5 +97,5 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go build -trimpath -o /tmp/octomaton ./cmd/octomaton
-                /tmp/octomaton version
+                go build -trimpath -o /tmp/bin/ ./cmd/...
+                /tmp/bin/octomaton-lint -version

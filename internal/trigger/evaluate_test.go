@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel/attribute"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"octomaton.dev/internal/checkrun"
@@ -106,7 +106,7 @@ func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {
 	if string(secret.Data["token"]) == "" {
 		t.Fatalf("token Secret is empty")
 	}
-	if got := testutil.ToFloat64(h.m.RunsCreated.WithLabelValues(metrics.RunCreated)); got != 1 {
+	if got := h.m.Count(t, "octomaton.runs.created", attribute.String("result", metrics.RunCreated)); got != 1 {
 		t.Fatalf("runs created metric = %v", got)
 	}
 }
@@ -126,7 +126,7 @@ func TestEvaluateIsIdempotent(t *testing.T) {
 	if n := len(h.checks("ci")); n != 1 {
 		t.Fatalf("check runs = %d, want 1", n)
 	}
-	if got := testutil.ToFloat64(h.m.RunsCreated.WithLabelValues(metrics.RunExisting)); got != 1 {
+	if got := h.m.Count(t, "octomaton.runs.created", attribute.String("result", metrics.RunExisting)); got != 1 {
 		t.Fatalf("existing metric = %v, want 1 (the push to feature does not match ci)", got)
 	}
 }
@@ -329,7 +329,7 @@ func TestStartAbortsWhenTheTokenCannotBeMinted(t *testing.T) {
 		t.Fatalf("check = %+v", check)
 	}
 	mustContain(t, check.Summary, "minting the GitHub token")
-	if got := testutil.ToFloat64(h.m.RunsCreated.WithLabelValues(metrics.RunError)); got != 1 {
+	if got := h.m.Count(t, "octomaton.runs.created", attribute.String("result", metrics.RunError)); got != 1 {
 		t.Fatalf("error metric = %v", got)
 	}
 }

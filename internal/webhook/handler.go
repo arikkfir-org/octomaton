@@ -63,11 +63,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	event := r.Header.Get("X-GitHub-Event")
 	delivery := r.Header.Get("X-GitHub-Delivery")
 	label := metricEvent(event)
-	h.Metrics.WebhooksReceived.WithLabelValues(label).Inc()
+	h.Metrics.WebhookReceived(r.Context(), label)
 	log := h.Logger.With("event", event, "delivery", delivery)
 
 	reject := func(status int, reason, message string) {
-		h.Metrics.WebhooksRejected.WithLabelValues(label, reason).Inc()
+		h.Metrics.WebhookRejected(r.Context(), label, reason)
 		log.Warn("Rejected webhook", "status", status, "reason", reason, "detail", message)
 		http.Error(w, message, status)
 	}

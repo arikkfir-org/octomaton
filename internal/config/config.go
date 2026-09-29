@@ -1,177 +1,171 @@
-// Package config loads and validates the Octomaton server configuration
-// (by default /etc/octomaton/config.yaml) and the GitHub App credentials it points to.
+// Package config loads and validates Octomaton's server configuration. Every setting is an
+// environment variable read by envconfig: OCTOMATON_ followed by the envconfig tags of the field and
+// of the structs holding it, e.g. OCTOMATON_GITHUB_APP_ID. The telemetry package reads the logging
+// settings, OCTOMATON_LOG_LEVEL and OCTOMATON_LOG_FORMAT.
 package config
 
 import (
-	"bytes"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"go.yaml.in/yaml/v3"
+	"github.com/kelseyhightower/envconfig"
 )
 
-// DefaultPath is where the server configuration is read from unless overridden.
-const DefaultPath = "/etc/octomaton/config.yaml"
+// Prefix is the envconfig prefix of every variable.
+const Prefix = "octomaton"
 
-// DefaultFreePVCsAfter is how long after a PipelineRun finishes its PVCs are deleted.
-const DefaultFreePVCsAfter = time.Hour
+// serviceAccountNamespaceFile holds the pod's namespace when OCTOMATON_POD_NAMESPACE is unset.
+const serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 // Config is the server configuration.
 type Config struct {
-	GitHub     GitHub     `yaml:"github"`
-	Tekton     Tekton     `yaml:"tekton"`
-	Namespaces Namespaces `yaml:"namespaces"`
-	Relay      Relay      `yaml:"relay"`
-	Retention  Retention  `yaml:"retention"`
+	HTTP       HTTP       `envconfig:"HTTP"`
+	Webhook    Webhook    `envconfig:"WEBHOOK"`
+	GitHub     GitHub     `envconfig:"GITHUB"`
+	Tekton     Tekton     `envconfig:"TEKTON"`
+	Namespaces Namespaces `envconfig:"NAMESPACE"`
+	Relay      Relay      `envconfig:"RELAY"`
+	Retention  Retention  `envconfig:"RETENTION"`
+	Pod        Pod        `envconfig:"POD"`
 }
 
-// Relay forwards verified push and pull_request deliveries to other webhook receivers.
-type Relay struct {
-	URLs []string `yaml:"urls"`
+// HTTP configures the server for the webhook, the probes and the metrics.
+type HTTP struct {
+	Address string `envconfig:"ADDRESS" default:":8080"`
 }
 
-// Retention controls what Octomaton cleans up after runs finish.
-type Retention struct {
-	// FreePVCsAfter is how long after a PipelineRun finished the PVCs it owns are
-	// deleted (default 1h). Pods are kept: the Tekton Dashboard reads logs from them.
-	FreePVCsAfter Duration `yaml:"freePVCsAfter"`
+// Webhook sizes the pool that processes accepted webhook deliveries.
+type Webhook struct {
+	// Workers is the number of deliveries processed at once.
+	Workers int `envconfig:"WORKERS" default:"8"`
+	// QueueSize is the number of accepted deliveries that may wait for a worker.
+	QueueSize int `envconfig:"QUEUE_SIZE" default:"256"`
 }
 
-// Duration is a time.Duration written as a Go duration string ("90m", "1h").
-type Duration struct {
-	time.Duration
-}
-
-// UnmarshalYAML parses a duration string.
-func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
-	var s string
-	if err := node.Decode(&s); err != nil {
-		return err
-	}
-	parsed, err := time.ParseDuration(s)
-	if err != nil {
-		return fmt.Errorf("line %d: %q is not a duration (examples: 30m, 1h)", node.Line, s)
-	}
-	d.Duration = parsed
-	return nil
-}
-
-// GitHub configures the GitHub App.
+// GitHub holds the GitHub App's credentials and the owners it serves.
 type GitHub struct {
-	AppIDFile         string   `yaml:"appIDFile"`
-	PrivateKeyFile    string   `yaml:"privateKeyFile"`
-	WebhookSecretFile string   `yaml:"webhookSecretFile"`
-	AllowedOwners     []string `yaml:"allowedOwners"`
+	AppID int64 `envconfig:"APP_ID" required:"true"`
+	// PrivateKey is the App's PEM-encoded RSA private key (PKCS#1, as GitHub issues it, or PKCS#8).
+	PrivateKey    string `envconfig:"PRIVATE_KEY" required:"true"`
+	WebhookSecret string `envconfig:"WEBHOOK_SECRET" required:"true"`
+	// AllowedOwners are the users and organizations whose installations are served; empty serves
+	// every installation.
+	AllowedOwners []string `envconfig:"ALLOWED_OWNERS"`
+
+	key *rsa.PrivateKey
 }
 
 // Tekton configures links to Tekton.
 type Tekton struct {
-	DashboardURL string `yaml:"dashboardURL"`
+	// DashboardURL is where check runs link to their PipelineRuns.
+	DashboardURL string `envconfig:"DASHBOARD_URL"`
 }
 
-// Credentials are the GitHub App secrets read from the files named in GitHub.
-type Credentials struct {
-	AppID         int64
-	PrivateKey    *rsa.PrivateKey
-	WebhookSecret []byte
+// Relay forwards verified push and pull_request deliveries to other webhook receivers.
+type Relay struct {
+	URLs []string `envconfig:"URLS"`
 }
 
-// Error lists every problem found in a configuration.
+// Retention controls what Octomaton cleans up after runs finish.
+type Retention struct {
+	// FreePVCsAfter is how long after a PipelineRun finished the PVCs it owns are deleted. Pods are
+	// kept: the Tekton Dashboard reads logs from them.
+	FreePVCsAfter time.Duration `envconfig:"FREE_PVCS_AFTER" default:"1h"`
+}
+
+// Pod identifies this replica in the leader election; set it from the downward API.
+type Pod struct {
+	// Name defaults to the host name.
+	Name string `envconfig:"NAME"`
+	// Namespace holds the leader election Lease. It defaults to the service account's namespace.
+	Namespace string `envconfig:"NAMESPACE"`
+}
+
+// Error lists every problem found in the configuration.
 type Error struct {
-	Source   string
 	Problems []string
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("invalid configuration %s:\n  - %s", e.Source, strings.Join(e.Problems, "\n  - "))
+	return "invalid configuration:\n  - " + strings.Join(e.Problems, "\n  - ")
 }
 
-// Load reads, parses and validates the configuration at path and the credentials it references.
-func Load(path string) (*Config, *Credentials, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading configuration: %w", err)
-	}
-	cfg, err := Parse(data)
-	if err != nil {
-		var ce *Error
-		if errors.As(err, &ce) {
-			ce.Source = path
-		}
-		return nil, nil, err
-	}
-	creds, err := cfg.GitHub.LoadCredentials()
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg, creds, nil
-}
-
-// Parse decodes (rejecting unknown fields) and validates a configuration document.
-func Parse(data []byte) (*Config, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
+// Load reads the configuration from the environment and validates it.
+func Load() (*Config, error) {
 	var cfg Config
-	if err := dec.Decode(&cfg); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, &Error{Source: "(input)", Problems: []string{"configuration is empty"}}
-		}
-		return nil, &Error{Source: "(input)", Problems: []string{err.Error()}}
+	if err := envconfig.Process(Prefix, &cfg); err != nil {
+		return nil, err
 	}
-	var problems []string
-	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
-
-	if cfg.GitHub.AppIDFile == "" {
-		add("github.appIDFile is required")
+	if problems := cfg.validate(); len(problems) > 0 {
+		return nil, &Error{Problems: problems}
 	}
-	if cfg.GitHub.PrivateKeyFile == "" {
-		add("github.privateKeyFile is required")
-	}
-	if cfg.GitHub.WebhookSecretFile == "" {
-		add("github.webhookSecretFile is required")
-	}
-	for i, owner := range cfg.GitHub.AllowedOwners {
-		if strings.TrimSpace(owner) == "" || strings.Contains(owner, "/") {
-			add("github.allowedOwners[%d]: %q is not a GitHub user or organization name", i, owner)
-		}
-	}
-	if u := cfg.Tekton.DashboardURL; u != "" {
-		parsed, err := url.Parse(u)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			add("tekton.dashboardURL: %q is not an absolute http(s) URL", u)
-		}
-		cfg.Tekton.DashboardURL = strings.TrimRight(u, "/")
-	}
-	problems = append(problems, cfg.Namespaces.init()...)
-	for i, u := range cfg.Relay.URLs {
-		parsed, err := url.Parse(u)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			add("relay.urls[%d]: %q is not an absolute http(s) URL", i, u)
-		}
-	}
-	switch {
-	case cfg.Retention.FreePVCsAfter.Duration < 0:
-		add("retention.freePVCsAfter must not be negative")
-	case cfg.Retention.FreePVCsAfter.Duration == 0:
-		cfg.Retention.FreePVCsAfter.Duration = DefaultFreePVCsAfter
-	}
-	if len(problems) > 0 {
-		return nil, &Error{Source: "(input)", Problems: problems}
-	}
+	cfg.Pod.setDefaults()
 	return &cfg, nil
 }
 
+func (c *Config) validate() []string {
+	var problems []string
+	if c.Webhook.Workers < 1 || c.Webhook.QueueSize < 1 {
+		problems = append(problems, "OCTOMATON_WEBHOOK_WORKERS and OCTOMATON_WEBHOOK_QUEUE_SIZE must be positive")
+	}
+	problems = append(problems, c.GitHub.validate()...)
+	if u := c.Tekton.DashboardURL; u != "" {
+		problems = append(problems, checkURL("OCTOMATON_TEKTON_DASHBOARD_URL", u)...)
+		c.Tekton.DashboardURL = strings.TrimRight(u, "/")
+	}
+	problems = append(problems, c.Namespaces.init()...)
+	for _, u := range c.Relay.URLs {
+		problems = append(problems, checkURL("OCTOMATON_RELAY_URLS", u)...)
+	}
+	if c.Retention.FreePVCsAfter <= 0 {
+		problems = append(problems, "OCTOMATON_RETENTION_FREE_PVCS_AFTER must be positive")
+	}
+	return problems
+}
+
+func checkURL(name, u string) []string {
+	parsed, err := url.Parse(u)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return []string{fmt.Sprintf("%s: %q is not an absolute http(s) URL", name, u)}
+	}
+	return nil
+}
+
+func (g *GitHub) validate() []string {
+	var problems []string
+	if g.AppID <= 0 {
+		problems = append(problems, "OCTOMATON_GITHUB_APP_ID must be a positive GitHub App ID")
+	}
+	if key, err := ParsePrivateKey([]byte(g.PrivateKey)); err != nil {
+		problems = append(problems, "OCTOMATON_GITHUB_PRIVATE_KEY: "+err.Error())
+	} else {
+		g.key = key
+	}
+	if g.WebhookSecret = strings.TrimSpace(g.WebhookSecret); g.WebhookSecret == "" {
+		problems = append(problems, "OCTOMATON_GITHUB_WEBHOOK_SECRET is empty")
+	}
+	for _, owner := range g.AllowedOwners {
+		if strings.TrimSpace(owner) == "" || strings.Contains(owner, "/") {
+			problems = append(problems, fmt.Sprintf("OCTOMATON_GITHUB_ALLOWED_OWNERS: %q is not a GitHub user or organization name", owner))
+		}
+	}
+	return problems
+}
+
+// Key returns the App's parsed private key.
+func (g *GitHub) Key() *rsa.PrivateKey {
+	return g.key
+}
+
 // OwnerAllowed reports whether events from repositories owned by owner are processed.
-func (g GitHub) OwnerAllowed(owner string) bool {
+func (g *GitHub) OwnerAllowed(owner string) bool {
 	if len(g.AllowedOwners) == 0 {
 		return true
 	}
@@ -183,43 +177,21 @@ func (g GitHub) OwnerAllowed(owner string) bool {
 	return false
 }
 
-// LoadCredentials reads and validates the App ID, private key and webhook secret files.
-func (g GitHub) LoadCredentials() (*Credentials, error) {
-	var problems []string
-	creds := &Credentials{}
-
-	if raw, err := os.ReadFile(g.AppIDFile); err != nil {
-		problems = append(problems, fmt.Sprintf("github.appIDFile: %v", err))
-	} else if id, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64); err != nil || id <= 0 {
-		problems = append(problems, fmt.Sprintf("github.appIDFile: %s does not contain a positive GitHub App ID", g.AppIDFile))
-	} else {
-		creds.AppID = id
+func (p *Pod) setDefaults() {
+	if p.Name == "" {
+		p.Name, _ = os.Hostname()
 	}
-
-	if raw, err := os.ReadFile(g.PrivateKeyFile); err != nil {
-		problems = append(problems, fmt.Sprintf("github.privateKeyFile: %v", err))
-	} else if key, err := ParsePrivateKey(raw); err != nil {
-		problems = append(problems, fmt.Sprintf("github.privateKeyFile: %s: %v", g.PrivateKeyFile, err))
-	} else {
-		creds.PrivateKey = key
+	if p.Namespace == "" {
+		if data, err := os.ReadFile(serviceAccountNamespaceFile); err == nil {
+			p.Namespace = strings.TrimSpace(string(data))
+		}
 	}
-
-	if raw, err := os.ReadFile(g.WebhookSecretFile); err != nil {
-		problems = append(problems, fmt.Sprintf("github.webhookSecretFile: %v", err))
-	} else if secret := bytes.TrimSpace(raw); len(secret) == 0 {
-		problems = append(problems, fmt.Sprintf("github.webhookSecretFile: %s is empty", g.WebhookSecretFile))
-	} else {
-		creds.WebhookSecret = secret
+	if p.Namespace == "" {
+		p.Namespace = "octomaton"
 	}
-
-	if len(problems) > 0 {
-		return nil, &Error{Source: "(GitHub credentials)", Problems: problems}
-	}
-	return creds, nil
 }
 
-// ParsePrivateKey parses a PEM-encoded RSA private key (PKCS#1, as GitHub issues
-// them, or PKCS#8).
+// ParsePrivateKey parses a PEM-encoded RSA private key (PKCS#1, as GitHub issues them, or PKCS#8).
 func ParsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {

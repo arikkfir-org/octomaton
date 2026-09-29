@@ -18,8 +18,14 @@
 
 - Go 1.27; module `octomaton.dev` (a vanity path: `https://octomaton.dev` serves the `go-import` tag pointing at
   `github.com/arikkfir-org/octomaton`).
-- Layout: `cmd/octomaton` (serve, lint, version); `internal/` packages `config`, `repoconfig`, `tmpl`, `githubapp`
-  (+ `githubtest` fake API), `webhook`, `trigger`, `tekton`, `reporter`, `checkrun`, `relay`, `lint`, `metrics`, `e2e`.
+- Layout: `cmd/octomaton` (the server's launcher), `cmd/octomaton-lint`; `internal/` packages `config`, `telemetry`,
+  `http`, `leader`, `kube`, `buildinfo`, `repoconfig`, `tmpl`, `githubapp` (+ `githubtest` fake API), `webhook`,
+  `trigger`, `tekton`, `reporter`, `checkrun`, `relay`, `lint`, `metrics` (+ `metricstest`), `e2e`.
+- `cmd/octomaton` only coordinates startup and shutdown: signals, telemetry, configuration, wiring. Logic goes into an
+  `internal/` package; keep functions short.
+- The server is configured by environment variables only, read with `github.com/kelseyhightower/envconfig`
+  (`internal/config`; `internal/telemetry` reads `OCTOMATON_LOG_*`): no flags, no configuration files. Configuration
+  errors never print secret values.
 - Tekton objects are `unstructured.Unstructured` with the dynamic client; do not import `github.com/tektoncd/pipeline`.
 - `.octomaton.yaml` is parsed with `go.yaml.in/yaml/v3` (YAML 1.2, `KnownFields(true)`); never with a YAML 1.1 parser
   (an unquoted `on` would become `true`). PipelineRun files use the Kubernetes YAML reader.
@@ -27,7 +33,9 @@
   `reporter.Runs`) implemented by `tekton.Client`. Keep packages small and dependency-injected.
 - Runs are created held, then check run, task checks, token Secret, then released per concurrency policy; any failure
   in between cancels the run and fails its check. Keep every step idempotent (Resume replays them).
-- Logs: `log/slog` JSON, messages start with a capital letter, errors logged once where handled.
+- Logs: `log/slog`, set up by `internal/telemetry` (JSON with the fields Cloud Logging reads); messages start with a
+  capital letter, errors logged once where handled. Metrics go through OpenTelemetry (`internal/metrics`) and are
+  served for Prometheus; traces and logs are exported only when the standard `OTEL_*_EXPORTER` variables ask.
 
 ## Tests
 
@@ -38,5 +46,5 @@
 ## Commands
 
 - `make test`, `make lint`, `make build`, `make image` (ko; needs registry credentials).
-- `go run ./cmd/octomaton lint --render .` prints the PipelineRuns as Octomaton would create them.
+- `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

@@ -205,7 +205,7 @@ func (r *Reporter) processNext(ctx context.Context, queue workqueue.TypedRateLim
 		r.Logger.Error("Reporting a PipelineRun failed; giving up until it changes", "key", key, "error", err)
 		queue.Forget(key)
 	}
-	r.Metrics.ReconcileDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
+	r.Metrics.ReconcileDone(ctx, result, time.Since(start))
 	return true
 }
 
@@ -319,7 +319,7 @@ func (r *Reporter) markInProgress(ctx context.Context, run *unstructured.Unstruc
 		upd.StartedAt = &github.Timestamp{Time: st.StartTime.Time}
 	}
 	if _, err := r.GitHub.Installation(ref.installationID).UpdateCheckRun(ctx, ref.owner, ref.repo, checkID, upd); err != nil {
-		r.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+		r.Metrics.CheckRunError(ctx, "update")
 		return err
 	}
 	return r.annotate(ctx, run, tekton.AnnotationReported, tekton.ReportedInProgress)
@@ -373,7 +373,7 @@ func (r *Reporter) progress(ctx context.Context, run *unstructured.Unstructured,
 		},
 	}
 	if _, err := r.GitHub.Installation(ref.installationID).UpdateCheckRun(ctx, ref.owner, ref.repo, checkID, upd); err != nil {
-		r.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+		r.Metrics.CheckRunError(ctx, "update")
 		return err
 	}
 	return r.annotate(ctx, run, tekton.AnnotationProgress, key)
@@ -426,7 +426,7 @@ func (r *Reporter) finish(ctx context.Context, ns, name string) error {
 			upd.StartedAt = &github.Timestamp{Time: st.StartTime.Time}
 		}
 		if _, err := r.GitHub.Installation(ref.installationID).UpdateCheckRun(ctx, ref.owner, ref.repo, ref.checkID, upd); err != nil {
-			r.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+			r.Metrics.CheckRunError(ctx, "update")
 			return err
 		}
 		if r.ReleaseNext != nil {
@@ -503,7 +503,7 @@ func (r *Reporter) ReportDeleted(ctx context.Context, run *unstructured.Unstruct
 		},
 	}
 	if _, err := r.GitHub.Installation(ref.installationID).UpdateCheckRun(ctx, ref.owner, ref.repo, ref.checkID, upd); err != nil {
-		r.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+		r.Metrics.CheckRunError(ctx, "update")
 		return err
 	}
 	r.Logger.Info("Reported deleted PipelineRun as cancelled", "namespace", ns, "name", name)

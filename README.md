@@ -184,7 +184,7 @@ pipelines:
       slot: "{{ .Schedule.Slot }}"
 ```
 
-Validate a configuration and the PipelineRun files it references with `octomaton lint [--render] PATH...` (PATH is
+Validate a configuration and the PipelineRun files it references with `octomaton-lint [-render] PATH...` (PATH is
 the file or its directory); it renders every param for every triggering event with placeholder values, so a template
 that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
 
@@ -206,7 +206,8 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 
 ## Security
 
-- Only webhooks with a valid signature are processed; only installations on `github.allowedOwners` are served.
+- Only webhooks with a valid signature are processed; only installations on `OCTOMATON_GITHUB_ALLOWED_OWNERS` are
+  served.
 - Pull requests run automatically when their author is an owner, member or collaborator, or their branch is in the
   repository itself. Other pull requests need **Approve and run** (or a re-run) from someone with write access, for
   every new commit.
@@ -217,40 +218,34 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 
 ## Server configuration
 
-Read from `/etc/octomaton/config.yaml` (flag `--config`, env `OCTOMATON_CONFIG`); unknown fields are errors and the
-process exits with every problem listed.
+The server takes no arguments: environment variables configure it, and it exits at startup listing every problem.
 
-```yaml
-github:
-  appIDFile: /etc/octomaton/github/app-id
-  privateKeyFile: /etc/octomaton/github/private-key
-  webhookSecretFile: /etc/octomaton/github/webhook-secret
-  allowedOwners: [arikkfir-org]        # installations on other owners are ignored
-tekton:
-  dashboardURL: https://tekton.dev.kfirs.com
-namespaces:
-  template: "ci-{{ .Repository.Name }}" # rendered, then sanitized to a DNS label
-  overrides:
-    arikkfir-org/.github: ci-github
-relay:                                  # verified push and pull_request deliveries are forwarded here
-  urls: [http://argocd-server.argocd.svc.cluster.local/api/webhook]
-retention:
-  freePVCsAfter: 1h                     # PVCs of finished runs are deleted after this; runs and pods stay
-```
-
-- `namespaces.template` is rendered over `.Repository`, then sanitized: lowercased, leading dots stripped, every run of
-  characters outside `[a-z0-9-]` replaced by `-`, leading and trailing `-` trimmed, cut to 63 characters. Overrides
-  (`owner/name`, case-insensitive) win. A namespace that does not exist fails the check with "repository not onboarded".
-- `relay.urls` receive the original body and GitHub headers (signatures included), asynchronously, with a 10 s timeout.
-
-| Flag / environment | Default | Meaning |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `--config`, `OCTOMATON_CONFIG` | `/etc/octomaton/config.yaml` | server configuration |
-| `--listen` | `:8080` | address of `/github/hooks`, `/healthz`, `/readyz`, `/metrics` |
-| `--workers`, `--queue-size` | `8`, `256` | webhook worker pool |
-| `OCTOMATON_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (JSON logs on stdout) |
-| `POD_NAMESPACE`, `POD_NAME` | service account namespace, hostname | Lease `octomaton` namespace and holder identity |
+| `OCTOMATON_GITHUB_APP_ID` | required | the GitHub App's ID |
+| `OCTOMATON_GITHUB_PRIVATE_KEY` | required | the App's PEM private key (PKCS#1 or PKCS#8) |
+| `OCTOMATON_GITHUB_WEBHOOK_SECRET` | required | the App's webhook secret |
+| `OCTOMATON_GITHUB_ALLOWED_OWNERS` | every owner | users and organizations whose installations are served, comma-separated |
+| `OCTOMATON_TEKTON_DASHBOARD_URL` | none | Tekton Dashboard base URL that check runs link to |
+| `OCTOMATON_NAMESPACE_TEMPLATE` | `ci-{{ .Repository.Name }}` | namespace of a repository's runs, rendered then sanitized |
+| `OCTOMATON_NAMESPACE_OVERRIDES` | none | `owner/name:namespace` pairs, comma-separated; they win over the template |
+| `OCTOMATON_RELAY_URLS` | none | URLs that receive verified `push` and `pull_request` deliveries, comma-separated |
+| `OCTOMATON_RETENTION_FREE_PVCS_AFTER` | `1h` | delay after which the PVCs of finished runs are deleted; runs and pods stay |
+| `OCTOMATON_HTTP_ADDRESS` | `:8080` | address of `/github/hooks`, `/healthz`, `/readyz` and `/metrics` |
+| `OCTOMATON_WEBHOOK_WORKERS`, `OCTOMATON_WEBHOOK_QUEUE_SIZE` | `8`, `256` | webhook worker pool |
+| `OCTOMATON_POD_NAME`, `OCTOMATON_POD_NAMESPACE` | host name, service account namespace | holder identity and namespace of the Lease `octomaton` |
+| `OCTOMATON_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `OCTOMATON_LOG_FORMAT` | `json` | `json` (the fields Cloud Logging reads) or `text`, on stdout |
+| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER` | none | `otlp` (with the `OTEL_EXPORTER_OTLP_*` variables) or `console` to export traces and logs |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `octomaton` | the resource of exported telemetry, e.g. `k8s.pod.name=…` |
 | `KUBECONFIG` | in-cluster config | used when not running in a cluster |
+
+- `OCTOMATON_NAMESPACE_TEMPLATE` is rendered over `.Repository`, then sanitized: lowercased, leading dots stripped,
+  every run of characters outside `[a-z0-9-]` replaced by `-`, leading and trailing `-` trimmed, cut to 63 characters.
+  Overrides (`owner/name`, case-insensitive) win. A namespace that does not exist fails the check with "repository not
+  onboarded".
+- `OCTOMATON_RELAY_URLS` receive the original body and GitHub headers (signatures included), asynchronously, with a
+  10 s timeout.
 
 ## GitHub App
 
@@ -264,10 +259,11 @@ homepage `https://octomaton.dev`, webhook URL `https://octomaton.dev/github/hook
 ## Deployment
 
 Octomaton is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
-`octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap
-`octomaton` (key `config.yaml`) at `/etc/octomaton/config.yaml`, Secret `octomaton-github` (keys `app-id`,
-`private-key`, `webhook-secret`) at `/etc/octomaton/github/`. Every replica serves webhooks; the replica holding the
-Lease `octomaton` in its namespace runs the reporter, scheduler, token refresher and PVC retention.
+`octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
+(the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
+`webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
+Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace runs the reporter, scheduler,
+token refresher and PVC retention.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced); `GET /metrics`.
@@ -283,7 +279,8 @@ the leader, the PipelineRun informer synced); `GET /metrics`.
 **Metrics:** `octomaton_webhooks_received_total{event}`, `octomaton_webhooks_rejected_total{event,reason}`,
 `octomaton_runs_created_total{result}` (`created`, `existing`, `skipped`, `action_required`, `failed`, `error`),
 `octomaton_github_checkrun_errors_total{operation}`, `octomaton_reconcile_duration_seconds{result}`,
-`octomaton_webhook_queue_depth`, `octomaton_leader`, plus Go and process collectors.
+`octomaton_webhook_queue_depth`, `octomaton_leader`; OpenTelemetry's HTTP server metrics for `/github/hooks`
+(`http_server_request_duration_seconds{http_route,http_response_status_code,…}`); Go and process collectors.
 
 **Bookkeeping:** objects Octomaton creates carry the label `app.kubernetes.io/managed-by: octomaton` and labels and
 annotations under `octomaton.dev/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
@@ -293,31 +290,33 @@ configuration.
 ## Development
 
 The module path is `octomaton.dev`: `https://octomaton.dev` answers `go get` with a `go-import` tag pointing at this
-repository, so the CLI installs with:
+repository, so the linter installs with:
 
 ```bash
-go install octomaton.dev/cmd/octomaton@latest
+go install octomaton.dev/cmd/octomaton-lint@latest
 ```
 
 Requirements: Go 1.27, and [ko](https://ko.build) for images.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
-make lint      # octomaton lint . (this repository's own .octomaton.yaml)
-make build     # bin/octomaton
+make lint      # octomaton-lint . (this repository's own .octomaton.yaml)
+make build     # bin/octomaton and bin/octomaton-lint
 ```
 
-Run locally against a cluster (the current `KUBECONFIG` context) with a configuration pointing at local copies of the
-App ID, private key and webhook secret:
+Run locally against a cluster (the current `KUBECONFIG` context):
 
 ```bash
-go run ./cmd/octomaton --config ./config.local.yaml --listen :8080
+export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pem)" OCTOMATON_GITHUB_WEBHOOK_SECRET=…
+OCTOMATON_LOG_FORMAT=text go run ./cmd/octomaton
 ```
 
 Tests use an in-process fake of the GitHub API (`internal/githubapp/githubtest`) and client-go's fake clients;
 `internal/e2e` drives signed webhooks through the whole service.
 
-Layout: `cmd/octomaton` (serve, lint, version); `internal/config` (server configuration, namespaces),
+Layout: `cmd/octomaton` (the server: startup and shutdown), `cmd/octomaton-lint`; `internal/config` (server
+configuration, namespaces), `internal/telemetry` (logs and OpenTelemetry), `internal/http` (HTTP server, readiness),
+`internal/leader` (Lease election), `internal/kube` (API clients), `internal/buildinfo` (version),
 `internal/repoconfig` (`.octomaton.yaml` schema and matching), `internal/tmpl` (template context),
 `internal/githubapp` (App auth and GitHub API), `internal/webhook` (signatures, dedupe, worker pool),
 `internal/trigger` (events → held runs, concurrency, re-runs, comments, schedules, maintenance), `internal/tekton`

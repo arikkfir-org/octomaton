@@ -28,7 +28,7 @@ import (
 	"octomaton.dev/internal/config"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/metrics/metricstest"
 	"octomaton.dev/internal/reporter"
 	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/trigger"
@@ -124,26 +124,22 @@ func setup(t *testing.T) *env {
 		tekton.TaskRuns:     "TaskRunList",
 	})
 	runs := &tekton.Client{Dynamic: dyn, Kube: kube}
-	cfg, err := config.Parse([]byte(`
-github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, allowedOwners: [arikkfir-org]}
-tekton: {dashboardURL: "https://tekton.dev.kfirs.com"}
-namespaces:
-  template: "ci-{{ .Repository.Name }}"
-  overrides: {arikkfir-org/.github: ci-github}
-`))
+	namespaces, err := config.NewNamespaces("ci-{{ .Repository.Name }}", map[string]string{"arikkfir-org/.github": "ci-github"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	owners := &config.GitHub{AllowedOwners: []string{"arikkfir-org"}}
+	const dashboard = "https://tekton.dev.kfirs.com"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := metrics.New()
+	m := metricstest.New(t).Metrics
 	svc := &trigger.Service{
-		GitHub: app, Runs: runs, Namespaces: &cfg.Namespaces, DashboardURL: cfg.Tekton.DashboardURL,
-		OwnerAllowed: cfg.GitHub.OwnerAllowed, Logger: logger, Metrics: m,
+		GitHub: app, Runs: runs, Namespaces: namespaces, DashboardURL: dashboard,
+		OwnerAllowed: owners.OwnerAllowed, Logger: logger, Metrics: m,
 	}
 	pool := webhook.NewPool(2, 16, time.Minute, logger, m)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 	handler := &webhook.Handler{Secret: []byte(secret), Router: svc, Pool: pool, Dedupe: webhook.NewDedupe(100, time.Hour), Metrics: m, Logger: logger}
-	rep := &reporter.Reporter{Dynamic: dyn, Runs: runs, GitHub: app, DashboardURL: cfg.Tekton.DashboardURL, Logger: logger, Metrics: m, Resume: svc.Resume, ReleaseNext: svc.ReleaseNext}
+	rep := &reporter.Reporter{Dynamic: dyn, Runs: runs, GitHub: app, DashboardURL: dashboard, Logger: logger, Metrics: m, Resume: svc.Resume, ReleaseNext: svc.ReleaseNext}
 	return &env{t: t, gh: gh, dyn: dyn, runs: runs, handler: handler, reporter: rep}
 }
 

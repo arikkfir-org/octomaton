@@ -62,7 +62,7 @@ func (p *Pool) Submit(job Job) bool {
 	}
 	select {
 	case p.jobs <- job:
-		p.metrics.QueueDepth.Set(float64(len(p.jobs)))
+		p.metrics.SetQueueDepth(p.baseCtx, len(p.jobs))
 		return true
 	default:
 		return false
@@ -98,7 +98,7 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 func (p *Pool) worker() {
 	defer p.wg.Done()
 	for job := range p.jobs {
-		p.metrics.QueueDepth.Set(float64(len(p.jobs)))
+		p.metrics.SetQueueDepth(p.baseCtx, len(p.jobs))
 		p.run(job)
 	}
 }

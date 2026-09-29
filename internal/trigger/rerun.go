@@ -50,7 +50,7 @@ func (s *Service) Rerun(ctx context.Context, req RerunRequest) {
 	runs := req.CheckRuns
 	if req.SuiteID != 0 {
 		if runs, err = gh.SuiteCheckRuns(ctx, owner, repo, req.SuiteID); err != nil {
-			s.Metrics.CheckRunErrors.WithLabelValues("list").Inc()
+			s.Metrics.CheckRunError(ctx, "list")
 			log.Error("Could not list the check suite's check runs", "suite", req.SuiteID, "error", err)
 			return
 		}
@@ -114,7 +114,7 @@ func (s *Service) checkRunContext(ctx context.Context, gh githubapp.Client, req 
 	if !found && err == nil {
 		full, getErr := gh.GetCheckRun(ctx, req.Repository.Owner, req.Repository.Name, cr.GetID())
 		if getErr != nil {
-			s.Metrics.CheckRunErrors.WithLabelValues("get").Inc()
+			s.Metrics.CheckRunError(ctx, "get")
 			log.Error("Could not fetch check run", "error", getErr)
 			return checkrun.Context{}, false
 		}

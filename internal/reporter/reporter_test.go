@@ -20,7 +20,7 @@ import (
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/metrics/metricstest"
 	"octomaton.dev/internal/tekton"
 )
 
@@ -63,7 +63,7 @@ func newHarness(t *testing.T) *harness {
 		GitHub:       app,
 		DashboardURL: "https://tekton.example",
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Metrics:      metrics.New(),
+		Metrics:      metricstest.New(t).Metrics,
 		Now:          func() time.Time { return h.now },
 		Resume: func(_ context.Context, run *unstructured.Unstructured) error {
 			h.mu.Lock()

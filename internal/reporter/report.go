@@ -375,7 +375,7 @@ func (r *Reporter) taskChecks(ctx context.Context, run *unstructured.Unstructure
 			continue
 		}
 		if _, err := gh.UpdateCheckRun(ctx, ref.owner, ref.repo, id, upd); err != nil {
-			r.Metrics.CheckRunErrors.WithLabelValues("update").Inc()
+			r.Metrics.CheckRunError(ctx, "update")
 			errs = append(errs, err)
 			continue
 		}

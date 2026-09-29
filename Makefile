@@ -15,11 +15,11 @@ vet:
 
 ## lint: validate this repository's own .octomaton.yaml and PipelineRuns
 lint:
-	$(GO) run ./cmd/octomaton lint .
+	$(GO) run ./cmd/octomaton-lint .
 
-## build: a static binary in bin/
+## build: static binaries in bin/: octomaton (the server) and octomaton-lint
 build:
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/octomaton ./cmd/octomaton
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X octomaton.dev/internal/buildinfo.version=$(VERSION)" -o bin/ ./cmd/...
 
 ## image: build and push the image with ko (needs registry credentials)
 image:

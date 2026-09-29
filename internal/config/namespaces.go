@@ -12,38 +12,48 @@ import (
 // Namespaces maps repositories to the Kubernetes namespaces their PipelineRuns run in.
 type Namespaces struct {
 	// Template is a Go template over .Repository whose output is sanitized into a DNS label.
-	Template string `yaml:"template"`
-	// Overrides maps "owner/name" to a namespace, bypassing the template.
-	Overrides map[string]string `yaml:"overrides"`
+	Template string `envconfig:"TEMPLATE" default:"ci-{{ .Repository.Name }}"`
+	// Overrides maps "owner/name" to a namespace, bypassing the template; the variable lists them
+	// as "owner/name:namespace" pairs separated by commas.
+	Overrides map[string]string `envconfig:"OVERRIDES"`
 
 	compiled  *template.Template
 	overrides map[string]string
 }
 
+// NewNamespaces compiles and validates a namespace template and its overrides.
+func NewNamespaces(template string, overrides map[string]string) (*Namespaces, error) {
+	n := &Namespaces{Template: template, Overrides: overrides}
+	if problems := n.init(); len(problems) > 0 {
+		return nil, &Error{Problems: problems}
+	}
+	return n, nil
+}
+
 func (n *Namespaces) init() []string {
 	var problems []string
 	if strings.TrimSpace(n.Template) == "" {
-		problems = append(problems, "namespaces.template is required")
-	} else if t, err := tmpl.Parse("namespaces.template", n.Template); err != nil {
-		problems = append(problems, fmt.Sprintf("namespaces.template: %v", err))
+		problems = append(problems, "OCTOMATON_NAMESPACE_TEMPLATE is required")
+	} else if t, err := tmpl.Parse("OCTOMATON_NAMESPACE_TEMPLATE", n.Template); err != nil {
+		problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: %v", err))
 	} else {
 		n.compiled = t
 		sample := tmpl.Sample().Repository
 		if out, err := tmpl.Execute(t, tmpl.NamespaceContext{Repository: sample}); err != nil {
-			problems = append(problems, fmt.Sprintf("namespaces.template: %v", err))
+			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: %v", err))
 		} else if SanitizeDNSLabel(out) == "" {
-			problems = append(problems, fmt.Sprintf("namespaces.template: renders %q for repository %s, which is not usable as a namespace", out, sample.FullName))
+			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: renders %q for repository %s, which is not usable as a namespace", out, sample.FullName))
 		}
 	}
 	n.overrides = make(map[string]string, len(n.Overrides))
 	for repo, ns := range n.Overrides {
 		owner, name, ok := strings.Cut(repo, "/")
 		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-			problems = append(problems, fmt.Sprintf("namespaces.overrides: key %q must be \"owner/name\"", repo))
+			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_OVERRIDES: key %q must be \"owner/name\"", repo))
 			continue
 		}
 		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
-			problems = append(problems, fmt.Sprintf("namespaces.overrides[%s]: %q is not a valid namespace name: %s", repo, ns, strings.Join(errs, "; ")))
+			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_OVERRIDES: %s: %q is not a valid namespace name: %s", repo, ns, strings.Join(errs, "; ")))
 			continue
 		}
 		n.overrides[strings.ToLower(repo)] = ns

@@ -138,7 +138,7 @@ func markdownLine(s string) string {
 
 func (s *Service) reportConfigProblem(ctx context.Context, gh githubapp.Client, c checkrun.Context, title, summary string) {
 	c.Pipeline = ""
-	s.Metrics.RunsCreated.WithLabelValues(metrics.RunFailed).Inc()
+	s.Metrics.RunCreated(ctx, metrics.RunFailed)
 	s.createCompleted(ctx, gh, c, checkrun.ConfigCheckName, "failure", title, summary, nil, "")
 }
 
@@ -153,7 +153,7 @@ func (s *Service) reportSkipped(ctx context.Context, gh githubapp.Client, c chec
 	}
 	b.WriteString("\nRe-run this check to run the pipeline anyway.")
 	s.logFor(c).Info("Pipeline skipped: no relevant changes")
-	s.Metrics.RunsCreated.WithLabelValues(metrics.RunSkipped).Inc()
+	s.Metrics.RunCreated(ctx, metrics.RunSkipped)
 	s.createCompleted(ctx, gh, c, c.Pipeline, "skipped", "Skipped: no relevant changes", b.String(), nil, "")
 }
 
@@ -170,7 +170,7 @@ func (s *Service) reportApprovalRequired(ctx context.Context, gh githubapp.Clien
 		Identifier:  ApproveAction,
 	}}
 	s.logFor(c).Info("Pipeline requires approval", "author", pr.Author, "association", pr.AuthorAssociation)
-	s.Metrics.RunsCreated.WithLabelValues(metrics.RunActionRequired).Inc()
+	s.Metrics.RunCreated(ctx, metrics.RunActionRequired)
 	s.createCompleted(ctx, gh, c, c.Pipeline, "action_required", "Approval required", summary, actions, pr.HTMLURL)
 }
 

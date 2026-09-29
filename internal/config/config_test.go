@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,165 +13,120 @@ import (
 	"octomaton.dev/internal/tmpl"
 )
 
-// referenceConfig is the server configuration from the hub reference.
-const referenceConfig = `
-github:
-  appIDFile: /etc/octomaton/github/app-id
-  privateKeyFile: /etc/octomaton/github/private-key
-  webhookSecretFile: /etc/octomaton/github/webhook-secret
-  allowedOwners: [arikkfir-org]        # installations on other owners are ignored
-tekton:
-  dashboardURL: https://tekton.dev.kfirs.com
-namespaces:
-  template: "ci-{{ .Repository.Name }}" # rendered, then sanitized to a DNS label
-  overrides:
-    arikkfir-org/.github: ci-github
-relay:                                  # verified push and pull_request deliveries are forwarded here
-  urls: [http://argocd-server.argocd.svc.cluster.local/api/webhook]
-retention:
-  freePVCsAfter: 1h                     # PVCs of finished runs are deleted after this; runs and pods stay
-`
-
-func TestParseReferenceConfig(t *testing.T) {
-	cfg, err := Parse([]byte(referenceConfig))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if cfg.GitHub.AppIDFile != "/etc/octomaton/github/app-id" || cfg.Tekton.DashboardURL != "https://tekton.dev.kfirs.com" {
-		t.Fatalf("unexpected config: %+v", cfg)
-	}
-	if !cfg.GitHub.OwnerAllowed("arikkfir-org") || !cfg.GitHub.OwnerAllowed("ARIKKFIR-ORG") || cfg.GitHub.OwnerAllowed("someone-else") {
-		t.Fatalf("OwnerAllowed does not follow allowedOwners")
-	}
-	if len(cfg.Relay.URLs) != 1 || cfg.Retention.FreePVCsAfter.Duration != time.Hour {
-		t.Fatalf("relay/retention = %+v / %+v", cfg.Relay, cfg.Retention)
-	}
-}
-
-func TestParseDefaults(t *testing.T) {
-	cfg, err := Parse([]byte(`
-github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}
-namespaces: {template: "ci-{{ .Repository.Name }}"}
-`))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if cfg.Retention.FreePVCsAfter.Duration != DefaultFreePVCsAfter {
-		t.Fatalf("freePVCsAfter default = %v", cfg.Retention.FreePVCsAfter)
-	}
-	if !cfg.GitHub.OwnerAllowed("anyone") {
-		t.Fatalf("without allowedOwners every owner is allowed")
-	}
-}
-
-func TestParseProblems(t *testing.T) {
-	base := "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: \"ci-{{ .Repository.Name }}\"}\n"
-	tests := []struct {
-		name string
-		yaml string
-		want string
-	}{
-		{name: "empty", yaml: "", want: "configuration is empty"},
-		{name: "unknown top-level field", yaml: base + "extra: 1\n", want: "field extra not found"},
-		{name: "unknown nested field", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, typo: x}\nnamespaces: {template: x}\n", want: "field typo not found"},
-		{name: "missing files", yaml: "namespaces: {template: x}\n", want: "github.appIDFile is required"},
-		{name: "missing template", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\n", want: "namespaces.template is required"},
-		{name: "bad template", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: \"{{ .Repository.Nope }}\"}\n", want: "can't evaluate field Nope"},
-		{name: "template renders nothing usable", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: \"...\"}\n", want: "not usable as a namespace"},
-		{name: "bad dashboard URL", yaml: base + "tekton: {dashboardURL: tekton.dev.kfirs.com}\n", want: "tekton.dashboardURL"},
-		{name: "bad allowed owner", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, allowedOwners: [\"a/b\"]}\nnamespaces: {template: x}\n", want: "allowedOwners[0]"},
-		{name: "bad override key", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: x, overrides: {justname: ns}}\n", want: `key "justname" must be "owner/name"`},
-		{name: "bad override namespace", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: x, overrides: {o/r: Not_Valid}}\n", want: "not a valid namespace name"},
-		{name: "bad relay URL", yaml: base + "relay: {urls: [\"argocd/api\"]}\n", want: "relay.urls[0]"},
-		{name: "bad retention duration", yaml: base + "retention: {freePVCsAfter: soon}\n", want: "is not a duration"},
-		{name: "negative retention", yaml: base + "retention: {freePVCsAfter: -1h}\n", want: "must not be negative"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse([]byte(tt.yaml))
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("error = %v, want one containing %q", err, tt.want)
-			}
-		})
-	}
-}
-
-func writeFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func pemKey(t *testing.T, pkcs8 bool) string {
+func testKeyPEM(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkcs8 {
-		der, err := x509.MarshalPKCS8PrivateKey(key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
-	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 }
 
-func TestLoad(t *testing.T) {
-	dir := t.TempDir()
-	gh := GitHub{
-		AppIDFile:         writeFile(t, dir, "app-id", "12345\n"),
-		PrivateKeyFile:    writeFile(t, dir, "private-key", pemKey(t, false)),
-		WebhookSecretFile: writeFile(t, dir, "webhook-secret", "  hook-secret\n"),
-	}
-	cfgPath := writeFile(t, dir, "config.yaml", "github:\n  appIDFile: "+gh.AppIDFile+"\n  privateKeyFile: "+gh.PrivateKeyFile+
-		"\n  webhookSecretFile: "+gh.WebhookSecretFile+"\nnamespaces:\n  template: \"ci-{{ .Repository.Name }}\"\n")
-	cfg, creds, err := Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if creds.AppID != 12345 || creds.PrivateKey == nil || string(creds.WebhookSecret) != "hook-secret" {
-		t.Fatalf("credentials = %d, %v, %q", creds.AppID, creds.PrivateKey != nil, creds.WebhookSecret)
-	}
-	if cfg.Namespaces.Template == "" {
-		t.Fatalf("namespaces not loaded")
-	}
-	if _, _, err := Load(filepath.Join(dir, "missing.yaml")); err == nil {
-		t.Fatalf("Load of a missing file must fail")
+// setReferenceEnv sets the variables of the hub reference's Deployment.
+func setReferenceEnv(t *testing.T) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"OCTOMATON_GITHUB_APP_ID":             "123",
+		"OCTOMATON_GITHUB_PRIVATE_KEY":        testKeyPEM(t),
+		"OCTOMATON_GITHUB_WEBHOOK_SECRET":     "s3cret\n",
+		"OCTOMATON_GITHUB_ALLOWED_OWNERS":     "arikkfir-org",
+		"OCTOMATON_TEKTON_DASHBOARD_URL":      "https://tekton.dev.kfirs.com/",
+		"OCTOMATON_NAMESPACE_OVERRIDES":       "arikkfir-org/.github:ci-github",
+		"OCTOMATON_RELAY_URLS":                "http://argocd-server.argocd.svc.cluster.local/api/webhook",
+		"OCTOMATON_RETENTION_FREE_PVCS_AFTER": "90m",
+		"OCTOMATON_POD_NAME":                  "octomaton-abc",
+		"OCTOMATON_POD_NAMESPACE":             "octomaton",
+	} {
+		t.Setenv(name, value)
 	}
 }
 
-func TestLoadCredentialsProblems(t *testing.T) {
-	dir := t.TempDir()
-	key := writeFile(t, dir, "key", pemKey(t, true))
+func TestLoadReference(t *testing.T) {
+	setReferenceEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GitHub.AppID != 123 || cfg.GitHub.Key() == nil || cfg.GitHub.WebhookSecret != "s3cret" {
+		t.Errorf("GitHub = %+v", cfg.GitHub)
+	}
+	if !cfg.GitHub.OwnerAllowed("Arikkfir-Org") || cfg.GitHub.OwnerAllowed("someone-else") {
+		t.Error("OwnerAllowed does not follow OCTOMATON_GITHUB_ALLOWED_OWNERS")
+	}
+	if cfg.Tekton.DashboardURL != "https://tekton.dev.kfirs.com" {
+		t.Errorf("DashboardURL = %q (trailing slash kept?)", cfg.Tekton.DashboardURL)
+	}
+	if len(cfg.Relay.URLs) != 1 || cfg.Retention.FreePVCsAfter != 90*time.Minute {
+		t.Errorf("Relay = %v, Retention = %v", cfg.Relay, cfg.Retention)
+	}
+	if cfg.Pod != (Pod{Name: "octomaton-abc", Namespace: "octomaton"}) {
+		t.Errorf("Pod = %+v", cfg.Pod)
+	}
+}
+
+func TestLoadDefaults(t *testing.T) {
+	setReferenceEnv(t)
+	for _, name := range []string{"OCTOMATON_GITHUB_ALLOWED_OWNERS", "OCTOMATON_RETENTION_FREE_PVCS_AFTER", "OCTOMATON_POD_NAME", "OCTOMATON_POD_NAMESPACE"} {
+		t.Setenv(name, "") // restores the variable after the test
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.HTTP.Address != ":8080" {
+		t.Errorf("HTTP = %+v", cfg.HTTP)
+	}
+	if cfg.Webhook.Workers != 8 || cfg.Webhook.QueueSize != 256 || cfg.Namespaces.Template != "ci-{{ .Repository.Name }}" {
+		t.Errorf("Webhook = %+v, Namespaces.Template = %q", cfg.Webhook, cfg.Namespaces.Template)
+	}
+	if !cfg.GitHub.OwnerAllowed("anyone") {
+		t.Error("an empty OCTOMATON_GITHUB_ALLOWED_OWNERS serves every owner")
+	}
+	if cfg.Pod.Name == "" || cfg.Pod.Namespace == "" {
+		t.Errorf("Pod defaults = %+v", cfg.Pod)
+	}
+}
+
+func TestLoadProblems(t *testing.T) {
 	tests := []struct {
-		name string
-		gh   GitHub
-		want string
+		name, variable, value, want string
 	}{
-		{name: "PKCS#8 key is accepted", gh: GitHub{AppIDFile: writeFile(t, dir, "id1", "1"), PrivateKeyFile: key, WebhookSecretFile: writeFile(t, dir, "s1", "x")}},
-		{name: "app ID not a number", gh: GitHub{AppIDFile: writeFile(t, dir, "id2", "abc"), PrivateKeyFile: key, WebhookSecretFile: writeFile(t, dir, "s2", "x")}, want: "positive GitHub App ID"},
-		{name: "missing key file", gh: GitHub{AppIDFile: writeFile(t, dir, "id3", "1"), PrivateKeyFile: filepath.Join(dir, "nope"), WebhookSecretFile: writeFile(t, dir, "s3", "x")}, want: "github.privateKeyFile"},
-		{name: "not a PEM key", gh: GitHub{AppIDFile: writeFile(t, dir, "id4", "1"), PrivateKeyFile: writeFile(t, dir, "bad", "hello"), WebhookSecretFile: writeFile(t, dir, "s4", "x")}, want: "no PEM data"},
-		{name: "empty webhook secret", gh: GitHub{AppIDFile: writeFile(t, dir, "id5", "1"), PrivateKeyFile: key, WebhookSecretFile: writeFile(t, dir, "s5", "\n")}, want: "is empty"},
+		{name: "missing app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "", want: "OCTOMATON_GITHUB_APP_ID"},
+		{name: "non-positive app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "0", want: "positive GitHub App ID"},
+		{name: "bad private key", variable: "OCTOMATON_GITHUB_PRIVATE_KEY", value: "not a key", want: "OCTOMATON_GITHUB_PRIVATE_KEY: no PEM data"},
+		{name: "blank webhook secret", variable: "OCTOMATON_GITHUB_WEBHOOK_SECRET", value: " \n", want: "OCTOMATON_GITHUB_WEBHOOK_SECRET is empty"},
+		{name: "repository as owner", variable: "OCTOMATON_GITHUB_ALLOWED_OWNERS", value: "arikkfir-org/docs", want: "not a GitHub user or organization"},
+		{name: "relative dashboard URL", variable: "OCTOMATON_TEKTON_DASHBOARD_URL", value: "tekton.dev.kfirs.com", want: "OCTOMATON_TEKTON_DASHBOARD_URL"},
+		{name: "bad relay URL", variable: "OCTOMATON_RELAY_URLS", value: "ftp://x", want: "OCTOMATON_RELAY_URLS"},
+		{name: "bad template", variable: "OCTOMATON_NAMESPACE_TEMPLATE", value: "{{ .Nope", want: "OCTOMATON_NAMESPACE_TEMPLATE"},
+		{name: "unusable template", variable: "OCTOMATON_NAMESPACE_TEMPLATE", value: "___", want: "not usable as a namespace"},
+		{name: "override key without owner", variable: "OCTOMATON_NAMESPACE_OVERRIDES", value: "docs:ci-docs", want: `key "docs" must be`},
+		{name: "override with bad namespace", variable: "OCTOMATON_NAMESPACE_OVERRIDES", value: "a/b:Not_OK", want: "not a valid namespace name"},
+		{name: "zero retention", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "0s", want: "must be positive"},
+		{name: "no workers", variable: "OCTOMATON_WEBHOOK_WORKERS", value: "0", want: "must be positive"},
+		{name: "bad duration", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "soon", want: "OCTOMATON_RETENTION_FREE_PVCS_AFTER"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tt.gh.LoadCredentials()
-			if tt.want == "" {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				return
-			}
+			setReferenceEnv(t)
+			t.Setenv(tt.variable, tt.value)
+			_, err := Load()
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("error = %v, want one containing %q", err, tt.want)
+				t.Fatalf("Load() error = %v, want it to mention %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadNeverPrintsThePrivateKey(t *testing.T) {
+	setReferenceEnv(t)
+	t.Setenv("OCTOMATON_GITHUB_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nc2VjcmV0\n-----END RSA PRIVATE KEY-----\n")
+	_, err := Load()
+	if err == nil || strings.Contains(err.Error(), "c2VjcmV0") {
+		t.Fatalf("Load() error = %v", err)
 	}
 }
 
@@ -202,9 +156,9 @@ func TestSanitizeDNSLabel(t *testing.T) {
 }
 
 func TestResolveNamespace(t *testing.T) {
-	cfg, err := Parse([]byte(referenceConfig))
+	n, err := NewNamespaces("ci-{{ .Repository.Name }}", map[string]string{"arikkfir-org/.github": "ci-github"})
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("NewNamespaces: %v", err)
 	}
 	tests := []struct {
 		repo tmpl.Repository
@@ -216,7 +170,7 @@ func TestResolveNamespace(t *testing.T) {
 		{tmpl.Repository{Owner: "arikkfir-org", Name: "My_Repo", FullName: "arikkfir-org/My_Repo"}, "ci-my-repo"},
 	}
 	for _, tt := range tests {
-		got, err := cfg.Namespaces.Resolve(tt.repo)
+		got, err := n.Resolve(tt.repo)
 		if err != nil || got != tt.want {
 			t.Errorf("Resolve(%s) = %q, %v; want %q", tt.repo.FullName, got, err, tt.want)
 		}

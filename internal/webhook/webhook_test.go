@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel/attribute"
 	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/metrics/metricstest"
 )
 
 var testSecret = []byte("s3cr3t")
@@ -72,12 +73,12 @@ func TestDedupe(t *testing.T) {
 	}
 }
 
-func testMetrics() *metrics.Metrics { return metrics.New() }
+func testMetrics(t *testing.T) *metrics.Metrics { return metricstest.New(t).Metrics }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func TestPool(t *testing.T) {
-	m := testMetrics()
+	m := testMetrics(t)
 	p := NewPool(2, 10, time.Second, discardLogger(), m)
 	var ran atomic.Int32
 	for range 5 {
@@ -98,7 +99,7 @@ func TestPool(t *testing.T) {
 }
 
 func TestPoolQueueFull(t *testing.T) {
-	p := NewPool(1, 1, time.Second, discardLogger(), testMetrics())
+	p := NewPool(1, 1, time.Second, discardLogger(), testMetrics(t))
 	release := make(chan struct{})
 	started := make(chan struct{})
 	p.Submit(Job{Name: "blocker", Run: func(context.Context) { close(started); <-release }})
@@ -114,7 +115,7 @@ func TestPoolQueueFull(t *testing.T) {
 }
 
 func TestPoolShutdownTimeoutCancelsJobs(t *testing.T) {
-	p := NewPool(1, 1, time.Minute, discardLogger(), testMetrics())
+	p := NewPool(1, 1, time.Minute, discardLogger(), testMetrics(t))
 	cancelled := make(chan struct{})
 	p.Submit(Job{Name: "slow", Run: func(ctx context.Context) { <-ctx.Done(); close(cancelled) }})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -155,13 +156,13 @@ func (s *stubRelay) Forward(header http.Header, body []byte) {
 	s.forwarded = append(s.forwarded, header.Get("X-GitHub-Event")+":"+string(body))
 }
 
-func newHandler(t *testing.T, router Router, queue int) (*Handler, *stubRelay) {
+func newHandler(t *testing.T, router Router, queue int) (*Handler, *stubRelay, *metricstest.Metrics) {
 	t.Helper()
-	m := testMetrics()
-	pool := NewPool(1, queue, time.Second, discardLogger(), m)
+	m := metricstest.New(t)
+	pool := NewPool(1, queue, time.Second, discardLogger(), m.Metrics)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 	relay := &stubRelay{}
-	return &Handler{Secret: testSecret, Router: router, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m, Logger: discardLogger(), Relay: relay}, relay
+	return &Handler{Secret: testSecret, Router: router, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m.Metrics, Logger: discardLogger(), Relay: relay}, relay, m
 }
 
 func post(h http.Handler, event, delivery string, body []byte, sign bool) *httptest.ResponseRecorder {
@@ -204,7 +205,7 @@ func TestHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			router := &stubRouter{reason: tt.reason, ran: make(chan string, 1)}
-			h, relay := newHandler(t, router, 10)
+			h, relay, _ := newHandler(t, router, 10)
 			method := tt.method
 			if method == "" {
 				method = http.MethodPost
@@ -242,7 +243,7 @@ func TestHandler(t *testing.T) {
 
 func TestHandlerDedupesDeliveries(t *testing.T) {
 	router := &stubRouter{ran: make(chan string, 2)}
-	h, _ := newHandler(t, router, 10)
+	h, _, m := newHandler(t, router, 10)
 	if rec := post(h, "push", "same", []byte(pushBody), true); rec.Code != http.StatusAccepted {
 		t.Fatalf("first delivery: %d", rec.Code)
 	}
@@ -256,7 +257,7 @@ func TestHandlerDedupesDeliveries(t *testing.T) {
 		t.Fatalf("a duplicate delivery was processed")
 	case <-time.After(100 * time.Millisecond):
 	}
-	if got := testutil.ToFloat64(h.Metrics.WebhooksReceived.WithLabelValues("push")); got != 2 {
+	if got := m.Count(t, "octomaton.webhooks.received", attribute.String("event", "push")); got != 2 {
 		t.Fatalf("received metric = %v, want 2", got)
 	}
 }
@@ -267,7 +268,7 @@ func TestHandlerQueueFullAnswers503AndForgetsDelivery(t *testing.T) {
 	router := routerFunc(func(event, delivery string, payload any) (Job, string) {
 		return Job{Name: delivery, Run: func(context.Context) { started <- struct{}{}; <-block }}, ""
 	})
-	h, _ := newHandler(t, router, 1)
+	h, _, m := newHandler(t, router, 1)
 	defer close(block)
 	post(h, "push", "d1", []byte(pushBody), true) // taken by the worker
 	<-started
@@ -279,7 +280,7 @@ func TestHandlerQueueFullAnswers503AndForgetsDelivery(t *testing.T) {
 	if !h.Dedupe.Add("d3") {
 		t.Fatalf("a delivery answered with 503 must be accepted when redelivered")
 	}
-	if got := testutil.ToFloat64(h.Metrics.WebhooksRejected.WithLabelValues("push", "queue_full")); got != 1 {
+	if got := m.Count(t, "octomaton.webhooks.rejected", attribute.String("event", "push"), attribute.String("reason", "queue_full")); got != 1 {
 		t.Fatalf("rejected metric = %v, want 1", got)
 	}
 }

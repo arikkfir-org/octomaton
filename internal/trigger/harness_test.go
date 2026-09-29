@@ -24,7 +24,7 @@ import (
 	"octomaton.dev/internal/config"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/githubapp/githubtest"
-	"octomaton.dev/internal/metrics"
+	"octomaton.dev/internal/metrics/metricstest"
 	"octomaton.dev/internal/tekton"
 )
 
@@ -42,12 +42,6 @@ const (
 	baseSHA        = "9999999999999999999999999999999999999999"
 	dashboard      = "https://tekton.example"
 )
-
-const serverConfig = `
-github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, allowedOwners: [octo-org]}
-tekton: {dashboardURL: "https://tekton.example"}
-namespaces: {template: "ci-{{ .Repository.Name }}"}
-`
 
 // ciConfig runs "ci" on pull requests, pushes to main and the merge queue.
 const ciConfig = `
@@ -89,7 +83,7 @@ type harness struct {
 	dyn  *dynamicfake.FakeDynamicClient
 	runs *tekton.Client
 	svc  *Service
-	m    *metrics.Metrics
+	m    *metricstest.Metrics
 
 	mu    sync.Mutex
 	now   time.Time
@@ -125,19 +119,20 @@ func newHarness(t *testing.T) *harness {
 		return false, nil, nil
 	})
 	h.runs = &tekton.Client{Dynamic: h.dyn, Kube: h.kube}
-	cfg, err := config.Parse([]byte(serverConfig))
+	namespaces, err := config.NewNamespaces("ci-{{ .Repository.Name }}", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.m = metrics.New()
+	owners := &config.GitHub{AllowedOwners: []string{"octo-org"}}
+	h.m = metricstest.New(t)
 	h.svc = &Service{
 		GitHub:       app,
 		Runs:         h.runs,
-		Namespaces:   &cfg.Namespaces,
+		Namespaces:   namespaces,
 		DashboardURL: dashboard,
-		OwnerAllowed: cfg.GitHub.OwnerAllowed,
+		OwnerAllowed: owners.OwnerAllowed,
 		Logger:       discard(),
-		Metrics:      h.m,
+		Metrics:      h.m.Metrics,
 		Now:          h.clockNow,
 	}
 	h.gh.SetPermission(fullName, "maintainer", "write")

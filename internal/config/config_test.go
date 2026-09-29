@@ -22,7 +22,7 @@ github:
   webhookSecretFile: /etc/octomatron/github/webhook-secret
   allowedOwners: [arikkfir-org]        # installations on other owners are ignored
 tekton:
-  dashboardURL: https://tekton.kfirs.com
+  dashboardURL: https://tekton.dev.kfirs.com
 namespaces:
   template: "ci-{{ .Repository.Name }}" # rendered, then sanitized to a DNS label
   overrides:
@@ -38,7 +38,7 @@ func TestParseReferenceConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.GitHub.AppIDFile != "/etc/octomatron/github/app-id" || cfg.Tekton.DashboardURL != "https://tekton.kfirs.com" {
+	if cfg.GitHub.AppIDFile != "/etc/octomatron/github/app-id" || cfg.Tekton.DashboardURL != "https://tekton.dev.kfirs.com" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	if !cfg.GitHub.OwnerAllowed("arikkfir-org") || !cfg.GitHub.OwnerAllowed("ARIKKFIR-ORG") || cfg.GitHub.OwnerAllowed("someone-else") {
@@ -79,7 +79,7 @@ func TestParseProblems(t *testing.T) {
 		{name: "missing template", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\n", want: "namespaces.template is required"},
 		{name: "bad template", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: \"{{ .Repository.Nope }}\"}\n", want: "can't evaluate field Nope"},
 		{name: "template renders nothing usable", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: \"...\"}\n", want: "not usable as a namespace"},
-		{name: "bad dashboard URL", yaml: base + "tekton: {dashboardURL: tekton.kfirs.com}\n", want: "tekton.dashboardURL"},
+		{name: "bad dashboard URL", yaml: base + "tekton: {dashboardURL: tekton.dev.kfirs.com}\n", want: "tekton.dashboardURL"},
 		{name: "bad allowed owner", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, allowedOwners: [\"a/b\"]}\nnamespaces: {template: x}\n", want: "allowedOwners[0]"},
 		{name: "bad override key", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: x, overrides: {justname: ns}}\n", want: `key "justname" must be "owner/name"`},
 		{name: "bad override namespace", yaml: "github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c}\nnamespaces: {template: x, overrides: {o/r: Not_Valid}}\n", want: "not a valid namespace name"},

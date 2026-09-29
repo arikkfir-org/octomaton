@@ -126,7 +126,7 @@ func setup(t *testing.T) *env {
 	runs := &tekton.Client{Dynamic: dyn, Kube: kube}
 	cfg, err := config.Parse([]byte(`
 github: {appIDFile: a, privateKeyFile: b, webhookSecretFile: c, allowedOwners: [arikkfir-org]}
-tekton: {dashboardURL: "https://tekton.kfirs.com"}
+tekton: {dashboardURL: "https://tekton.dev.kfirs.com"}
 namespaces:
   template: "ci-{{ .Repository.Name }}"
   overrides: {arikkfir-org/.github: ci-github}
@@ -230,7 +230,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	checkID, _ := strconv.ParseInt(pr.GetAnnotations()[tekton.AnnotationCheckRunID], 10, 64)
 	check, _ := e.gh.CheckRun(checkID)
-	if check.Name != "ci" || check.Status != "queued" || check.DetailsURL != "https://tekton.kfirs.com/#/namespaces/ci-octomatron/pipelineruns/"+name {
+	if check.Name != "ci" || check.Status != "queued" || check.DetailsURL != "https://tekton.dev.kfirs.com/#/namespaces/ci-octomatron/pipelineruns/"+name {
 		t.Fatalf("check run = %+v", check)
 	}
 

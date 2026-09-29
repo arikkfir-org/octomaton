@@ -125,10 +125,10 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestDashboardURLs(t *testing.T) {
-	if got := DashboardURL("https://tekton.kfirs.com/", "ci-docs", "docs-ci-abc1234-1"); got != "https://tekton.kfirs.com/#/namespaces/ci-docs/pipelineruns/docs-ci-abc1234-1" {
+	if got := DashboardURL("https://tekton.dev.kfirs.com/", "ci-docs", "docs-ci-abc1234-1"); got != "https://tekton.dev.kfirs.com/#/namespaces/ci-docs/pipelineruns/docs-ci-abc1234-1" {
 		t.Fatalf("DashboardURL = %q", got)
 	}
-	if got := TaskRunURL("https://tekton.kfirs.com", "ns", "tr"); got != "https://tekton.kfirs.com/#/namespaces/ns/taskruns/tr" {
+	if got := TaskRunURL("https://tekton.dev.kfirs.com", "ns", "tr"); got != "https://tekton.dev.kfirs.com/#/namespaces/ns/taskruns/tr" {
 		t.Fatalf("TaskRunURL = %q", got)
 	}
 	if DashboardURL("", "ns", "run") != "" {

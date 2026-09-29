@@ -191,7 +191,7 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 ## Check runs
 
 - Each run reports on a check named after its pipeline (`queued` → `in_progress` → `completed`), linked to
-  `https://tekton.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`, with `external_id` `<namespace>/<name>`.
+  `https://tekton.dev.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`, with `external_id` `<namespace>/<name>`.
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;
@@ -227,7 +227,7 @@ github:
   webhookSecretFile: /etc/octomatron/github/webhook-secret
   allowedOwners: [arikkfir-org]        # installations on other owners are ignored
 tekton:
-  dashboardURL: https://tekton.kfirs.com
+  dashboardURL: https://tekton.dev.kfirs.com
 namespaces:
   template: "ci-{{ .Repository.Name }}" # rendered, then sanitized to a DNS label
   overrides:

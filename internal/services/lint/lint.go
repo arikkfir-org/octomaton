@@ -1,5 +1,6 @@
-// Package lint validates a .octomaton.yaml and the PipelineRun files it
-// references the way Octomaton would at run time, without GitHub or a cluster.
+// Package lint validates a .octomaton.yaml and the pipeline definitions it names the way Octomaton
+// would at run time, without a code host or a cluster: schema, globs, templates rendered for each
+// triggering event, and each definition rendered as the runner would create it.
 package lint
 
 import (
@@ -9,8 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"octomaton.dev/internal/adapters/tekton"
-	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/services/ci"
 	"octomaton.dev/internal/services/pipelines"
 	"sigs.k8s.io/yaml"
 )
@@ -21,6 +21,15 @@ const (
 	ExitProblems = 1
 	ExitUsage    = 2
 )
+
+// Renderer renders runs as the runner would create them, without creating anything; the Tekton
+// adapter's Renderer implements it.
+type Renderer interface {
+	// CheckDefinition reports what is wrong with a pipeline definition whatever the trigger.
+	CheckDefinition(spec ci.RunSpec) error
+	// Render returns the object the runner would create for spec's first attempt.
+	Render(spec ci.RunSpec) (map[string]any, error)
+}
 
 // Problem is one finding.
 type Problem struct {
@@ -34,20 +43,27 @@ func (p Problem) String() string { return p.File + ": " + p.Message }
 type Result struct {
 	Config   string
 	Problems []Problem
-	// Rendered holds each PipelineRun rendered with placeholder values, by
-	// "<pipeline> (<event>)", in order.
+	// Rendered holds each pipeline's run rendered with placeholder values for each of its events,
+	// in order.
 	Rendered []Rendered
 }
 
-// Rendered is one PipelineRun rendered for one event.
+// Rendered is one pipeline's run rendered for one event.
 type Rendered struct {
 	Pipeline string
 	Event    string
 	Object   map[string]any
 }
 
-// ConfigPath returns the configuration file for a path argument: the file
-// itself, or .octomaton.yaml in a directory.
+// Linter lints configurations.
+type Linter struct {
+	Renderer Renderer
+	// CheckPermissions checks githubToken permissions as the code host would.
+	CheckPermissions pipelines.PermissionCheck
+}
+
+// ConfigPath returns the configuration file for a path argument: the file itself, or
+// .octomaton.yaml in a directory.
 func ConfigPath(path string) (string, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -59,11 +75,9 @@ func ConfigPath(path string) (string, error) {
 	return path, nil
 }
 
-// Lint validates the configuration at configPath and every PipelineRun file it
-// references (resolved relative to the configuration's directory): schema,
-// globs, templates rendered with placeholder values for each triggering event,
-// the Secret-mount guard, taskChecks and the single-document PipelineRun rule.
-func Lint(configPath string) Result {
+// Lint validates the configuration at configPath and every pipeline definition it names, resolved
+// relative to the configuration's directory.
+func (l *Linter) Lint(configPath string) Result {
 	res := Result{Config: configPath}
 	add := func(file, format string, args ...any) {
 		res.Problems = append(res.Problems, Problem{File: file, Message: fmt.Sprintf(format, args...)})
@@ -73,7 +87,7 @@ func Lint(configPath string) Result {
 		add(configPath, "%v", err)
 		return res
 	}
-	cfg, err := pipelines.Parse(data, githubapp.CheckPermissions)
+	cfg, err := pipelines.Parse(data, l.CheckPermissions)
 	if err != nil {
 		var ce *pipelines.Error
 		if errors.As(err, &ce) {
@@ -89,60 +103,46 @@ func Lint(configPath string) Result {
 	for i := range cfg.Pipelines {
 		p := &cfg.Pipelines[i]
 		file := filepath.Join(root, filepath.FromSlash(p.PipelineRun))
-		raw, err := os.ReadFile(file)
+		definition, err := os.ReadFile(file)
 		if err != nil {
 			add(configPath, "pipeline %s: pipelineRun: %v", p.Name, err)
 			continue
 		}
-		pr, err := tekton.ParsePipelineRun(raw)
-		if err != nil {
+		base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun, Timeout: p.TimeoutDuration(), Token: p.Token(), TaskReports: p.TaskChecks}
+		if err := l.Renderer.CheckDefinition(base); err != nil {
 			add(file, "%v", err)
 			continue
 		}
-		if p.TaskChecks && len(tekton.TaskNames(pr)) == 0 {
-			add(file, "pipeline %s sets taskChecks, which needs the PipelineRun's own spec.pipelineSpec to list its tasks", p.Name)
-		}
 		for _, event := range p.Events() {
-			ctx := pipelines.SampleFor(event)
-			ctx.Pipeline = p.Name
-			params, err := p.RenderParams(ctx)
-			if err != nil {
+			sample := pipelines.SampleFor(event)
+			sample.Pipeline = p.Name
+			spec := base
+			spec.Trigger = ci.Trigger{
+				Event: event, Pipeline: p.Name, Revision: sample.Revision,
+				Repository: ci.Repository{Owner: sample.Repository.Owner, Name: sample.Repository.Name, FullName: sample.Repository.FullName},
+			}
+			if spec.Params, err = p.RenderParams(sample); err != nil {
 				add(configPath, "pipeline %s, on %s: %v", p.Name, event, err)
 				continue
 			}
-			if _, err := p.ConcurrencyFor(ctx); err != nil {
+			if _, err := p.ConcurrencyFor(sample); err != nil {
 				add(configPath, "pipeline %s, on %s: %v", p.Name, event, err)
 				continue
 			}
-			name := tekton.RunName(ctx.Repository.Name, p.Name, ctx.Revision, 1)
-			rendered, err := tekton.Render(pr, tekton.RenderInput{
-				Namespace:      pr.GetNamespace(),
-				Name:           name,
-				Params:         params,
-				Timeout:        p.TimeoutDuration(),
-				TokenWorkspace: p.TokenWorkspace(),
-			})
+			obj, err := l.Renderer.Render(spec)
 			if err != nil {
 				add(file, "%v", err)
 				continue
 			}
-			allowed := ""
-			if p.GitHubToken != nil {
-				allowed = tekton.TokenSecretName(name)
-			}
-			if err := tekton.CheckSecrets(rendered, allowed); err != nil {
-				add(file, "%v", err)
-				continue
-			}
-			res.Rendered = append(res.Rendered, Rendered{Pipeline: p.Name, Event: event, Object: rendered.Object})
+			res.Rendered = append(res.Rendered, Rendered{Pipeline: p.Name, Event: event, Object: obj})
 		}
 	}
 	return res
 }
 
-// Run implements "octomaton lint [--render] PATH...": it prints problems to
-// stderr (or rendered PipelineRuns to stdout with render) and returns the exit code.
-func Run(paths []string, render bool, stdout, stderr io.Writer) int {
+// Run lints each path and prints the problems to stderr, or, with render, the rendered runs to
+// stdout, and returns the exit code.
+func (l *Linter) Run(paths []string, render bool, stdout, stderr io.Writer) int {
 	if len(paths) == 0 {
 		return ExitUsage
 	}
@@ -154,7 +154,7 @@ func Run(paths []string, render bool, stdout, stderr io.Writer) int {
 			problems++
 			continue
 		}
-		res := Lint(configPath)
+		res := l.Lint(configPath)
 		for _, p := range res.Problems {
 			fmt.Fprintln(stderr, p.String())
 		}

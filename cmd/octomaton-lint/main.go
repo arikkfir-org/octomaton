@@ -17,7 +17,9 @@ import (
 	"io"
 	"os"
 
-	"octomaton.dev/internal/lint"
+	"octomaton.dev/internal/adapters/github"
+	"octomaton.dev/internal/adapters/tekton"
+	"octomaton.dev/internal/services/lint"
 	"octomaton.dev/internal/system/buildinfo"
 )
 
@@ -49,5 +51,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		flags.Usage()
 		return lint.ExitUsage
 	}
-	return lint.Run(flags.Args(), *render, stdout, stderr)
+	linter := &lint.Linter{Renderer: tekton.Renderer{}, CheckPermissions: github.CheckPermissions}
+	return linter.Run(flags.Args(), *render, stdout, stderr)
 }

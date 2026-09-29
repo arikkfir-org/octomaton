@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/go-github/v92/github"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/adapters/github/githubtest"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/githubapp/githubtest"
 	"octomaton.dev/internal/tekton"
 )
 

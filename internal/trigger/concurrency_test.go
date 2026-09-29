@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"octomaton.dev/internal/adapters/github/githubtest"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/githubapp/githubtest"
 	"octomaton.dev/internal/tekton"
 )
 

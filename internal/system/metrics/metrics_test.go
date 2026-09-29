@@ -60,3 +60,14 @@ func TestGauges(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscard(t *testing.T) {
+	m := metrics.Discard()
+	if m == nil {
+		t.Fatal("Discard returned nil")
+	}
+	ctx := context.Background()
+	m.WebhookReceived(ctx, "push")
+	m.RunCreated(ctx, metrics.RunCreated)
+	m.SetLeader(ctx, true)
+}

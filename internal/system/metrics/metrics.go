@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // Results recorded by RunCreated.
@@ -63,6 +64,12 @@ func New(meter metric.Meter) (*Metrics, error) {
 		metric.WithDescription("Time spent reporting a PipelineRun's state to GitHub, by result."),
 		metric.WithExplicitBucketBoundaries(durationBuckets...))
 	return m, errors.Join(append(errs, err)...)
+}
+
+// Discard returns metrics that record nothing.
+func Discard() *Metrics {
+	m, _ := New(noop.NewMeterProvider().Meter(""))
+	return m
 }
 
 // WebhookReceived counts a delivery of event.

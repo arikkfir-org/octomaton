@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/adapters/github/githubtest"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/githubapp/githubtest"
 )
 
 const (

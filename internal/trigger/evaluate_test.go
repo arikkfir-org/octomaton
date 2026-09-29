@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/adapters/github/githubtest"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/githubapp/githubtest"
 	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/tekton"
 )

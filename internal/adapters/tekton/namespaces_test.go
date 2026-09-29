@@ -79,7 +79,7 @@ func TestSanitizeDNSLabel(t *testing.T) {
 		{"___", ""},
 	}
 	for _, tt := range tests {
-		got := SanitizeDNSLabel(tt.in)
+		got := sanitizeDNSLabel(tt.in)
 		if got != tt.want || len(got) > 63 {
 			t.Errorf("SanitizeDNSLabel(%q) = %q, want %q (at most 63 characters)", tt.in, got, tt.want)
 		}

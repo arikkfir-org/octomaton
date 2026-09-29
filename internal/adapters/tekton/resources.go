@@ -9,7 +9,7 @@ import (
 )
 
 // finishedRuns selects the runs let go whose PVCs are not freed yet.
-const finishedRuns = LabelManagedBy + "=" + ManagedByValue + "," + LabelDone + ",!" + LabelPVCsFreed
+const finishedRuns = labelManagedBy + "=" + managedByValue + "," + labelDone + ",!" + labelPVCsFreed
 
 // FreeResources deletes the PVCs owned by runs that finished before the given time, and labels
 // those runs so they are not examined again. Pods are kept: the Tekton Dashboard reads logs from
@@ -23,7 +23,7 @@ func (r *Runner) FreeResources(ctx context.Context, finishedBefore time.Time) (i
 	owned := map[string]map[types.UID]string{} // namespace → run UID → run name
 	for i := range runs {
 		run := &runs[i]
-		st, err := GetPipelineRunStatus(run)
+		st, err := getPipelineRunStatus(run)
 		if err != nil || st.CompletionTime == nil || !st.CompletionTime.Time.Before(finishedBefore) {
 			continue
 		}
@@ -54,7 +54,7 @@ func (r *Runner) freeNamespace(ctx context.Context, ns string, byUID map[types.U
 	deleted := 0
 	for _, pvc := range pvcs {
 		for _, ref := range pvc.OwnerReferences {
-			if ref.Kind != KindPipelineRun || byUID[ref.UID] == "" {
+			if ref.Kind != kindPipelineRun || byUID[ref.UID] == "" {
 				continue
 			}
 			if err := c.DeletePVC(ctx, ns, pvc.Name); err != nil {
@@ -69,7 +69,7 @@ func (r *Runner) freeNamespace(ctx context.Context, ns string, byUID map[types.U
 		return deleted, errors.Join(errs...)
 	}
 	for _, name := range byUID {
-		if err := c.Label(ctx, ns, name, map[string]string{LabelPVCsFreed: "true"}, nil); err != nil {
+		if err := c.Label(ctx, ns, name, map[string]string{labelPVCsFreed: "true"}, nil); err != nil {
 			errs = append(errs, err)
 		}
 	}

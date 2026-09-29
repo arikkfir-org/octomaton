@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,8 +49,8 @@ func TestLoadReference(t *testing.T) {
 	if cfg.GitHub.AppID != 123 || cfg.GitHub.Key() == nil || cfg.GitHub.WebhookSecret != "s3cret" {
 		t.Errorf("GitHub = %+v", cfg.GitHub)
 	}
-	if !cfg.GitHub.OwnerAllowed("Arikkfir-Org") || cfg.GitHub.OwnerAllowed("someone-else") {
-		t.Error("OwnerAllowed does not follow OCTOMATON_GITHUB_ALLOWED_OWNERS")
+	if !slices.Equal(cfg.GitHub.AllowedOwners, []string{"arikkfir-org"}) {
+		t.Errorf("AllowedOwners = %q", cfg.GitHub.AllowedOwners)
 	}
 	if cfg.Tekton.DashboardURL != "https://tekton.dev.kfirs.com" {
 		t.Errorf("DashboardURL = %q (trailing slash kept?)", cfg.Tekton.DashboardURL)
@@ -80,8 +81,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Webhook.Workers != 8 || cfg.Webhook.QueueSize != 256 || cfg.Namespaces.Template != "ci-{{ .Repository.Name }}" {
 		t.Errorf("Webhook = %+v, Namespaces.Template = %q", cfg.Webhook, cfg.Namespaces.Template)
 	}
-	if !cfg.GitHub.OwnerAllowed("anyone") {
-		t.Error("an empty OCTOMATON_GITHUB_ALLOWED_OWNERS serves every owner")
+	if len(cfg.GitHub.AllowedOwners) != 0 {
+		t.Errorf("AllowedOwners = %q, want none (every owner is served)", cfg.GitHub.AllowedOwners)
 	}
 	if cfg.Pod.Name == "" || cfg.Pod.Namespace == "" {
 		t.Errorf("Pod defaults = %+v", cfg.Pod)

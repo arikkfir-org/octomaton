@@ -47,7 +47,7 @@ type Runner struct {
 
 var _ ci.Runner = (*Runner)(nil)
 
-func (r *Runner) client() *Client { return &Client{Dynamic: r.Dynamic, Kube: r.Kube} }
+func (r *Runner) client() *kubeClient { return &kubeClient{Dynamic: r.Dynamic, Kube: r.Kube} }
 
 func (r *Runner) logger() *slog.Logger {
 	if r.Logger != nil {
@@ -90,14 +90,14 @@ func (r *Runner) Check(ctx context.Context, spec ci.RunSpec) error {
 // definition parses spec's PipelineRun file and checks it fits the namespace and the pipeline's
 // settings.
 func (r *Runner) definition(spec ci.RunSpec, ns string) (*unstructured.Unstructured, error) {
-	pr, err := ParsePipelineRun(spec.Definition)
+	pr, err := parsePipelineRun(spec.Definition)
 	if err != nil {
 		return nil, refusal("`%s` is not a valid PipelineRun file: %v", spec.Path, err)
 	}
 	if fileNS := pr.GetNamespace(); fileNS != "" && fileNS != ns {
 		return nil, refusal("`%s` sets namespace `%s`, but this repository's runs must be created in namespace `%s`. Remove `metadata.namespace` from the file.", spec.Path, fileNS, ns)
 	}
-	if spec.TaskReports && len(TaskNames(pr)) == 0 {
+	if spec.TaskReports && len(taskNames(pr)) == 0 {
 		return nil, refusal("Pipeline `%s` sets `taskChecks`, which needs the PipelineRun's own `spec.pipelineSpec` to list its tasks.", spec.Trigger.Pipeline)
 	}
 	return pr, nil
@@ -114,21 +114,21 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 	if err != nil {
 		return ci.Run{}, err
 	}
-	name := RunName(t.Repository.Name, t.Pipeline, t.Revision, attempt)
-	in := RenderInput{Namespace: ns, Name: name, Params: spec.Params, Timeout: spec.Timeout, Labels: runLabels(spec), Annotations: runAnnotations(spec, attempt), Held: true}
+	name := runName(t.Repository.Name, t.Pipeline, t.Revision, attempt)
+	in := renderInput{Namespace: ns, Name: name, Params: spec.Params, Timeout: spec.Timeout, Labels: runLabels(spec), Annotations: runAnnotations(spec, attempt), Held: true}
 	allowed := ""
 	if spec.Token != nil {
-		in.TokenWorkspace, allowed = spec.Token.Workspace, TokenSecretName(name)
+		in.TokenWorkspace, allowed = spec.Token.Workspace, tokenSecretName(name)
 	}
-	pr, err := Render(src, in)
+	pr, err := render(src, in)
 	if err != nil {
 		return ci.Run{}, refusal("%v", err)
 	}
-	if err := CheckSecrets(pr, allowed); err != nil {
+	if err := checkSecrets(pr, allowed); err != nil {
 		return ci.Run{}, &ci.Refusal{Title: "Refused", Reason: err.Error()}
 	}
 	created, err := r.client().Create(ctx, pr)
-	if errors.Is(err, ErrAlreadyExists) {
+	if errors.Is(err, errAlreadyExists) {
 		existing, gerr := r.Get(ctx, ci.RunID{Tenant: ns, Name: name})
 		if gerr != nil {
 			existing = ci.Run{}
@@ -145,21 +145,21 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 func runLabels(spec ci.RunSpec) map[string]string {
 	t := spec.Trigger
 	l := map[string]string{
-		LabelManagedBy:    ManagedByValue,
-		LabelPipeline:     t.Pipeline,
-		LabelEvent:        t.Event,
-		LabelRepositoryID: strconv.FormatInt(t.Repository.ID, 10),
-		LabelSHA:          t.Revision,
+		labelManagedBy:    managedByValue,
+		labelPipeline:     t.Pipeline,
+		labelEvent:        t.Event,
+		labelRepositoryID: strconv.FormatInt(t.Repository.ID, 10),
+		labelSHA:          t.Revision,
 	}
 	if key := spec.Concurrency.Key; key != "" {
-		l[LabelConcurrencyGroup] = GroupLabel(t.Repository.FullName, key)
+		l[labelConcurrencyGroup] = groupLabel(t.Repository.FullName, key)
 	}
 	if t.Comment != nil {
-		l[LabelComment] = strconv.FormatInt(t.Comment.ID, 10)
+		l[labelComment] = strconv.FormatInt(t.Comment.ID, 10)
 	}
 	if t.Schedule != nil {
 		if slot, err := time.Parse(time.RFC3339, t.Schedule.Slot); err == nil {
-			l[LabelSlot] = slotLabel(slot)
+			l[labelSlot] = slotLabel(slot)
 		}
 	}
 	return l
@@ -174,27 +174,27 @@ func runAnnotations(spec ci.RunSpec, attempt int) map[string]string {
 		t.Version = ci.TriggerVersion
 	}
 	a := map[string]string{
-		AnnotationRepository:     t.Repository.FullName,
-		AnnotationSHA:            t.Revision,
-		AnnotationInstallationID: strconv.FormatInt(t.InstallationID, 10),
-		AnnotationDeliveryID:     t.DeliveryID,
-		AnnotationHead:           t.Head(),
-		AnnotationAttempt:        strconv.Itoa(attempt),
+		annotationRepository:     t.Repository.FullName,
+		annotationSHA:            t.Revision,
+		annotationInstallationID: strconv.FormatInt(t.InstallationID, 10),
+		annotationDeliveryID:     t.DeliveryID,
+		annotationHead:           t.Head(),
+		annotationAttempt:        strconv.Itoa(attempt),
 	}
 	if data, err := json.Marshal(t); err == nil {
-		a[AnnotationContext] = string(data)
+		a[annotationContext] = string(data)
 	}
 	if c := spec.Concurrency; c.Group != "" {
-		a[AnnotationConcurrencyGroup] = c.Group
-		a[AnnotationConcurrencyPolicy] = string(c.Policy)
+		a[annotationConcurrencyGroup] = c.Group
+		a[annotationConcurrencyPolicy] = string(c.Policy)
 	}
 	if spec.Token != nil {
 		if data, err := json.Marshal(spec.Token); err == nil {
-			a[AnnotationToken] = string(data)
+			a[annotationToken] = string(data)
 		}
 	}
 	if spec.TaskReports {
-		a[AnnotationTaskChecks] = "true"
+		a[annotationTaskChecks] = "true"
 	}
 	return a
 }
@@ -214,25 +214,25 @@ func (r *Runner) Get(ctx context.Context, id ci.RunID) (ci.Run, error) {
 // List returns the runs q selects, in the repository's namespace, or in all namespaces.
 func (r *Runner) List(ctx context.Context, q ci.RunQuery) ([]ci.Run, error) {
 	ns := ""
-	set := labels.Set{LabelManagedBy: ManagedByValue}
+	set := labels.Set{labelManagedBy: managedByValue}
 	if q.Repository != nil {
 		var err error
 		if ns, err = r.Namespaces.Resolve(*q.Repository); err != nil {
 			return nil, err
 		}
-		set[LabelRepositoryID] = strconv.FormatInt(q.Repository.ID, 10)
+		set[labelRepositoryID] = strconv.FormatInt(q.Repository.ID, 10)
 	}
-	for label, value := range map[string]string{LabelPipeline: q.Pipeline, LabelSHA: q.Revision, LabelEvent: q.Event, LabelConcurrencyGroup: q.Group} {
+	for label, value := range map[string]string{labelPipeline: q.Pipeline, labelSHA: q.Revision, labelEvent: q.Event, labelConcurrencyGroup: q.Group} {
 		if value != "" {
 			set[label] = value
 		}
 	}
 	if !q.Slot.IsZero() {
-		set[LabelSlot] = slotLabel(q.Slot)
+		set[labelSlot] = slotLabel(q.Slot)
 	}
 	selector := labels.SelectorFromSet(set).String()
 	if q.Live {
-		selector += ",!" + LabelDone
+		selector += ",!" + labelDone
 	}
 	items, err := r.client().List(ctx, ns, selector)
 	if err != nil {
@@ -254,13 +254,13 @@ func (r *Runner) Release(ctx context.Context, id ci.RunID) error {
 func (r *Runner) Cancel(ctx context.Context, id ci.RunID, why ci.Cancellation) error {
 	a := map[string]string{}
 	if why.Reason != "" {
-		a[AnnotationCancelReason] = why.Reason
+		a[annotationCancelReason] = why.Reason
 	}
 	switch {
 	case why.SupersededBy != "":
-		a[AnnotationSupersededBy] = why.SupersededBy
+		a[annotationSupersededBy] = why.SupersededBy
 	case why.NewerCommit != "":
-		a[AnnotationSupersededBy] = supersededByHead + why.NewerCommit
+		a[annotationSupersededBy] = supersededByHead + why.NewerCommit
 	}
 	return r.client().Cancel(ctx, id.Tenant, id.Name, a)
 }
@@ -270,36 +270,36 @@ func (r *Runner) Cancel(ctx context.Context, id ci.RunID, why ci.Cancellation) e
 func (r *Runner) Record(ctx context.Context, id ci.RunID, rec ci.Record) error {
 	a := map[string]string{}
 	if rec.ReportID != nil {
-		a[AnnotationCheckRunID] = strconv.FormatInt(int64(*rec.ReportID), 10)
+		a[annotationCheckRunID] = strconv.FormatInt(int64(*rec.ReportID), 10)
 	}
 	if rec.Reported != nil {
-		a[AnnotationReported] = string(*rec.Reported)
+		a[annotationReported] = string(*rec.Reported)
 	}
 	if rec.Progress != nil {
-		a[AnnotationProgress] = *rec.Progress
+		a[annotationProgress] = *rec.Progress
 	}
 	if rec.WaitingFor != nil {
-		a[AnnotationWaitingFor] = *rec.WaitingFor
+		a[annotationWaitingFor] = *rec.WaitingFor
 	}
 	// Maps of strings and numbers always marshal.
 	if rec.TaskReportIDs != nil {
 		data, _ := json.Marshal(rec.TaskReportIDs)
-		a[AnnotationTaskCheckIDs] = string(data)
+		a[annotationTaskCheckIDs] = string(data)
 	}
 	if rec.TaskReportStates != nil {
 		data, _ := json.Marshal(rec.TaskReportStates)
-		a[AnnotationTaskCheckStates] = string(data)
+		a[annotationTaskCheckStates] = string(data)
 	}
 	meta := map[string]any{"annotations": a}
 	if rec.Done {
-		meta["labels"] = map[string]string{LabelDone: "true"}
+		meta["labels"] = map[string]string{labelDone: "true"}
 	}
 	return r.client().patch(ctx, id.Tenant, id.Name, map[string]any{"metadata": meta})
 }
 
 // Link tells where people see a run: the Tekton Dashboard, when there is one.
 func (r *Runner) Link(id ci.RunID) ci.RunLink {
-	return ci.RunLink{Kind: KindPipelineRun, Name: id.String(), URL: dashboardURL(r.DashboardURL, id)}
+	return ci.RunLink{Kind: kindPipelineRun, Name: id.String(), URL: dashboardURL(r.DashboardURL, id)}
 }
 
 // TaskURL is where people see one task of a run on the Tekton Dashboard.

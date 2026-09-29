@@ -3,6 +3,8 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"octomaton.dev/internal/services/ci"
 	"octomaton.dev/internal/system/metrics"
 	"octomaton.dev/internal/system/metrics/metricstest"
 )
@@ -126,24 +129,33 @@ func TestPoolShutdownTimeoutCancelsJobs(t *testing.T) {
 	<-cancelled
 }
 
-type stubRouter struct {
-	mu      sync.Mutex
-	routed  []string
-	reason  string
-	ran     chan string
-	payload any
+// stubDecoder handles push, pull_request and check_run deliveries: it fails invalid JSON, ignores
+// every delivery with reason when set, and otherwise decodes a comment event carrying the delivery.
+type stubDecoder struct{ reason string }
+
+func (stubDecoder) Handles(event string) bool {
+	return event == "push" || event == "pull_request" || event == "check_run"
 }
 
-func (r *stubRouter) Route(event, delivery string, payload any) (Job, string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.routed = append(r.routed, event+"/"+delivery)
-	r.payload = payload
-	if r.reason != "" {
-		return Job{}, r.reason
+func (d stubDecoder) Decode(event, delivery string, body []byte) (ci.Event, string, error) {
+	if !json.Valid(body) {
+		return nil, "", errors.New("invalid JSON")
 	}
-	return Job{Name: event, Run: func(context.Context) { r.ran <- delivery }}, ""
+	if d.reason != "" {
+		return nil, d.reason, nil
+	}
+	return &ci.CommandEvent{Repository: ci.Repository{FullName: "o/r"}, DeliveryID: delivery}, "", nil
 }
+
+// handled receives the delivery of each event handled.
+type handled chan string
+
+func (h handled) Handle(ctx context.Context, ev ci.Event) { h <- ev.(*ci.CommandEvent).DeliveryID }
+
+// handlerFunc handles events with a function.
+type handlerFunc func(ctx context.Context, ev ci.Event)
+
+func (f handlerFunc) Handle(ctx context.Context, ev ci.Event) { f(ctx, ev) }
 
 type stubRelay struct {
 	mu        sync.Mutex
@@ -156,13 +168,13 @@ func (s *stubRelay) Forward(header http.Header, body []byte) {
 	s.forwarded = append(s.forwarded, header.Get("X-GitHub-Event")+":"+string(body))
 }
 
-func newHandler(t *testing.T, router Router, queue int) (*Handler, *stubRelay, *metricstest.Metrics) {
+func newHandler(t *testing.T, decoder Decoder, events EventHandler, queue int) (*Handler, *stubRelay, *metricstest.Metrics) {
 	t.Helper()
 	m := metricstest.New(t)
 	pool := NewPool(1, queue, time.Second, discardLogger(), m.Metrics)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 	relay := &stubRelay{}
-	return &Handler{Secret: testSecret, Router: router, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m.Metrics, Logger: discardLogger(), Relay: relay}, relay, m
+	return &Handler{Secret: testSecret, Decoder: decoder, Events: events, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m.Metrics, Logger: discardLogger(), Relay: relay}, relay, m
 }
 
 func post(h http.Handler, event, delivery string, body []byte, sign bool) *httptest.ResponseRecorder {
@@ -198,14 +210,14 @@ func TestHandler(t *testing.T) {
 		{name: "missing event header", event: "", body: `{}`, sign: true, wantStatus: http.StatusBadRequest},
 		{name: "unhandled event is acknowledged", event: "star", body: `{}`, sign: true, wantStatus: http.StatusAccepted},
 		{name: "invalid payload", event: "push", body: `not json`, sign: true, wantStatus: http.StatusBadRequest, wantRelay: true},
-		{name: "ignored by the router", event: "push", body: pushBody, sign: true, reason: "not interesting", wantStatus: http.StatusAccepted, wantRelay: true},
+		{name: "ignored by the decoder", event: "push", body: pushBody, sign: true, reason: "not interesting", wantStatus: http.StatusAccepted, wantRelay: true},
 		{name: "accepted push is processed and relayed", event: "push", body: pushBody, sign: true, wantStatus: http.StatusAccepted, wantRun: true, wantRelay: true},
 		{name: "check_run is processed, not relayed", event: "check_run", body: `{"action":"rerequested"}`, sign: true, wantStatus: http.StatusAccepted, wantRun: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := &stubRouter{reason: tt.reason, ran: make(chan string, 1)}
-			h, relay, _ := newHandler(t, router, 10)
+			ran := make(handled, 1)
+			h, relay, _ := newHandler(t, stubDecoder{reason: tt.reason}, ran, 10)
 			method := tt.method
 			if method == "" {
 				method = http.MethodPost
@@ -223,7 +235,7 @@ func TestHandler(t *testing.T) {
 			}
 			if tt.wantRun {
 				select {
-				case d := <-router.ran:
+				case d := <-ran:
 					if d != "d-1" {
 						t.Fatalf("job ran for delivery %q", d)
 					}
@@ -242,8 +254,8 @@ func TestHandler(t *testing.T) {
 }
 
 func TestHandlerDedupesDeliveries(t *testing.T) {
-	router := &stubRouter{ran: make(chan string, 2)}
-	h, _, m := newHandler(t, router, 10)
+	ran := make(handled, 2)
+	h, _, m := newHandler(t, stubDecoder{}, ran, 10)
 	if rec := post(h, "push", "same", []byte(pushBody), true); rec.Code != http.StatusAccepted {
 		t.Fatalf("first delivery: %d", rec.Code)
 	}
@@ -251,9 +263,9 @@ func TestHandlerDedupesDeliveries(t *testing.T) {
 	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), "duplicate") {
 		t.Fatalf("second delivery: %d %q, want 202 duplicate", rec.Code, rec.Body.String())
 	}
-	<-router.ran
+	<-ran
 	select {
-	case <-router.ran:
+	case <-ran:
 		t.Fatalf("a duplicate delivery was processed")
 	case <-time.After(100 * time.Millisecond):
 	}
@@ -265,10 +277,8 @@ func TestHandlerDedupesDeliveries(t *testing.T) {
 func TestHandlerQueueFullAnswers503AndForgetsDelivery(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{}, 1)
-	router := routerFunc(func(event, delivery string, payload any) (Job, string) {
-		return Job{Name: delivery, Run: func(context.Context) { started <- struct{}{}; <-block }}, ""
-	})
-	h, _, m := newHandler(t, router, 1)
+	events := handlerFunc(func(context.Context, ci.Event) { started <- struct{}{}; <-block })
+	h, _, m := newHandler(t, stubDecoder{}, events, 1)
 	defer close(block)
 	post(h, "push", "d1", []byte(pushBody), true) // taken by the worker
 	<-started
@@ -283,10 +293,4 @@ func TestHandlerQueueFullAnswers503AndForgetsDelivery(t *testing.T) {
 	if got := m.Count(t, "octomaton.webhooks.rejected", attribute.String("event", "push"), attribute.String("reason", "queue_full")); got != 1 {
 		t.Fatalf("rejected metric = %v, want 1", got)
 	}
-}
-
-type routerFunc func(event, delivery string, payload any) (Job, string)
-
-func (f routerFunc) Route(event, delivery string, payload any) (Job, string) {
-	return f(event, delivery, payload)
 }

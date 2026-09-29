@@ -9,18 +9,19 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"octomaton.dev/internal/adapters/github"
 	octohttp "octomaton.dev/internal/adapters/http"
-	webhook "octomaton.dev/internal/adapters/http"
 	"octomaton.dev/internal/adapters/kube"
 	"octomaton.dev/internal/adapters/leader"
 	"octomaton.dev/internal/adapters/relay"
 	"octomaton.dev/internal/adapters/tekton"
-	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/reporter"
+	"octomaton.dev/internal/services/reports"
+	"octomaton.dev/internal/services/runs"
+	"octomaton.dev/internal/services/schedules"
+	"octomaton.dev/internal/services/upkeep"
 	"octomaton.dev/internal/system/buildinfo"
 	"octomaton.dev/internal/system/config"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/trigger"
 )
 
 const (
@@ -35,77 +36,80 @@ const (
 )
 
 // app is Octomaton's server: the HTTP endpoints and the webhook workers on every replica and, on
-// the elected leader, the reporter, the scheduler and the maintenance jobs.
+// the elected leader, the reports, the schedules and the upkeep.
 type app struct {
-	cfg        *config.Config
-	kube       *kube.Clients
-	github     *githubapp.App
-	metrics    *metrics.Metrics
-	namespaces *tekton.Namespaces
+	cfg     *config.Config
+	metrics *metrics.Metrics
+	kube    *kube.Clients
+	github  *github.App
+	runner  *tekton.Runner
 
-	trigger   *trigger.Service
-	scheduler *trigger.Scheduler
-	reporter  *reporter.Reporter
-	pool      *webhook.Pool
-	relay     *relay.Relay
-	elector   *leader.Elector
-	server    *octohttp.Server
+	runs      *runs.Service
+	reports   *reports.Service
+	schedules *schedules.Scheduler
+	upkeep    *upkeep.Service
+
+	pool    *octohttp.Pool
+	relay   *relay.Relay
+	elector *leader.Elector
+	server  *octohttp.Server
 }
 
-// newApp connects to Kubernetes and GitHub, then wires the components.
+// newApp connects the adapters to Kubernetes and GitHub, then wires the services over them.
 func newApp(cfg *config.Config) (*app, error) {
 	a := &app{cfg: cfg}
 	if err := a.connect(); err != nil {
 		return nil, err
 	}
-	a.wireTrigger()
+	a.wireServices()
 	a.wireLeader()
 	a.wireServer()
 	return a, nil
 }
 
+// connect builds the adapters: GitHub is the code host, Tekton the runner.
 func (a *app) connect() error {
-	var err error
-	if a.namespaces, err = tekton.NewNamespaces(a.cfg.Namespaces.Template, a.cfg.Namespaces.Overrides); err != nil {
+	namespaces, err := tekton.NewNamespaces(a.cfg.Namespaces.Template, a.cfg.Namespaces.Overrides)
+	if err != nil {
 		return err
-	}
-	if a.kube, err = kube.NewClients("octomaton/" + buildinfo.Version()); err != nil {
-		return err
-	}
-	if a.github, err = githubapp.New(int64(a.cfg.GitHub.AppID), a.cfg.GitHub.Key()); err != nil {
-		return fmt.Errorf("creating the GitHub App client: %w", err)
 	}
 	if a.metrics, err = metrics.New(otel.Meter("octomaton.dev")); err != nil {
 		return fmt.Errorf("creating the metrics: %w", err)
 	}
+	if a.kube, err = kube.NewClients("octomaton/" + buildinfo.Version()); err != nil {
+		return err
+	}
+	a.github, err = github.New(int64(a.cfg.GitHub.AppID), a.cfg.GitHub.Key(),
+		github.WithOwners(a.cfg.GitHub.AllowedOwners), github.WithMetrics(a.metrics))
+	if err != nil {
+		return fmt.Errorf("creating the GitHub App client: %w", err)
+	}
+	a.runner = &tekton.Runner{
+		Dynamic:      a.kube.Dynamic,
+		Kube:         a.kube.Kube,
+		Namespaces:   namespaces,
+		DashboardURL: a.cfg.Tekton.DashboardURL,
+		Logger:       component("runner"),
+		Metrics:      a.metrics,
+	}
 	return nil
 }
 
-// wireTrigger builds the service that turns deliveries into PipelineRuns, and the scheduler and
-// reporter working with it.
-func (a *app) wireTrigger() {
-	runs := &tekton.Client{Dynamic: a.kube.Dynamic, Kube: a.kube.Kube}
-	a.trigger = &trigger.Service{
-		GitHub:       a.github,
-		Runs:         runs,
-		Namespaces:   a.namespaces,
-		DashboardURL: a.cfg.Tekton.DashboardURL,
-		OwnerAllowed: a.cfg.GitHub.OwnerAllowed,
-		Logger:       component("trigger"),
-		Metrics:      a.metrics,
+// wireServices builds the services over the adapters: runs turns events into runs, reports mirrors
+// them onto the code host, schedules fires cron triggers, and upkeep keeps tokens fresh and frees
+// finished runs' resources.
+func (a *app) wireServices() {
+	a.runs = &runs.Service{Host: a.github, Runner: a.runner, Logger: component("runs"), Metrics: a.metrics}
+	a.schedules = &schedules.Scheduler{Host: a.github, Runner: a.runner, Runs: a.runs, Logger: component("schedules")}
+	a.runs.Schedules = a.schedules
+	a.reports = &reports.Service{
+		Host:        a.github,
+		Runner:      a.runner,
+		Logger:      component("reports"),
+		Resume:      a.runs.Resume,
+		ReleaseNext: a.runs.ReleaseNext,
 	}
-	a.scheduler = &trigger.Scheduler{Service: a.trigger}
-	a.trigger.Schedules = a.scheduler
-	a.reporter = &reporter.Reporter{
-		Dynamic:      a.kube.Dynamic,
-		Runs:         runs,
-		GitHub:       a.github,
-		DashboardURL: a.cfg.Tekton.DashboardURL,
-		Logger:       component("reporter"),
-		Metrics:      a.metrics,
-		Resume:       a.trigger.Resume,
-		ReleaseNext:  a.trigger.ReleaseNext,
-	}
+	a.upkeep = &upkeep.Service{Host: a.github, Runner: a.runner, Logger: component("upkeep")}
 }
 
 func (a *app) wireLeader() {
@@ -121,19 +125,21 @@ func (a *app) wireLeader() {
 }
 
 func (a *app) wireServer() {
-	readiness := &octohttp.Readiness{Ping: a.kube.Ping, Leading: a.elector.Leading, Synced: a.reporter.Synced, TTL: readinessTTL}
+	readiness := &octohttp.Readiness{Ping: a.kube.Ping, Leading: a.elector.Leading, Synced: a.runner.Synced, TTL: readinessTTL}
 	a.server = octohttp.NewServer(a.cfg.HTTP.Address, a.wireWebhook(), readiness)
 }
 
-// wireWebhook returns the handler of GitHub's deliveries. It verifies them and queues them for the
-// worker pool, and relays them when relay URLs are configured.
+// wireWebhook returns the handler of GitHub's deliveries. It verifies and decodes them and queues
+// their events for the runs service on the worker pool, and relays them when relay URLs are
+// configured.
 func (a *app) wireWebhook() http.Handler {
-	a.pool = webhook.NewPool(a.cfg.Webhook.Workers, a.cfg.Webhook.QueueSize, webhookJobTimeout, component("webhook"), a.metrics)
-	hook := &webhook.Handler{
+	a.pool = octohttp.NewPool(a.cfg.Webhook.Workers, a.cfg.Webhook.QueueSize, webhookJobTimeout, component("webhook"), a.metrics)
+	hook := &octohttp.Handler{
 		Secret:  []byte(a.cfg.GitHub.WebhookSecret),
-		Router:  a.trigger,
+		Decoder: a.github,
+		Events:  a.runs,
 		Pool:    a.pool,
-		Dedupe:  webhook.NewDedupe(4096, time.Hour),
+		Dedupe:  octohttp.NewDedupe(4096, time.Hour),
 		Metrics: a.metrics,
 		Logger:  component("webhook"),
 	}
@@ -144,14 +150,15 @@ func (a *app) wireWebhook() http.Handler {
 	return hook
 }
 
-// lead runs the leader's jobs until it loses the Lease.
+// lead runs the leader's jobs until it loses the Lease: reporting the runs the runner watches,
+// firing schedules, and upkeep.
 func (a *app) lead(ctx context.Context) {
 	var jobs sync.WaitGroup
-	jobs.Go(func() { a.scheduler.Run(ctx) })
-	jobs.Go(func() { a.trigger.RefreshTokens(ctx) })
-	jobs.Go(func() { a.trigger.FreePVCs(ctx, a.cfg.Retention.FreePVCsAfter) })
-	if err := a.reporter.Run(ctx); err != nil && ctx.Err() == nil {
-		slog.ErrorContext(ctx, "Reporter stopped", "error", err)
+	jobs.Go(func() { a.schedules.Run(ctx) })
+	jobs.Go(func() { a.upkeep.RefreshTokens(ctx) })
+	jobs.Go(func() { a.upkeep.FreeResources(ctx, a.cfg.Retention.FreePVCsAfter) })
+	if err := a.runner.Watch(ctx, a.reports); err != nil && ctx.Err() == nil {
+		slog.ErrorContext(ctx, "Watching runs stopped", "error", err)
 	}
 	jobs.Wait()
 }

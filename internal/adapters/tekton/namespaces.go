@@ -33,7 +33,7 @@ func NewNamespaces(text string, overrides map[string]string) (*Namespaces, error
 		sample := pipelines.Sample().Repository
 		if out, err := pipelines.ExecuteTemplate(t, pipelines.NamespaceContext{Repository: sample}); err != nil {
 			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: %v", err))
-		} else if SanitizeDNSLabel(out) == "" {
+		} else if sanitizeDNSLabel(out) == "" {
 			problems = append(problems, fmt.Sprintf("OCTOMATON_NAMESPACE_TEMPLATE: renders %q for repository %s, which is not usable as a namespace", out, sample.FullName))
 		}
 	}
@@ -65,17 +65,17 @@ func (n *Namespaces) Resolve(repo ci.Repository) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("rendering the namespace template: %w", err)
 	}
-	ns := SanitizeDNSLabel(out)
+	ns := sanitizeDNSLabel(out)
 	if ns == "" {
 		return "", fmt.Errorf("the namespace template rendered %q for %s, which does not sanitize to a valid namespace name", out, repo.FullName)
 	}
 	return ns, nil
 }
 
-// SanitizeDNSLabel turns s into a DNS-1123 label: it lowercases s, strips leading dots, replaces
+// sanitizeDNSLabel turns s into a DNS-1123 label: it lowercases s, strips leading dots, replaces
 // every run of characters outside [a-z0-9-] with a single "-", trims leading and trailing "-" and
 // truncates to 63 characters.
-func SanitizeDNSLabel(s string) string {
+func sanitizeDNSLabel(s string) string {
 	s = strings.TrimLeft(strings.ToLower(s), ".")
 	var b strings.Builder
 	inRun := false

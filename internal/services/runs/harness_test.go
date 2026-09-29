@@ -83,12 +83,6 @@ func (h *harness) clock() time.Time {
 	return h.now
 }
 
-func (h *harness) advance(d time.Duration) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.now = h.now.Add(d)
-}
-
 // Notify records the repositories whose schedules are to be read again.
 func (h *harness) Notify(_ int64, r ci.Repository) {
 	h.mu.Lock()

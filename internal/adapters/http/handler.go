@@ -1,35 +1,32 @@
-// Package webhook receives GitHub App webhooks: it verifies signatures, drops
-// duplicate deliveries and hands accepted events to a bounded worker pool.
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 
-	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/services/ci"
 	"octomaton.dev/internal/system/metrics"
 )
 
 // MaxBodyBytes is the largest payload accepted (GitHub caps payloads at 25 MB).
 const MaxBodyBytes = 25 << 20
 
-// Router turns a parsed webhook payload into a job. A job with a nil Run means
-// the event is ignored, for the returned reason.
-type Router interface {
-	Route(event, deliveryID string, payload any) (job Job, reason string)
+// Decoder turns verified deliveries into events; the GitHub adapter's App implements it.
+type Decoder interface {
+	// Handles reports whether Decode handles an event, by its X-GitHub-Event name.
+	Handles(event string) bool
+	// Decode turns a delivery into an event. It returns no event, and the reason, for deliveries
+	// Octomaton ignores, and an error for payloads it cannot parse.
+	Decode(event, delivery string, body []byte) (ci.Event, string, error)
 }
 
-// handledEvents are the events parsed and routed; others are acknowledged and ignored.
-var handledEvents = map[string]bool{
-	"push":          true,
-	"pull_request":  true,
-	"merge_group":   true,
-	"check_run":     true,
-	"check_suite":   true,
-	"issue_comment": true,
+// EventHandler does what an event asks for; the runs service implements it.
+type EventHandler interface {
+	Handle(ctx context.Context, ev ci.Event)
 }
 
 // relayedEvents are forwarded to the Forwarder after signature verification.
@@ -40,10 +37,12 @@ type Forwarder interface {
 	Forward(header http.Header, body []byte)
 }
 
-// Handler serves POST /github/hooks.
+// Handler serves POST /github/hooks: it verifies signatures, decodes deliveries, drops duplicates
+// and hands the events to a bounded worker pool.
 type Handler struct {
 	Secret  []byte
-	Router  Router
+	Decoder Decoder
+	Events  EventHandler
 	Pool    *Pool
 	Dedupe  *Dedupe
 	Metrics *metrics.Metrics
@@ -52,8 +51,8 @@ type Handler struct {
 	Relay Forwarder
 }
 
-func metricEvent(event string) string {
-	if handledEvents[event] || event == "ping" {
+func (h *Handler) metricEvent(event string) string {
+	if event == "ping" || h.Decoder.Handles(event) {
 		return event
 	}
 	return "other"
@@ -62,7 +61,7 @@ func metricEvent(event string) string {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	event := r.Header.Get("X-GitHub-Event")
 	delivery := r.Header.Get("X-GitHub-Delivery")
-	label := metricEvent(event)
+	label := h.metricEvent(event)
 	h.Metrics.WebhookReceived(r.Context(), label)
 	log := h.Logger.With("event", event, "delivery", delivery)
 
@@ -107,19 +106,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Relay != nil && relayedEvents[event] {
 		h.Relay.Forward(r.Header, body)
 	}
-	if !handledEvents[event] {
+	if !h.Decoder.Handles(event) {
 		log.Debug("Ignoring unhandled event")
 		respond(http.StatusAccepted, "ignored: unhandled event")
 		return
 	}
 
-	payload, err := github.ParseWebHook(event, body)
+	ev, reason, err := h.Decoder.Decode(event, delivery, body)
 	if err != nil {
 		reject(http.StatusBadRequest, "payload", "invalid payload")
 		return
 	}
-	job, reason := h.Router.Route(event, delivery, payload)
-	if job.Run == nil {
+	if ev == nil {
 		log.Debug("Ignoring event", "reason", reason)
 		respond(http.StatusAccepted, "ignored: "+reason)
 		return
@@ -129,6 +127,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(http.StatusAccepted, "ignored: duplicate delivery")
 		return
 	}
+	job := Job{Name: ev.String(), Run: func(ctx context.Context) { h.Events.Handle(ctx, ev) }}
 	if !h.Pool.Submit(job) {
 		if delivery != "" {
 			h.Dedupe.Remove(delivery)

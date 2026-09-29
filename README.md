@@ -23,7 +23,7 @@ sequenceDiagram
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
   SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy
-  loop reporter (elected leader only)
+  loop reports (elected leader only)
     K8s-->>SB: PipelineRun and TaskRun changes
     SB->>GH: check run in_progress, task table, completed with conclusion and failed-step logs
   end
@@ -267,8 +267,8 @@ Octomaton is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.c
 `octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
-Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace runs the reporter, scheduler,
-token refresher and PVC retention.
+Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
+refreshes tokens and deletes PVCs of finished runs.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).
@@ -278,7 +278,7 @@ the leader, the PipelineRun informer synced).
 | Scope | Permissions |
 | --- | --- |
 | Tenant namespaces (`ClusterRole octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
-| Cluster | PipelineRuns: get, list, watch (the reporter's informer, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
+| Cluster | PipelineRuns: get, list, watch (the leader's watch, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace | Leases: get, create, update |
 
 **Metrics** (in Cloud Monitoring under `prometheus.googleapis.com/`): counters `octomaton.webhooks.received{event}`,
@@ -317,17 +317,37 @@ export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pe
 go run ./cmd/octomaton
 ```
 
-Tests use an in-process fake of the GitHub API (`internal/githubapp/githubtest`) and client-go's fake clients;
-`internal/e2e` drives signed webhooks through the whole service.
+### Architecture
 
-Layout: `cmd/octomaton` (the server: startup and shutdown), `cmd/octomaton-lint`; `internal/config` (server
-configuration, namespaces), `internal/telemetry` (logs and OpenTelemetry), `internal/http` (HTTP server, readiness),
-`internal/leader` (Lease election), `internal/kube` (API clients), `internal/buildinfo` (version),
-`internal/repoconfig` (`.octomaton.yaml` schema and matching), `internal/tmpl` (template context),
-`internal/githubapp` (App auth and GitHub API), `internal/webhook` (signatures, dedupe, worker pool),
-`internal/trigger` (events → held runs, concurrency, re-runs, comments, schedules, maintenance), `internal/tekton`
-(PipelineRun rendering and client), `internal/reporter` (check-run reporting), `internal/checkrun` (trigger context
-marker), `internal/relay`, `internal/lint`, `internal/metrics`.
+The code has three layers, wired together by `cmd/octomaton`; dependencies point inward
+([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-architecture.md)):
+
+- **Services** (`internal/services`) hold the CI logic, in Octomaton's own terms. `ci` defines the vocabulary
+  (repository, trigger, event, run, report) and the ports the other layers implement: `CodeHost` (GitHub) and `Runner`
+  (Tekton).
+- **Adapters** (`internal/adapters`) implement the ports over GitHub, Tekton, Kubernetes and HTTP.
+- **System** (`internal/system`) configures the process: configuration, telemetry, metrics, the version.
+
+| Package | Role |
+| --- | --- |
+| `cmd/octomaton` | The server: signals, telemetry, configuration, wiring, shutdown |
+| `cmd/octomaton-lint` | The linter's launcher |
+| `internal/services/ci` | Vocabulary and ports; standard library only (`citest`: in-memory `CodeHost` and `Runner`) |
+| `internal/services/pipelines` | `.octomaton.yaml`: schema, event matching, templates |
+| `internal/services/runs` | Events to runs: evaluation, trust, path filters, start, concurrency, re-runs, comment commands |
+| `internal/services/reports` | Runs to reports: progress, task tables, conclusions, failure logs, task checks |
+| `internal/services/schedules` | Cron triggers to runs |
+| `internal/services/upkeep` | Token refresh; freeing finished runs' resources |
+| `internal/services/lint` | Validating a repository's configuration as Octomaton would run it |
+| `internal/adapters/github` | `CodeHost`: App authentication, REST calls, check runs and their trigger marker, webhook payloads to events (`githubtest`: fake GitHub API) |
+| `internal/adapters/tekton` | `Runner`: PipelineRun rendering, bookkeeping labels and annotations, status to runs, the watch |
+| `internal/adapters/http` | HTTP server, readiness, the webhook endpoint (signature, deduplication, worker pool) |
+| `internal/adapters/kube`, `leader`, `relay` | Kubernetes clients, Lease election, forwarding deliveries |
+| `internal/system/config`, `telemetry`, `metrics`, `buildinfo` | Environment configuration, logs and OpenTelemetry, metric recorders, version |
+
+Services are tested against the in-memory `citest` fakes. Adapters are tested against the fake GitHub API and
+client-go's fake clients. `internal/e2e` drives signed webhooks through the real adapters and services. The layering
+itself is tested by `internal/architecture`, which fails on any import that points outward.
 
 ## Releases
 

@@ -3,23 +3,23 @@ package tekton
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"octomaton.dev/internal/services/ci"
 )
 
-// Condition is a knative-style status condition.
-type Condition struct {
+// condition is a knative-style status condition.
+type condition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
-// ChildReference points from a PipelineRun to one of its TaskRuns or CustomRuns.
-type ChildReference struct {
+// childReference points from a PipelineRun to one of its TaskRuns or CustomRuns.
+type childReference struct {
 	APIVersion       string `json:"apiVersion,omitempty"`
 	Kind             string `json:"kind,omitempty"`
 	Name             string `json:"name,omitempty"`
@@ -27,53 +27,53 @@ type ChildReference struct {
 	DisplayName      string `json:"displayName,omitempty"`
 }
 
-// SkippedTask is a pipeline task that did not run.
-type SkippedTask struct {
+// skippedTask is a pipeline task that did not run.
+type skippedTask struct {
 	Name   string `json:"name"`
 	Reason string `json:"reason,omitempty"`
 }
 
-// PipelineRunStatus is the subset of a PipelineRun's status Octomaton reads.
-type PipelineRunStatus struct {
-	Conditions      []Condition      `json:"conditions,omitempty"`
+// pipelineRunStatus is the subset of a PipelineRun's status Octomaton reads.
+type pipelineRunStatus struct {
+	Conditions      []condition      `json:"conditions,omitempty"`
 	StartTime       *metav1.Time     `json:"startTime,omitempty"`
 	CompletionTime  *metav1.Time     `json:"completionTime,omitempty"`
-	ChildReferences []ChildReference `json:"childReferences,omitempty"`
-	SkippedTasks    []SkippedTask    `json:"skippedTasks,omitempty"`
+	ChildReferences []childReference `json:"childReferences,omitempty"`
+	SkippedTasks    []skippedTask    `json:"skippedTasks,omitempty"`
 }
 
-// StepTerminated describes a finished step container.
-type StepTerminated struct {
+// stepTerminated describes a finished step container.
+type stepTerminated struct {
 	ExitCode int32  `json:"exitCode"`
 	Reason   string `json:"reason,omitempty"`
 	Message  string `json:"message,omitempty"`
 }
 
-// StepState is the state of one TaskRun step.
-type StepState struct {
+// stepState is the state of one TaskRun step.
+type stepState struct {
 	Name       string          `json:"name,omitempty"`
 	Container  string          `json:"container,omitempty"`
-	Terminated *StepTerminated `json:"terminated,omitempty"`
+	Terminated *stepTerminated `json:"terminated,omitempty"`
 }
 
-// TaskRunStatus is the subset of a TaskRun's status Octomaton reads.
-type TaskRunStatus struct {
-	Conditions     []Condition  `json:"conditions,omitempty"`
+// taskRunStatus is the subset of a TaskRun's status Octomaton reads.
+type taskRunStatus struct {
+	Conditions     []condition  `json:"conditions,omitempty"`
 	PodName        string       `json:"podName,omitempty"`
 	StartTime      *metav1.Time `json:"startTime,omitempty"`
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-	Steps          []StepState  `json:"steps,omitempty"`
+	Steps          []stepState  `json:"steps,omitempty"`
 }
 
-// GetPipelineRunStatus decodes a PipelineRun's status.
-func GetPipelineRunStatus(obj *unstructured.Unstructured) (PipelineRunStatus, error) {
-	var st PipelineRunStatus
+// getPipelineRunStatus decodes a PipelineRun's status.
+func getPipelineRunStatus(obj *unstructured.Unstructured) (pipelineRunStatus, error) {
+	var st pipelineRunStatus
 	return st, decodeStatus(obj, &st)
 }
 
-// GetTaskRunStatus decodes a TaskRun's status.
-func GetTaskRunStatus(obj *unstructured.Unstructured) (TaskRunStatus, error) {
-	var st TaskRunStatus
+// getTaskRunStatus decodes a TaskRun's status.
+func getTaskRunStatus(obj *unstructured.Unstructured) (taskRunStatus, error) {
+	var st taskRunStatus
 	return st, decodeStatus(obj, &st)
 }
 
@@ -91,84 +91,43 @@ func decodeStatus(obj *unstructured.Unstructured, into any) error {
 	return nil
 }
 
-// Succeeded returns the Succeeded condition, if any.
-func Succeeded(conditions []Condition) (Condition, bool) {
+// succeeded returns the Succeeded condition, if any.
+func succeeded(conditions []condition) (condition, bool) {
 	for _, c := range conditions {
 		if c.Type == "Succeeded" {
 			return c, true
 		}
 	}
-	return Condition{}, false
+	return condition{}, false
 }
 
-// Check-run statuses and conclusions.
-const (
-	StatusQueued     = "queued"
-	StatusInProgress = "in_progress"
-	StatusCompleted  = "completed"
-
-	ConclusionSuccess   = "success"
-	ConclusionFailure   = "failure"
-	ConclusionCancelled = "cancelled"
-	ConclusionTimedOut  = "timed_out"
-	ConclusionSkipped   = "skipped"
-)
-
-// Outcome is a PipelineRun state expressed as a GitHub check-run status and conclusion.
-type Outcome struct {
-	Status     string
-	Conclusion string
-	Reason     string
-	Message    string
-	// Title is a short description of the conclusion ("Succeeded", "Superseded", ...).
-	Title string
-}
-
-// Done reports whether the outcome is final.
-func (o Outcome) Done() bool { return o.Status == StatusCompleted }
-
-// OutcomeOf maps a Succeeded condition to a check-run status and conclusion:
-// no condition or Unknown → in_progress; True → success; False with reason
-// Cancelled, CancelledRunFinally or StoppedRunFinally → cancelled; False with
-// reason PipelineRunTimeout → timed_out; any other False → failure.
-func OutcomeOf(conditions []Condition) Outcome {
-	c, ok := Succeeded(conditions)
+// conclusionOf maps a Succeeded condition to how a run (or TaskRun) ended: True is success; False
+// is cancelled for a cancelled or stopped reason (Cancelled, CancelledRunFinally,
+// StoppedRunFinally), timed out for a timeout reason (PipelineRunTimeout, TaskRunTimeout), and
+// failure otherwise. done is false while it has not ended: no condition, or Unknown.
+func conclusionOf(conditions []condition) (conclusion ci.Conclusion, message string, done bool) {
+	c, ok := succeeded(conditions)
 	if !ok {
-		return Outcome{Status: StatusInProgress}
+		return "", "", false
 	}
-	o := Outcome{Reason: c.Reason, Message: c.Message}
 	switch c.Status {
 	case "True":
-		o.Status, o.Conclusion, o.Title = StatusCompleted, ConclusionSuccess, "Succeeded"
+		return ci.Success, c.Message, true
 	case "False":
-		o.Status = StatusCompleted
 		switch {
-		case c.Reason == "Cancelled" || c.Reason == "CancelledRunFinally" || c.Reason == "StoppedRunFinally" ||
-			strings.Contains(c.Reason, "Cancel") || strings.Contains(c.Reason, "Stopped"):
-			o.Conclusion, o.Title = ConclusionCancelled, "Cancelled"
-		case c.Reason == "PipelineRunTimeout" || strings.Contains(c.Reason, "Timeout"):
-			o.Conclusion, o.Title = ConclusionTimedOut, "Timed out"
+		case strings.Contains(c.Reason, "Cancel") || strings.Contains(c.Reason, "Stopped"):
+			return ci.Cancelled, c.Message, true
+		case strings.Contains(c.Reason, "Timeout"):
+			return ci.TimedOut, c.Message, true
 		default:
-			o.Conclusion, o.Title = ConclusionFailure, "Failed"
+			return ci.Failure, c.Message, true
 		}
-	default:
-		o.Status = StatusInProgress
 	}
-	return o
+	return "", "", false
 }
 
-// RunOutcome is OutcomeOf for a PipelineRun, where a finished run that
-// Octomaton superseded concludes as skipped ("Superseded").
-func RunOutcome(pr *unstructured.Unstructured, st PipelineRunStatus) Outcome {
-	o := OutcomeOf(st.Conditions)
-	if o.Done() && o.Conclusion != ConclusionSuccess && pr.GetAnnotations()[AnnotationSupersededBy] != "" {
-		o.Conclusion, o.Title = ConclusionSkipped, "Superseded"
-	}
-	return o
-}
-
-// IsDone reports whether a PipelineRun (or TaskRun) has finished.
-func IsDone(obj *unstructured.Unstructured) bool {
+// isDone reports whether a PipelineRun (or TaskRun) has finished.
+func isDone(obj *unstructured.Unstructured) bool {
 	if t, _, _ := unstructured.NestedString(obj.Object, "status", "completionTime"); t != "" {
 		return true
 	}
@@ -182,8 +141,8 @@ func IsDone(obj *unstructured.Unstructured) bool {
 	return false
 }
 
-// CancelRequested reports whether spec.status requests cancellation.
-func CancelRequested(obj *unstructured.Unstructured) bool {
+// cancelRequested reports whether spec.status requests cancellation.
+func cancelRequested(obj *unstructured.Unstructured) bool {
 	s, _, _ := unstructured.NestedString(obj.Object, "spec", "status")
 	switch s {
 	case "Cancelled", "CancelledRunFinally", "StoppedRunFinally":
@@ -192,20 +151,20 @@ func CancelRequested(obj *unstructured.Unstructured) bool {
 	return false
 }
 
-// IsPending reports whether a run is held (spec.status PipelineRunPending).
-func IsPending(obj *unstructured.Unstructured) bool {
+// isPending reports whether a run is held (spec.status PipelineRunPending).
+func isPending(obj *unstructured.Unstructured) bool {
 	s, _, _ := unstructured.NestedString(obj.Object, "spec", "status")
-	return s == SpecStatusPending
+	return s == specStatusPending
 }
 
-// Started reports whether Tekton started a released run.
-func Started(obj *unstructured.Unstructured) bool {
+// started reports whether Tekton started a released run.
+func started(obj *unstructured.Unstructured) bool {
 	t, _, _ := unstructured.NestedString(obj.Object, "status", "startTime")
-	return t != "" && !IsPending(obj)
+	return t != "" && !isPending(obj)
 }
 
-// Results returns a run's (or TaskRun's) results by name.
-func Results(obj *unstructured.Unstructured) map[string]string {
+// resultsOf returns a run's (or TaskRun's) results by name.
+func resultsOf(obj *unstructured.Unstructured) map[string]string {
 	out := map[string]string{}
 	list, _, _ := unstructured.NestedSlice(obj.Object, "status", "results")
 	for _, r := range list {
@@ -216,15 +175,4 @@ func Results(obj *unstructured.Unstructured) map[string]string {
 		}
 	}
 	return out
-}
-
-// Duration returns the time between start and end (or now when end is nil).
-func Duration(start, end *metav1.Time, now time.Time) time.Duration {
-	if start == nil {
-		return 0
-	}
-	if end != nil {
-		return end.Sub(start.Time)
-	}
-	return now.Sub(start.Time)
 }

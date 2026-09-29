@@ -1,5 +1,8 @@
-// Package tekton loads, renders, creates and inspects Tekton PipelineRuns using
-// unstructured objects and the dynamic client (the Tekton Go module is not imported).
+// Package tekton is Octomaton's runner: Runner implements ci.Runner over Tekton PipelineRuns in the
+// repositories' namespaces. It renders and creates PipelineRuns, keeps Octomaton's bookkeeping in
+// their labels and annotations, maps their status to ci.Run and watches them for the leader;
+// Renderer renders them without a cluster, for octomaton-lint. Tekton objects are unstructured and go
+// through the dynamic client (the Tekton Go module is not imported).
 package tekton
 
 import (
@@ -29,91 +32,83 @@ var (
 )
 
 const (
-	// APIVersion is the only PipelineRun API version Octomaton accepts.
-	APIVersion = "tekton.dev/v1"
-	// KindPipelineRun is the only kind Octomaton accepts in a pipelineRun file.
-	KindPipelineRun = "PipelineRun"
+	// apiVersion is the only PipelineRun API version Octomaton accepts.
+	apiVersion = "tekton.dev/v1"
+	// kindPipelineRun is the only kind Octomaton accepts in a pipelineRun file.
+	kindPipelineRun = "PipelineRun"
 )
 
 // Values of spec.status Octomaton writes: a pending run is held until the
 // field is cleared; a cancelled one stops, running its finally tasks.
 const (
-	SpecStatusPending   = "PipelineRunPending"
-	SpecStatusCancelled = "CancelledRunFinally"
+	specStatusPending   = "PipelineRunPending"
+	specStatusCancelled = "CancelledRunFinally"
 )
 
 // Labels Octomaton writes on the objects it creates (bookkeeping only; they
 // are never read as configuration).
 const (
-	LabelManagedBy    = "app.kubernetes.io/managed-by"
-	ManagedByValue    = "octomaton"
-	LabelPipeline     = "octomaton.dev/pipeline"
-	LabelEvent        = "octomaton.dev/event"
-	LabelRepositoryID = "octomaton.dev/repository-id"
-	LabelSHA          = "octomaton.dev/sha"
-	// LabelConcurrencyGroup holds a hash of the repository and the concurrency group.
-	LabelConcurrencyGroup = "octomaton.dev/concurrency-group"
-	LabelComment          = "octomaton.dev/comment"
-	LabelSlot             = "octomaton.dev/slot"
-	// LabelDone marks a run Octomaton has finished reporting on.
-	LabelDone = "octomaton.dev/done"
-	// LabelPVCsFreed marks a finished run whose PVCs were deleted.
-	LabelPVCsFreed = "octomaton.dev/pvcs-freed"
+	labelManagedBy    = "app.kubernetes.io/managed-by"
+	managedByValue    = "octomaton"
+	labelPipeline     = "octomaton.dev/pipeline"
+	labelEvent        = "octomaton.dev/event"
+	labelRepositoryID = "octomaton.dev/repository-id"
+	labelSHA          = "octomaton.dev/sha"
+	// labelConcurrencyGroup holds a hash of the repository and the concurrency group.
+	labelConcurrencyGroup = "octomaton.dev/concurrency-group"
+	labelComment          = "octomaton.dev/comment"
+	labelSlot             = "octomaton.dev/slot"
+	// labelDone marks a run Octomaton has finished reporting on.
+	labelDone = "octomaton.dev/done"
+	// labelPVCsFreed marks a finished run whose PVCs were deleted.
+	labelPVCsFreed = "octomaton.dev/pvcs-freed"
 )
 
 // Annotations Octomaton writes on the objects it creates.
 const (
-	AnnotationRepository        = "octomaton.dev/repository"
-	AnnotationSHA               = "octomaton.dev/sha"
-	AnnotationCheckRunID        = "octomaton.dev/check-run-id"
-	AnnotationInstallationID    = "octomaton.dev/installation-id"
-	AnnotationConcurrencyGroup  = "octomaton.dev/concurrency-group"
-	AnnotationConcurrencyPolicy = "octomaton.dev/concurrency-policy"
-	AnnotationDeliveryID        = "octomaton.dev/delivery-id"
-	// AnnotationContext holds the serialized trigger context (JSON).
-	AnnotationContext = "octomaton.dev/context"
-	// AnnotationHead identifies the branch (or tag) the run is for.
-	AnnotationHead    = "octomaton.dev/head"
-	AnnotationAttempt = "octomaton.dev/attempt"
-	// AnnotationToken holds the GitHub token settings (JSON) for resuming and refreshing.
-	AnnotationToken      = "octomaton.dev/token"
-	AnnotationTaskChecks = "octomaton.dev/task-checks"
-	// AnnotationReported records what was last reported: queued, in_progress, concluded or completed.
-	AnnotationReported        = "octomaton.dev/reported"
-	AnnotationProgress        = "octomaton.dev/progress"
-	AnnotationTaskCheckIDs    = "octomaton.dev/task-check-ids"
-	AnnotationTaskCheckStates = "octomaton.dev/task-check-states"
-	// AnnotationSupersededBy names the run (or "head:<sha>") that superseded this one.
-	AnnotationSupersededBy = "octomaton.dev/superseded-by"
-	// AnnotationWaitingFor names a same-commit rival a held run waits for.
-	AnnotationWaitingFor = "octomaton.dev/waiting-for"
-	// AnnotationCancelReason explains why Octomaton cancelled a run.
-	AnnotationCancelReason = "octomaton.dev/cancel-reason"
-	// AnnotationExpiresAt is the token expiry on a token Secret (RFC 3339).
-	AnnotationExpiresAt = "octomaton.dev/expires-at"
-	// AnnotationPermissions lists the token permissions on a token Secret (JSON).
-	AnnotationPermissions = "octomaton.dev/permissions"
-)
-
-// Reported states.
-const (
-	ReportedQueued     = "queued"
-	ReportedInProgress = "in_progress"
-	ReportedConcluded  = "concluded"
-	ReportedCompleted  = "completed"
+	annotationRepository        = "octomaton.dev/repository"
+	annotationSHA               = "octomaton.dev/sha"
+	annotationCheckRunID        = "octomaton.dev/check-run-id"
+	annotationInstallationID    = "octomaton.dev/installation-id"
+	annotationConcurrencyGroup  = "octomaton.dev/concurrency-group"
+	annotationConcurrencyPolicy = "octomaton.dev/concurrency-policy"
+	annotationDeliveryID        = "octomaton.dev/delivery-id"
+	// annotationContext holds the serialized trigger context (JSON).
+	annotationContext = "octomaton.dev/context"
+	// annotationHead identifies the branch (or tag) the run is for.
+	annotationHead    = "octomaton.dev/head"
+	annotationAttempt = "octomaton.dev/attempt"
+	// annotationToken holds the GitHub token settings (JSON) for resuming and refreshing.
+	annotationToken      = "octomaton.dev/token"
+	annotationTaskChecks = "octomaton.dev/task-checks"
+	// annotationReported records what was last reported: queued, in_progress, concluded or completed.
+	annotationReported        = "octomaton.dev/reported"
+	annotationProgress        = "octomaton.dev/progress"
+	annotationTaskCheckIDs    = "octomaton.dev/task-check-ids"
+	annotationTaskCheckStates = "octomaton.dev/task-check-states"
+	// annotationSupersededBy names the run (or "head:<sha>") that superseded this one.
+	annotationSupersededBy = "octomaton.dev/superseded-by"
+	// annotationWaitingFor names a same-commit rival a held run waits for.
+	annotationWaitingFor = "octomaton.dev/waiting-for"
+	// annotationCancelReason explains why Octomaton cancelled a run.
+	annotationCancelReason = "octomaton.dev/cancel-reason"
+	// annotationExpiresAt is the token expiry on a token Secret (RFC 3339).
+	annotationExpiresAt = "octomaton.dev/expires-at"
+	// annotationPermissions lists the token permissions on a token Secret (JSON).
+	annotationPermissions = "octomaton.dev/permissions"
 )
 
 const (
 	maxNameLength = 63
-	// TokenSecretSuffix is appended to the PipelineRun name to name its GitHub token Secret.
-	TokenSecretSuffix = "-github-token"
-	// TokenSecretKey is the Secret key holding the GitHub token.
-	TokenSecretKey = "token"
+	// tokenSecretSuffix is appended to the PipelineRun name to name its GitHub token Secret.
+	tokenSecretSuffix = "-github-token"
+	// tokenSecretKey is the Secret key holding the GitHub token.
+	tokenSecretKey = "token"
 )
 
-// ParsePipelineRun parses a pipelineRun file: exactly one YAML (or JSON) document
+// parsePipelineRun parses a pipelineRun file: exactly one YAML (or JSON) document
 // holding a tekton.dev/v1 PipelineRun. YAML is interpreted the way kubectl does.
-func ParsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
+func parsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
 	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 	var docs [][]byte
 	for {
@@ -141,11 +136,11 @@ func ParsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
 		return nil, fmt.Errorf("the document is not a YAML mapping: %w", err)
 	}
 	pr := &unstructured.Unstructured{Object: obj}
-	if v := pr.GetAPIVersion(); v != APIVersion {
-		return nil, fmt.Errorf("apiVersion must be %q (got %q)", APIVersion, v)
+	if v := pr.GetAPIVersion(); v != apiVersion {
+		return nil, fmt.Errorf("apiVersion must be %q (got %q)", apiVersion, v)
 	}
-	if k := pr.GetKind(); k != KindPipelineRun {
-		return nil, fmt.Errorf("kind must be %q (got %q)", KindPipelineRun, k)
+	if k := pr.GetKind(); k != kindPipelineRun {
+		return nil, fmt.Errorf("kind must be %q (got %q)", kindPipelineRun, k)
 	}
 	if spec, found, err := unstructured.NestedFieldNoCopy(obj, "spec"); err != nil || (found && !isMap(spec)) {
 		return nil, errors.New("spec must be a mapping")
@@ -158,18 +153,18 @@ func isMap(v any) bool {
 	return ok
 }
 
-// ShortSHA abbreviates a commit SHA to seven characters.
-func ShortSHA(sha string) string {
+// shortSHA abbreviates a commit SHA to seven characters.
+func shortSHA(sha string) string {
 	if len(sha) > 7 {
 		return sha[:7]
 	}
 	return sha
 }
 
-// RunName is the name of a pipeline's run: <repo>-<pipeline>-<sha7>-<attempt>,
+// runName is the name of a pipeline's run: <repo>-<pipeline>-<sha7>-<attempt>,
 // reduced to a DNS label of at most 63 characters.
-func RunName(repository, pipeline, sha string, attempt int) string {
-	suffix := "-" + ShortSHA(sha) + "-" + strconv.Itoa(attempt)
+func runName(repository, pipeline, sha string, attempt int) string {
+	suffix := "-" + shortSHA(sha) + "-" + strconv.Itoa(attempt)
 	base := dnsLabel(repository + "-" + pipeline)
 	if limit := maxNameLength - len(suffix); len(base) > limit {
 		base = strings.TrimRight(base[:limit], "-")
@@ -193,20 +188,20 @@ func dnsLabel(s string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-// GroupLabel is a concurrency group as a label value: a hash of the repository
+// groupLabel is a concurrency group as a label value: a hash of the repository
 // and the group key, so groups never span repositories.
-func GroupLabel(repository, key string) string {
+func groupLabel(repository, key string) string {
 	sum := sha256.Sum256([]byte(repository + " " + key))
 	return hex.EncodeToString(sum[:8])
 }
 
-// TokenSecretName is the name of the Secret holding a PipelineRun's GitHub token.
-func TokenSecretName(pipelineRunName string) string {
-	return pipelineRunName + TokenSecretSuffix
+// tokenSecretName is the name of the Secret holding a PipelineRun's GitHub token.
+func tokenSecretName(pipelineRunName string) string {
+	return pipelineRunName + tokenSecretSuffix
 }
 
-// RenderInput describes how Octomaton customizes a PipelineRun.
-type RenderInput struct {
+// renderInput describes how Octomaton customizes a PipelineRun.
+type renderInput struct {
 	Namespace string
 	Name      string
 	// Params set or override spec.params entries by name.
@@ -221,10 +216,10 @@ type RenderInput struct {
 	Held bool
 }
 
-// Render returns a copy of src customized for creation: namespace and name set,
+// render returns a copy of src customized for creation: namespace and name set,
 // generateName and server-populated fields cleared, params, timeout, token
 // workspace, labels and annotations applied, and optionally held.
-func Render(src *unstructured.Unstructured, in RenderInput) (*unstructured.Unstructured, error) {
+func render(src *unstructured.Unstructured, in renderInput) (*unstructured.Unstructured, error) {
 	if ns := src.GetNamespace(); ns != "" && ns != in.Namespace {
 		return nil, fmt.Errorf("the PipelineRun sets namespace %q, but this repository's runs must be in namespace %q", ns, in.Namespace)
 	}
@@ -256,12 +251,12 @@ func Render(src *unstructured.Unstructured, in RenderInput) (*unstructured.Unstr
 		}
 	}
 	if in.TokenWorkspace != "" {
-		if err := bindSecretWorkspace(pr, in.TokenWorkspace, TokenSecretName(in.Name)); err != nil {
+		if err := bindSecretWorkspace(pr, in.TokenWorkspace, tokenSecretName(in.Name)); err != nil {
 			return nil, err
 		}
 	}
 	if in.Held {
-		if err := unstructured.SetNestedField(pr.Object, SpecStatusPending, "spec", "status"); err != nil {
+		if err := unstructured.SetNestedField(pr.Object, specStatusPending, "spec", "status"); err != nil {
 			return nil, fmt.Errorf("setting spec.status: %w", err)
 		}
 	} else {
@@ -343,10 +338,10 @@ func indexByName(list []any, name string) int {
 	return -1
 }
 
-// Secrets lists every Secret a PipelineRun names: in a volume or workspace
+// secrets lists every Secret a PipelineRun names: in a volume or workspace
 // (secretName), a projected source (secret.name) or an environment variable
 // (secretKeyRef.name, secretRef.name).
-func Secrets(obj map[string]any) []string {
+func secrets(obj map[string]any) []string {
 	var out []string
 	var walk func(key string, v any)
 	walk = func(key string, v any) {
@@ -369,10 +364,10 @@ func Secrets(obj map[string]any) []string {
 	return out
 }
 
-// CheckSecrets refuses a PipelineRun that references any Secret other than
+// checkSecrets refuses a PipelineRun that references any Secret other than
 // allowed (its own token Secret, or none).
-func CheckSecrets(pr *unstructured.Unstructured, allowed string) error {
-	for _, name := range Secrets(pr.Object) {
+func checkSecrets(pr *unstructured.Unstructured, allowed string) error {
+	for _, name := range secrets(pr.Object) {
 		if name != allowed {
 			if allowed == "" {
 				return fmt.Errorf("the PipelineRun references Secret %q; runs may not mount Secrets (use githubToken for a GitHub token)", name)
@@ -383,10 +378,10 @@ func CheckSecrets(pr *unstructured.Unstructured, allowed string) error {
 	return nil
 }
 
-// TaskNames lists the tasks of a run's pipeline in order (finally tasks
+// taskNames lists the tasks of a run's pipeline in order (finally tasks
 // excluded): from status.pipelineSpec once Tekton has resolved it, else from
 // the run's own spec.pipelineSpec.
-func TaskNames(pr *unstructured.Unstructured) []string {
+func taskNames(pr *unstructured.Unstructured) []string {
 	tasks, _, _ := unstructured.NestedSlice(pr.Object, "status", "pipelineSpec", "tasks")
 	if len(tasks) == 0 {
 		tasks, _, _ = unstructured.NestedSlice(pr.Object, "spec", "pipelineSpec", "tasks")
@@ -400,9 +395,4 @@ func TaskNames(pr *unstructured.Unstructured) []string {
 		}
 	}
 	return out
-}
-
-// TaskCheckName is the name of the check reporting one task of a pipeline.
-func TaskCheckName(pipeline, task string) string {
-	return pipeline + " / " + task
 }

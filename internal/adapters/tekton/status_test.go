@@ -4,43 +4,47 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/services/ci"
 )
 
-func TestOutcomeOf(t *testing.T) {
+func TestConclusionOf(t *testing.T) {
 	tests := []struct {
 		name           string
-		conditions     []Condition
-		wantStatus     string
-		wantConclusion string
+		conditions     []condition
+		wantDone       bool
+		wantConclusion ci.Conclusion
 	}{
-		{"no status yet (pending)", nil, StatusInProgress, ""},
-		{"started", []Condition{{Type: "Succeeded", Status: "Unknown", Reason: "Started"}}, StatusInProgress, ""},
-		{"running", []Condition{{Type: "Succeeded", Status: "Unknown", Reason: "Running"}}, StatusInProgress, ""},
-		{"pending", []Condition{{Type: "Succeeded", Status: "Unknown", Reason: "PipelineRunPending"}}, StatusInProgress, ""},
-		{"succeeded", []Condition{{Type: "Succeeded", Status: "True", Reason: "Succeeded"}}, StatusCompleted, ConclusionSuccess},
-		{"completed with skips", []Condition{{Type: "Succeeded", Status: "True", Reason: "Completed"}}, StatusCompleted, ConclusionSuccess},
-		{"cancelled", []Condition{{Type: "Succeeded", Status: "False", Reason: "Cancelled"}}, StatusCompleted, ConclusionCancelled},
-		{"cancelled, finally ran", []Condition{{Type: "Succeeded", Status: "False", Reason: "CancelledRunFinally"}}, StatusCompleted, ConclusionCancelled},
-		{"stopped, finally ran", []Condition{{Type: "Succeeded", Status: "False", Reason: "StoppedRunFinally"}}, StatusCompleted, ConclusionCancelled},
-		{"timed out", []Condition{{Type: "Succeeded", Status: "False", Reason: "PipelineRunTimeout"}}, StatusCompleted, ConclusionTimedOut},
-		{"failed", []Condition{{Type: "Succeeded", Status: "False", Reason: "Failed"}}, StatusCompleted, ConclusionFailure},
-		{"could not get pipeline", []Condition{{Type: "Succeeded", Status: "False", Reason: "CouldntGetPipeline"}}, StatusCompleted, ConclusionFailure},
-		{"other condition types are ignored", []Condition{{Type: "Ready", Status: "True"}}, StatusInProgress, ""},
+		{name: "no status yet (pending)"},
+		{name: "started", conditions: []condition{{Type: "Succeeded", Status: "Unknown", Reason: "Started"}}},
+		{name: "running", conditions: []condition{{Type: "Succeeded", Status: "Unknown", Reason: "Running"}}},
+		{name: "pending", conditions: []condition{{Type: "Succeeded", Status: "Unknown", Reason: "PipelineRunPending"}}},
+		{name: "succeeded", conditions: []condition{{Type: "Succeeded", Status: "True", Reason: "Succeeded"}}, wantDone: true, wantConclusion: ci.Success},
+		{name: "completed with skips", conditions: []condition{{Type: "Succeeded", Status: "True", Reason: "Completed"}}, wantDone: true, wantConclusion: ci.Success},
+		{name: "cancelled", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "Cancelled"}}, wantDone: true, wantConclusion: ci.Cancelled},
+		{name: "cancelled, finally ran", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "CancelledRunFinally"}}, wantDone: true, wantConclusion: ci.Cancelled},
+		{name: "stopped, finally ran", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "StoppedRunFinally"}}, wantDone: true, wantConclusion: ci.Cancelled},
+		{name: "timed out", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "PipelineRunTimeout"}}, wantDone: true, wantConclusion: ci.TimedOut},
+		{name: "task timed out", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "TaskRunTimeout"}}, wantDone: true, wantConclusion: ci.TimedOut},
+		{name: "failed", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "Failed", Message: "boom"}}, wantDone: true, wantConclusion: ci.Failure},
+		{name: "could not get pipeline", conditions: []condition{{Type: "Succeeded", Status: "False", Reason: "CouldntGetPipeline"}}, wantDone: true, wantConclusion: ci.Failure},
+		{name: "other condition types are ignored", conditions: []condition{{Type: "Ready", Status: "True"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			o := OutcomeOf(tt.conditions)
-			if o.Status != tt.wantStatus || o.Conclusion != tt.wantConclusion {
-				t.Fatalf("OutcomeOf = %+v, want %s/%s", o, tt.wantStatus, tt.wantConclusion)
+			conclusion, message, done := conclusionOf(tt.conditions)
+			if done != tt.wantDone || conclusion != tt.wantConclusion {
+				t.Fatalf("conclusionOf = %q, %v; want %q, %v", conclusion, done, tt.wantConclusion, tt.wantDone)
+			}
+			if c, ok := succeeded(tt.conditions); ok && done && message != c.Message {
+				t.Fatalf("message = %q, want the condition's %q", message, c.Message)
 			}
 		})
 	}
 }
 
 func run(status map[string]any, spec map[string]any, annotations map[string]string) *unstructured.Unstructured {
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": APIVersion, "kind": KindPipelineRun, "metadata": map[string]any{"name": "r", "namespace": "ns"}}}
+	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": apiVersion, "kind": kindPipelineRun, "metadata": map[string]any{"name": "r", "namespace": "ns"}}}
 	if status != nil {
 		u.Object["status"] = status
 	}
@@ -51,20 +55,6 @@ func run(status map[string]any, spec map[string]any, annotations map[string]stri
 	return u
 }
 
-func TestRunOutcomeSuperseded(t *testing.T) {
-	cancelled := map[string]any{"conditions": []any{map[string]any{"type": "Succeeded", "status": "False", "reason": "CancelledRunFinally"}}}
-	pr := run(cancelled, nil, map[string]string{AnnotationSupersededBy: "head:abc"})
-	st, _ := GetPipelineRunStatus(pr)
-	if o := RunOutcome(pr, st); o.Conclusion != ConclusionSkipped || o.Title != "Superseded" {
-		t.Fatalf("superseded run = %+v, want skipped", o)
-	}
-	succeeded := run(map[string]any{"conditions": []any{map[string]any{"type": "Succeeded", "status": "True"}}}, nil, map[string]string{AnnotationSupersededBy: "x"})
-	st, _ = GetPipelineRunStatus(succeeded)
-	if o := RunOutcome(succeeded, st); o.Conclusion != ConclusionSuccess {
-		t.Fatalf("a run that succeeded before being superseded stays successful: %+v", o)
-	}
-}
-
 func TestRunPredicates(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	tests := []struct {
@@ -72,17 +62,17 @@ func TestRunPredicates(t *testing.T) {
 		pr                                      *unstructured.Unstructured
 		done, pending, started, cancelRequested bool
 	}{
-		{"fresh held run", run(nil, map[string]any{"status": SpecStatusPending}, nil), false, true, false, false},
+		{"fresh held run", run(nil, map[string]any{"status": specStatusPending}, nil), false, true, false, false},
 		{"released, not started", run(nil, map[string]any{}, nil), false, false, false, false},
 		{"running", run(map[string]any{"startTime": now}, map[string]any{}, nil), false, false, true, false},
-		{"cancelling", run(map[string]any{"startTime": now}, map[string]any{"status": SpecStatusCancelled}, nil), false, false, true, true},
+		{"cancelling", run(map[string]any{"startTime": now}, map[string]any{"status": specStatusCancelled}, nil), false, false, true, true},
 		{"finished by condition", run(map[string]any{"conditions": []any{map[string]any{"type": "Succeeded", "status": "False"}}}, nil, nil), true, false, false, false},
 		{"finished by completion time", run(map[string]any{"completionTime": now}, nil, nil), true, false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if IsDone(tt.pr) != tt.done || IsPending(tt.pr) != tt.pending || Started(tt.pr) != tt.started || CancelRequested(tt.pr) != tt.cancelRequested {
-				t.Fatalf("done=%v pending=%v started=%v cancel=%v", IsDone(tt.pr), IsPending(tt.pr), Started(tt.pr), CancelRequested(tt.pr))
+			if isDone(tt.pr) != tt.done || isPending(tt.pr) != tt.pending || started(tt.pr) != tt.started || cancelRequested(tt.pr) != tt.cancelRequested {
+				t.Fatalf("done=%v pending=%v started=%v cancel=%v", isDone(tt.pr), isPending(tt.pr), started(tt.pr), cancelRequested(tt.pr))
 			}
 		})
 	}
@@ -97,28 +87,21 @@ func TestStatusDecoding(t *testing.T) {
 		"skippedTasks":    []any{map[string]any{"name": "deploy", "reason": "When Expressions evaluated to false"}},
 		"results":         []any{map[string]any{"name": "check-title", "value": "Done"}, map[string]any{"name": "list", "value": []any{"a"}}},
 	}, nil, nil)
-	st, err := GetPipelineRunStatus(pr)
+	st, err := getPipelineRunStatus(pr)
 	if err != nil {
 		t.Fatalf("GetPipelineRunStatus: %v", err)
 	}
 	if len(st.ChildReferences) != 1 || st.ChildReferences[0].PipelineTaskName != "build" || len(st.SkippedTasks) != 1 {
 		t.Fatalf("status = %+v", st)
 	}
-	if d := Duration(st.StartTime, st.CompletionTime, time.Now()); d != 150*time.Second {
-		t.Fatalf("Duration = %v", d)
+	if st.StartTime == nil || st.CompletionTime == nil || st.CompletionTime.Sub(st.StartTime.Time) != 150*time.Second {
+		t.Fatalf("start and completion times = %v, %v", st.StartTime, st.CompletionTime)
 	}
-	if Duration(nil, nil, time.Now()) != 0 {
-		t.Fatalf("no start time, no duration")
-	}
-	start := metav1.NewTime(time.Now().Add(-time.Minute))
-	if d := Duration(&start, nil, time.Now()); d < time.Minute {
-		t.Fatalf("running duration = %v", d)
-	}
-	if got := Results(pr); got["check-title"] != "Done" || len(got) != 1 {
+	if got := resultsOf(pr); got["check-title"] != "Done" || len(got) != 1 {
 		t.Fatalf("Results = %v (string results only)", got)
 	}
 	tr := run(map[string]any{"podName": "p", "steps": []any{map[string]any{"name": "s", "container": "step-s", "terminated": map[string]any{"exitCode": int64(2)}}}}, nil, nil)
-	ts, err := GetTaskRunStatus(tr)
+	ts, err := getTaskRunStatus(tr)
 	if err != nil || ts.PodName != "p" || ts.Steps[0].Terminated.ExitCode != 2 {
 		t.Fatalf("GetTaskRunStatus = %+v, %v", ts, err)
 	}

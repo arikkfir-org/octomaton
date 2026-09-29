@@ -193,19 +193,6 @@ func (g *GitHub) Key() *rsa.PrivateKey {
 	return g.key
 }
 
-// OwnerAllowed reports whether events from repositories owned by owner are processed.
-func (g *GitHub) OwnerAllowed(owner string) bool {
-	if len(g.AllowedOwners) == 0 {
-		return true
-	}
-	for _, allowed := range g.AllowedOwners {
-		if strings.EqualFold(allowed, owner) {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *Pod) setDefaults() {
 	if p.Name == "" {
 		p.Name, _ = os.Hostname()

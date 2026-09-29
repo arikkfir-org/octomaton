@@ -31,7 +31,7 @@ func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 	if err != nil {
 		return ci.Details{}, err
 	}
-	results := Results(pr)
+	results := resultsOf(pr)
 	fromTasks(pr, results, taskRuns)
 	return ci.Details{Tasks: tasksOf(pr, taskRuns), Results: results}, nil
 }
@@ -54,7 +54,7 @@ func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured
 			byTask[task] = &taskRuns[i]
 		}
 	}
-	st, _ := GetPipelineRunStatus(pr)
+	st, _ := getPipelineRunStatus(pr)
 	skipped := map[string]string{}
 	for _, s := range st.SkippedTasks {
 		skipped[s.Name] = s.Reason
@@ -74,7 +74,7 @@ func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured
 		}
 		tasks = append(tasks, t)
 	}
-	for _, name := range TaskNames(pr) {
+	for _, name := range taskNames(pr) {
 		add(name)
 	}
 	sort.SliceStable(others, func(i, j int) bool {
@@ -90,21 +90,21 @@ func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured
 }
 
 func fillTask(t *ci.Task, tr *unstructured.Unstructured) {
-	ts, err := GetTaskRunStatus(tr)
+	ts, err := getTaskRunStatus(tr)
 	if err != nil {
 		return
 	}
-	o := OutcomeOf(ts.Conditions)
+	conclusion, message, done := conclusionOf(ts.Conditions)
 	switch {
-	case !o.Done() && ts.StartTime == nil:
+	case !done && ts.StartTime == nil:
 		t.State = ci.TaskPending
-	case !o.Done():
+	case !done:
 		t.State = ci.TaskRunning
-	case o.Conclusion == ConclusionSuccess:
+	case conclusion == ci.Success:
 		t.State = ci.TaskSucceeded
-	case o.Conclusion == ConclusionCancelled:
+	case conclusion == ci.Cancelled:
 		t.State = ci.TaskCancelled
-	case o.Conclusion == ConclusionTimedOut:
+	case conclusion == ci.TimedOut:
 		t.State = ci.TaskTimedOut
 	default:
 		t.State = ci.TaskFailed
@@ -115,11 +115,11 @@ func fillTask(t *ci.Task, tr *unstructured.Unstructured) {
 	if ts.CompletionTime != nil {
 		t.Finished = ts.CompletionTime.Time.UTC()
 	}
-	t.Results = Results(tr)
+	t.Results = resultsOf(tr)
 	if t.State != ci.TaskFailed && t.State != ci.TaskTimedOut {
 		return
 	}
-	t.Message = o.Message
+	t.Message = message
 	for _, step := range ts.Steps {
 		if step.Terminated != nil && step.Terminated.ExitCode != 0 && step.Container != "" {
 			logs := ""
@@ -154,7 +154,7 @@ func fromTasks(pr *unstructured.Unstructured, results map[string]string, taskRun
 			if taskRuns[i].GetLabels()[labelPipelineTask] != ref[1] {
 				continue
 			}
-			if v, ok := Results(&taskRuns[i])[ref[2]]; ok {
+			if v, ok := resultsOf(&taskRuns[i])[ref[2]]; ok {
 				results[name] = v
 			}
 		}
@@ -175,7 +175,7 @@ func (r *Runner) StepLogs(ctx context.Context, id ci.RunID, step ci.Step, tailLi
 func (r *Runner) SetToken(ctx context.Context, run ci.Run, t ci.Token) error {
 	c := r.client()
 	id := run.ID
-	token := Token{Value: t.Value, ExpiresAt: t.ExpiresAt, Permissions: t.Permissions}
+	token := token{Value: t.Value, ExpiresAt: t.ExpiresAt, Permissions: t.Permissions}
 	secret, err := c.TokenSecret(ctx, id.Tenant, id.Name)
 	if err != nil {
 		return err
@@ -191,8 +191,8 @@ func (r *Runner) SetToken(ctx context.Context, run ci.Run, t ci.Token) error {
 		return ci.ErrNotFound
 	}
 	err = c.CreateTokenSecret(ctx, pr, token, map[string]string{
-		AnnotationRepository:     run.Trigger.Repository.FullName,
-		AnnotationInstallationID: strconv.FormatInt(run.Trigger.InstallationID, 10),
+		annotationRepository:     run.Trigger.Repository.FullName,
+		annotationInstallationID: strconv.FormatInt(run.Trigger.InstallationID, 10),
 	})
 	if !apierrors.IsAlreadyExists(err) {
 		return err
@@ -211,6 +211,6 @@ func (r *Runner) TokenExpiry(ctx context.Context, id ci.RunID) (time.Time, bool,
 	if err != nil || secret == nil {
 		return time.Time{}, false, err
 	}
-	expires, _ := time.Parse(time.RFC3339, secret.Annotations[AnnotationExpiresAt])
+	expires, _ := time.Parse(time.RFC3339, secret.Annotations[annotationExpiresAt])
 	return expires, true, nil
 }

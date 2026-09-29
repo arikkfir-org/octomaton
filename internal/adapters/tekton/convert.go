@@ -15,26 +15,26 @@ func runOf(pr *unstructured.Unstructured) ci.Run {
 	run := ci.Run{
 		ID:               ci.RunID{Tenant: pr.GetNamespace(), Name: pr.GetName()},
 		Trigger:          triggerOf(pr),
-		Attempt:          int(parseInt(a[AnnotationAttempt])),
-		Group:            l[LabelConcurrencyGroup],
-		Policy:           ci.Policy(a[AnnotationConcurrencyPolicy]),
-		Token:            tokenSettingsOf(a[AnnotationToken]),
-		TaskReports:      a[AnnotationTaskChecks] == "true",
-		Tasks:            TaskNames(pr),
+		Attempt:          int(parseInt(a[annotationAttempt])),
+		Group:            l[labelConcurrencyGroup],
+		Policy:           ci.Policy(a[annotationConcurrencyPolicy]),
+		Token:            tokenSettingsOf(a[annotationToken]),
+		TaskReports:      a[annotationTaskChecks] == "true",
+		Tasks:            taskNames(pr),
 		Phase:            phaseOf(pr),
-		CancelRequested:  CancelRequested(pr),
+		CancelRequested:  cancelRequested(pr),
 		Deleting:         pr.GetDeletionTimestamp() != nil,
 		Cancellation:     cancellationOf(a),
 		Created:          pr.GetCreationTimestamp().Time.UTC(),
-		ReportID:         ci.ReportID(parseInt(a[AnnotationCheckRunID])),
-		Reported:         ci.Reported(a[AnnotationReported]),
-		Progress:         a[AnnotationProgress],
-		TaskReportIDs:    jsonMap[ci.ReportID](a[AnnotationTaskCheckIDs]),
-		TaskReportStates: jsonMap[ci.Status](a[AnnotationTaskCheckStates]),
-		WaitingFor:       a[AnnotationWaitingFor],
-		Done:             l[LabelDone] != "",
+		ReportID:         ci.ReportID(parseInt(a[annotationCheckRunID])),
+		Reported:         ci.Reported(a[annotationReported]),
+		Progress:         a[annotationProgress],
+		TaskReportIDs:    jsonMap[ci.ReportID](a[annotationTaskCheckIDs]),
+		TaskReportStates: jsonMap[ci.Status](a[annotationTaskCheckStates]),
+		WaitingFor:       a[annotationWaitingFor],
+		Done:             l[labelDone] != "",
 	}
-	st, _ := GetPipelineRunStatus(pr)
+	st, _ := getPipelineRunStatus(pr)
 	if st.StartTime != nil {
 		run.Started = st.StartTime.Time.UTC()
 	}
@@ -42,19 +42,20 @@ func runOf(pr *unstructured.Unstructured) ci.Run {
 		run.Finished = st.CompletionTime.Time.UTC()
 	}
 	if run.Phase == ci.Finished {
-		o := OutcomeOf(st.Conditions)
-		run.Outcome = ci.Outcome{Conclusion: ci.Conclusion(o.Conclusion), Message: o.Message}
+		if conclusion, message, done := conclusionOf(st.Conditions); done {
+			run.Outcome = ci.Outcome{Conclusion: conclusion, Message: message}
+		}
 	}
 	return run
 }
 
 func phaseOf(pr *unstructured.Unstructured) ci.Phase {
 	switch {
-	case IsDone(pr):
+	case isDone(pr):
 		return ci.Finished
-	case IsPending(pr):
+	case isPending(pr):
 		return ci.Held
-	case Started(pr):
+	case started(pr):
 		return ci.Running
 	default:
 		return ci.Released
@@ -65,25 +66,25 @@ func phaseOf(pr *unstructured.Unstructured) ci.Phase {
 // still names its repository, installation, commit and pipeline; such a trigger has Version 0.
 func triggerOf(pr *unstructured.Unstructured) ci.Trigger {
 	l, a := pr.GetLabels(), pr.GetAnnotations()
-	if raw := a[AnnotationContext]; raw != "" {
+	if raw := a[annotationContext]; raw != "" {
 		var t ci.Trigger
 		if err := json.Unmarshal([]byte(raw), &t); err == nil && t.Version == ci.TriggerVersion {
 			return t
 		}
 	}
-	owner, name, _ := strings.Cut(a[AnnotationRepository], "/")
+	owner, name, _ := strings.Cut(a[annotationRepository], "/")
 	return ci.Trigger{
-		Event:          l[LabelEvent],
-		InstallationID: parseInt(a[AnnotationInstallationID]),
-		Repository:     ci.Repository{ID: parseInt(l[LabelRepositoryID]), Owner: owner, Name: name, FullName: a[AnnotationRepository]},
-		Revision:       a[AnnotationSHA],
-		Pipeline:       l[LabelPipeline],
+		Event:          l[labelEvent],
+		InstallationID: parseInt(a[annotationInstallationID]),
+		Repository:     ci.Repository{ID: parseInt(l[labelRepositoryID]), Owner: owner, Name: name, FullName: a[annotationRepository]},
+		Revision:       a[annotationSHA],
+		Pipeline:       l[labelPipeline],
 	}
 }
 
 func cancellationOf(a map[string]string) ci.Cancellation {
-	c := ci.Cancellation{Reason: a[AnnotationCancelReason]}
-	by := a[AnnotationSupersededBy]
+	c := ci.Cancellation{Reason: a[annotationCancelReason]}
+	by := a[annotationSupersededBy]
 	if sha, ok := strings.CutPrefix(by, supersededByHead); ok {
 		c.NewerCommit = sha
 	} else {

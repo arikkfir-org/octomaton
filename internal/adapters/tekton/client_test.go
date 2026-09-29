@@ -15,23 +15,24 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"octomaton.dev/internal/services/ci"
 )
 
-func newClient(objects ...runtime.Object) (*Client, *kubefake.Clientset) {
+func newClient(objects ...runtime.Object) (*kubeClient, *kubefake.Clientset) {
 	kube := kubefake.NewSimpleClientset(objects...)
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
 		PipelineRuns: "PipelineRunList",
 		TaskRuns:     "TaskRunList",
 	})
-	return &Client{Dynamic: dyn, Kube: kube}, kube
+	return &kubeClient{Dynamic: dyn, Kube: kube}, kube
 }
 
 func newRun(ns, name string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": APIVersion, "kind": KindPipelineRun,
+		"apiVersion": apiVersion, "kind": kindPipelineRun,
 		"metadata": map[string]any{"name": name, "namespace": ns, "uid": "uid-" + name,
-			"labels": map[string]any{LabelPipeline: "ci", LabelRepositoryID: "42", LabelManagedBy: ManagedByValue}},
-		"spec": map[string]any{"status": SpecStatusPending, "pipelineRef": map[string]any{"name": "p"}},
+			"labels": map[string]any{labelPipeline: "ci", labelRepositoryID: "42", labelManagedBy: managedByValue}},
+		"spec": map[string]any{"status": specStatusPending, "pipelineRef": map[string]any{"name": "p"}},
 	}}
 	return u
 }
@@ -66,29 +67,29 @@ func TestRunLifecycle(t *testing.T) {
 	if err != nil || created.GetName() != "r1" {
 		t.Fatalf("Create = %v, %v", created, err)
 	}
-	if _, err := c.Create(ctx, newRun("ns", "r1")); !errors.Is(err, ErrAlreadyExists) {
+	if _, err := c.Create(ctx, newRun("ns", "r1")); !errors.Is(err, errAlreadyExists) {
 		t.Fatalf("second Create err = %v, want ErrAlreadyExists", err)
 	}
 	if err := c.SetStatus(ctx, "ns", "r1", ""); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 	got, _ := c.Get(ctx, "ns", "r1")
-	if IsPending(got) {
+	if isPending(got) {
 		t.Fatalf("clearing spec.status must release the run: %v", got.Object["spec"])
 	}
 	value := "v"
 	if err := c.Annotate(ctx, "ns", "r1", map[string]*string{"a": &value, "b": nil}); err != nil {
 		t.Fatalf("Annotate: %v", err)
 	}
-	if err := c.Cancel(ctx, "ns", "r1", map[string]string{AnnotationSupersededBy: "r2"}); err != nil {
+	if err := c.Cancel(ctx, "ns", "r1", map[string]string{annotationSupersededBy: "r2"}); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
-	if err := c.Label(ctx, "ns", "r1", map[string]string{LabelDone: "true"}, map[string]string{AnnotationReported: ReportedCompleted}); err != nil {
+	if err := c.Label(ctx, "ns", "r1", map[string]string{labelDone: "true"}, map[string]string{annotationReported: string(ci.ReportedCompleted)}); err != nil {
 		t.Fatalf("Label: %v", err)
 	}
 	got, _ = c.Get(ctx, "ns", "r1")
-	if !CancelRequested(got) || got.GetAnnotations()["a"] != "v" || got.GetAnnotations()[AnnotationSupersededBy] != "r2" ||
-		got.GetLabels()[LabelDone] != "true" || got.GetAnnotations()[AnnotationReported] != ReportedCompleted {
+	if !cancelRequested(got) || got.GetAnnotations()["a"] != "v" || got.GetAnnotations()[annotationSupersededBy] != "r2" ||
+		got.GetLabels()[labelDone] != "true" || got.GetAnnotations()[annotationReported] != string(ci.ReportedCompleted) {
 		t.Fatalf("run after patches = %v", got.Object)
 	}
 	if missing, err := c.Get(ctx, "ns", "nope"); missing != nil || err != nil {
@@ -97,11 +98,11 @@ func TestRunLifecycle(t *testing.T) {
 	if _, err := c.Create(ctx, newRun("ns", "r2")); err != nil {
 		t.Fatal(err)
 	}
-	list, err := c.List(ctx, "ns", "!"+LabelDone)
+	list, err := c.List(ctx, "ns", "!"+labelDone)
 	if err != nil || len(list) != 1 || list[0].GetName() != "r2" {
 		t.Fatalf("List(!done) = %v, %v", list, err)
 	}
-	all, err := c.List(ctx, "", LabelManagedBy+"="+ManagedByValue)
+	all, err := c.List(ctx, "", labelManagedBy+"="+managedByValue)
 	if err != nil || len(all) != 2 {
 		t.Fatalf("cluster-wide List = %d, %v", len(all), err)
 	}
@@ -112,25 +113,25 @@ func TestTokenSecret(t *testing.T) {
 	ctx := context.Background()
 	run := newRun("ns", "r1")
 	expires := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
-	if err := c.CreateTokenSecret(ctx, run, Token{Value: "t1", ExpiresAt: expires, Permissions: map[string]string{"contents": "read"}}, map[string]string{AnnotationRepository: "o/r"}); err != nil {
+	if err := c.CreateTokenSecret(ctx, run, token{Value: "t1", ExpiresAt: expires, Permissions: map[string]string{"contents": "read"}}, map[string]string{annotationRepository: "o/r"}); err != nil {
 		t.Fatalf("CreateTokenSecret: %v", err)
 	}
 	s, err := c.TokenSecret(ctx, "ns", "r1")
 	if err != nil || s == nil {
 		t.Fatalf("TokenSecret = %v, %v", s, err)
 	}
-	if s.Name != "r1-github-token" || string(s.Data[TokenSecretKey]) != "t1" || s.Annotations[AnnotationExpiresAt] != "2026-01-01T01:00:00Z" ||
-		s.Annotations[AnnotationPermissions] != `{"contents":"read"}` || s.Annotations[AnnotationRepository] != "o/r" {
+	if s.Name != "r1-github-token" || string(s.Data[tokenSecretKey]) != "t1" || s.Annotations[annotationExpiresAt] != "2026-01-01T01:00:00Z" ||
+		s.Annotations[annotationPermissions] != `{"contents":"read"}` || s.Annotations[annotationRepository] != "o/r" {
 		t.Fatalf("secret = %+v", s)
 	}
-	if len(s.OwnerReferences) != 1 || s.OwnerReferences[0].Kind != KindPipelineRun || s.OwnerReferences[0].Name != "r1" || s.OwnerReferences[0].UID != "uid-r1" {
+	if len(s.OwnerReferences) != 1 || s.OwnerReferences[0].Kind != kindPipelineRun || s.OwnerReferences[0].Name != "r1" || s.OwnerReferences[0].UID != "uid-r1" {
 		t.Fatalf("owner references = %+v", s.OwnerReferences)
 	}
-	if err := c.UpdateTokenSecret(ctx, s, Token{Value: "t2", ExpiresAt: expires.Add(time.Hour)}); err != nil {
+	if err := c.UpdateTokenSecret(ctx, s, token{Value: "t2", ExpiresAt: expires.Add(time.Hour)}); err != nil {
 		t.Fatalf("UpdateTokenSecret: %v", err)
 	}
 	s, _ = kube.CoreV1().Secrets("ns").Get(ctx, "r1-github-token", metav1.GetOptions{})
-	if string(s.Data[TokenSecretKey]) != "t2" || s.Annotations[AnnotationExpiresAt] != "2026-01-01T02:00:00Z" {
+	if string(s.Data[tokenSecretKey]) != "t2" || s.Annotations[annotationExpiresAt] != "2026-01-01T02:00:00Z" {
 		t.Fatalf("updated secret = %+v", s)
 	}
 	if missing, err := c.TokenSecret(ctx, "ns", "other"); missing != nil || err != nil {
@@ -157,7 +158,7 @@ func TestTaskRunsAndLogs(t *testing.T) {
 	c, _ := newClient()
 	ctx := context.Background()
 	tr := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": APIVersion, "kind": "TaskRun",
+		"apiVersion": apiVersion, "kind": "TaskRun",
 		"metadata": map[string]any{"name": "r1-build", "namespace": "ns", "labels": map[string]any{"tekton.dev/pipelineRun": "r1", "tekton.dev/pipelineTask": "build"}},
 	}}
 	if _, err := c.Dynamic.Resource(TaskRuns).Namespace("ns").Create(ctx, tr, metav1.CreateOptions{}); err != nil {

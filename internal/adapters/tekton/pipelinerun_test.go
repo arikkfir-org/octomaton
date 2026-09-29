@@ -44,7 +44,7 @@ func TestParsePipelineRun(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pr, err := ParsePipelineRun([]byte(tt.doc))
+			pr, err := parsePipelineRun([]byte(tt.doc))
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want one containing %q", err, tt.wantErr)
@@ -88,18 +88,18 @@ status:
 `
 
 func TestRenderGolden(t *testing.T) {
-	src, err := ParsePipelineRun([]byte(sourceRun))
+	src, err := parsePipelineRun([]byte(sourceRun))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Render(src, RenderInput{
+	got, err := render(src, renderInput{
 		Namespace:      "ci-repo",
 		Name:           "repo-ci-0123456-1",
 		Params:         map[string]string{"revision": "0123456789", "repo-url": "https://example/repo.git", "a-first": "x"},
 		Timeout:        90 * time.Minute,
 		TokenWorkspace: "github-token",
-		Labels:         map[string]string{LabelManagedBy: ManagedByValue, LabelPipeline: "ci"},
-		Annotations:    map[string]string{AnnotationSHA: "0123456789"},
+		Labels:         map[string]string{labelManagedBy: managedByValue, labelPipeline: "ci"},
+		Annotations:    map[string]string{annotationSHA: "0123456789"},
 		Held:           true,
 	})
 	if err != nil {
@@ -144,14 +144,14 @@ spec:
 func TestRenderVariants(t *testing.T) {
 	base := func(t *testing.T, doc string) *unstructured.Unstructured {
 		t.Helper()
-		pr, err := ParsePipelineRun([]byte(doc))
+		pr, err := parsePipelineRun([]byte(doc))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return pr
 	}
 	t.Run("appends params and workspaces to an empty spec", func(t *testing.T) {
-		pr, err := Render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n"), RenderInput{
+		pr, err := render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n"), renderInput{
 			Namespace: "ns", Name: "run", Params: map[string]string{"b": "2", "a": "1"}, TokenWorkspace: "tok",
 		})
 		if err != nil {
@@ -173,18 +173,18 @@ func TestRenderVariants(t *testing.T) {
 		}
 	})
 	t.Run("same namespace is accepted", func(t *testing.T) {
-		if _, err := Render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata: {namespace: ns}\nspec: {}\n"), RenderInput{Namespace: "ns", Name: "r"}); err != nil {
+		if _, err := render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata: {namespace: ns}\nspec: {}\n"), renderInput{Namespace: "ns", Name: "r"}); err != nil {
 			t.Fatalf("Render: %v", err)
 		}
 	})
 	t.Run("other namespace is refused", func(t *testing.T) {
-		_, err := Render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata: {namespace: other}\nspec: {}\n"), RenderInput{Namespace: "ns", Name: "r"})
+		_, err := render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata: {namespace: other}\nspec: {}\n"), renderInput{Namespace: "ns", Name: "r"})
 		if err == nil || !strings.Contains(err.Error(), `sets namespace "other"`) {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("params must be a list", func(t *testing.T) {
-		_, err := Render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {params: {a: b}}\n"), RenderInput{Namespace: "ns", Name: "r", Params: map[string]string{"a": "c"}})
+		_, err := render(base(t, "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {params: {a: b}}\n"), renderInput{Namespace: "ns", Name: "r", Params: map[string]string{"a": "c"}})
 		if err == nil || !strings.Contains(err.Error(), "spec.params must be a list") {
 			t.Fatalf("error = %v", err)
 		}
@@ -206,7 +206,7 @@ func TestRunName(t *testing.T) {
 		{strings.Repeat("r", 51) + "-x", "ci", 1, strings.Repeat("r", 51) + "-x-0123456-1"},
 	}
 	for _, tt := range tests {
-		got := RunName(tt.repo, tt.pipeline, sha, tt.attempt)
+		got := runName(tt.repo, tt.pipeline, sha, tt.attempt)
 		if got != tt.want {
 			t.Errorf("RunName(%q, %q, %d) = %q, want %q", tt.repo, tt.pipeline, tt.attempt, got, tt.want)
 		}
@@ -217,11 +217,11 @@ func TestRunName(t *testing.T) {
 }
 
 func TestGroupLabel(t *testing.T) {
-	a := GroupLabel("octo/repo", "pr-1")
-	if a != GroupLabel("octo/repo", "pr-1") || len(a) != 16 {
+	a := groupLabel("octo/repo", "pr-1")
+	if a != groupLabel("octo/repo", "pr-1") || len(a) != 16 {
 		t.Fatalf("GroupLabel is not a stable 16-character hash: %q", a)
 	}
-	if a == GroupLabel("octo/other", "pr-1") || a == GroupLabel("octo/repo", "pr-2") {
+	if a == groupLabel("octo/other", "pr-1") || a == groupLabel("octo/repo", "pr-2") {
 		t.Fatalf("groups must differ by repository and key")
 	}
 }
@@ -248,37 +248,34 @@ spec:
               env: [{name: A, valueFrom: {secretKeyRef: {name: env-secret, key: k}}}]
               envFrom: [{secretRef: {name: envfrom-secret}}]
 `
-	pr, err := ParsePipelineRun([]byte(doc))
+	pr, err := parsePipelineRun([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := Secrets(pr.Object)
+	got := secrets(pr.Object)
 	want := []string{"env-secret", "envfrom-secret", "projected-secret", "registry-creds", "run-github-token"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Secrets = %v, want %v", got, want)
 	}
-	if err := CheckSecrets(pr, "run-github-token"); err == nil || !strings.Contains(err.Error(), "env-secret") {
+	if err := checkSecrets(pr, "run-github-token"); err == nil || !strings.Contains(err.Error(), "env-secret") {
 		t.Fatalf("CheckSecrets = %v, want a refusal", err)
 	}
-	clean, _ := ParsePipelineRun([]byte("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec:\n  workspaces: [{name: t, secret: {secretName: run-github-token}}]\n"))
-	if err := CheckSecrets(clean, "run-github-token"); err != nil {
+	clean, _ := parsePipelineRun([]byte("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec:\n  workspaces: [{name: t, secret: {secretName: run-github-token}}]\n"))
+	if err := checkSecrets(clean, "run-github-token"); err != nil {
 		t.Fatalf("the run's own token Secret is allowed: %v", err)
 	}
-	if err := CheckSecrets(clean, ""); err == nil || !strings.Contains(err.Error(), "may not mount Secrets") {
+	if err := checkSecrets(clean, ""); err == nil || !strings.Contains(err.Error(), "may not mount Secrets") {
 		t.Fatalf("without a token, no Secret is allowed: %v", err)
 	}
 }
 
 func TestTaskNames(t *testing.T) {
-	pr, _ := ParsePipelineRun([]byte(sourceRun))
-	if got := TaskNames(pr); !reflect.DeepEqual(got, []string{"build", "test"}) {
+	pr, _ := parsePipelineRun([]byte(sourceRun))
+	if got := taskNames(pr); !reflect.DeepEqual(got, []string{"build", "test"}) {
 		t.Fatalf("TaskNames = %v", got)
 	}
 	_ = unstructured.SetNestedSlice(pr.Object, []any{map[string]any{"name": "resolved"}}, "status", "pipelineSpec", "tasks")
-	if got := TaskNames(pr); !reflect.DeepEqual(got, []string{"resolved"}) {
+	if got := taskNames(pr); !reflect.DeepEqual(got, []string{"resolved"}) {
 		t.Fatalf("TaskNames must prefer status.pipelineSpec: %v", got)
-	}
-	if TaskCheckName("ci", "build") != "ci / build" {
-		t.Fatalf("TaskCheckName")
 	}
 }

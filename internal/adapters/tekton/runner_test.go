@@ -147,24 +147,24 @@ func TestCreateRecordsTheRun(t *testing.T) {
 	pr := h.object(run.ID)
 
 	wantLabels := map[string]string{
-		LabelManagedBy: ManagedByValue, LabelPipeline: "ci", LabelEvent: "push", LabelRepositoryID: "1001", LabelSHA: shaA,
-		LabelConcurrencyGroup: GroupLabel("octo-org/demo", "main"),
+		labelManagedBy: managedByValue, labelPipeline: "ci", labelEvent: "push", labelRepositoryID: "1001", labelSHA: shaA,
+		labelConcurrencyGroup: groupLabel("octo-org/demo", "main"),
 	}
 	if !reflect.DeepEqual(pr.GetLabels(), wantLabels) {
 		t.Errorf("labels = %v\nwant %v", pr.GetLabels(), wantLabels)
 	}
 	a := pr.GetAnnotations()
 	for key, want := range map[string]string{
-		AnnotationRepository: "octo-org/demo", AnnotationSHA: shaA, AnnotationInstallationID: "7", AnnotationDeliveryID: "d-1111",
-		AnnotationHead: "main", AnnotationAttempt: "1", AnnotationConcurrencyGroup: "main", AnnotationConcurrencyPolicy: "queue",
-		AnnotationToken: `{"workspace":"github-token","permissions":{"contents":"read"}}`, AnnotationTaskChecks: "true",
+		annotationRepository: "octo-org/demo", annotationSHA: shaA, annotationInstallationID: "7", annotationDeliveryID: "d-1111",
+		annotationHead: "main", annotationAttempt: "1", annotationConcurrencyGroup: "main", annotationConcurrencyPolicy: "queue",
+		annotationToken: `{"workspace":"github-token","permissions":{"contents":"read"}}`, annotationTaskChecks: "true",
 	} {
 		if a[key] != want {
 			t.Errorf("annotation %s = %q, want %q", key, a[key], want)
 		}
 	}
-	if !IsPending(pr) || pr.GetName() != "demo-ci-1111111-1" || pr.GetNamespace() != demoNS {
-		t.Errorf("created %s/%s, held %v", pr.GetNamespace(), pr.GetName(), IsPending(pr))
+	if !isPending(pr) || pr.GetName() != "demo-ci-1111111-1" || pr.GetNamespace() != demoNS {
+		t.Errorf("created %s/%s, held %v", pr.GetNamespace(), pr.GetName(), isPending(pr))
 	}
 	workspaces, _, _ := unstructured.NestedSlice(pr.Object, "spec", "workspaces")
 	if len(workspaces) != 1 || workspaces[0].(map[string]any)["secret"].(map[string]any)["secretName"] != "demo-ci-1111111-1-github-token" {
@@ -173,7 +173,7 @@ func TestCreateRecordsTheRun(t *testing.T) {
 
 	want := ci.Run{
 		ID: ci.RunID{Tenant: demoNS, Name: "demo-ci-1111111-1"}, Trigger: spec.Trigger, Attempt: 1,
-		Group: GroupLabel("octo-org/demo", "main"), Policy: ci.Queue, Token: spec.Token, TaskReports: true,
+		Group: groupLabel("octo-org/demo", "main"), Policy: ci.Queue, Token: spec.Token, TaskReports: true,
 		Tasks: []string{"build", "test"}, Phase: ci.Held, Created: pr.GetCreationTimestamp().Time.UTC(),
 	}
 	if !reflect.DeepEqual(run, want) {
@@ -208,9 +208,9 @@ func TestOccasionLabels(t *testing.T) {
 		label   string
 		want    string
 	}{
-		{"a comment command", comment, LabelComment, "99"},
-		{"a schedule slot", schedule, LabelSlot, "1767236400"},
-		{"a push has neither", pushTrigger(shaA), LabelComment, ""},
+		{"a comment command", comment, labelComment, "99"},
+		{"a schedule slot", schedule, labelSlot, "1767236400"},
+		{"a push has neither", pushTrigger(shaA), labelComment, ""},
 	}
 	for _, tt := range tests {
 		if got := runLabels(ci.RunSpec{Trigger: tt.trigger})[tt.label]; got != tt.want {
@@ -308,7 +308,7 @@ func TestRunStates(t *testing.T) {
 			return r.Phase == ci.Running && r.Started.Format(time.RFC3339) == start && r.Finished.IsZero()
 		}},
 		{"cancelled for a newer commit", func() { _ = h.r.Cancel(ctx, id, ci.Cancellation{NewerCommit: shaB}) }, func(r ci.Run) bool {
-			return r.CancelRequested && r.Cancellation == ci.Cancellation{NewerCommit: shaB} && h.object(id).GetAnnotations()[AnnotationSupersededBy] == "head:"+shaB
+			return r.CancelRequested && r.Cancellation == ci.Cancellation{NewerCommit: shaB} && h.object(id).GetAnnotations()[annotationSupersededBy] == "head:"+shaB
 		}},
 		{"finished cancelled", func() { setStatus(finished("False", "CancelledRunFinally")) }, func(r ci.Run) bool {
 			return r.Phase == ci.Finished && r.Outcome == ci.Outcome{Conclusion: ci.Cancelled, Message: "m"} && r.Finished.Format(time.RFC3339) == end
@@ -352,14 +352,14 @@ func TestCancelAndRecord(t *testing.T) {
 		!reflect.DeepEqual(run.TaskReportIDs, map[string]ci.ReportID{"build": 56}) || !reflect.DeepEqual(run.TaskReportStates, map[string]ci.Status{"build": ci.StatusInProgress}) || run.Done {
 		t.Fatalf("run = %+v", run)
 	}
-	if a := h.object(id).GetAnnotations(); a[AnnotationCheckRunID] != "55" || a[AnnotationTaskCheckIDs] != `{"build":56}` || a[AnnotationTaskCheckStates] != `{"build":"in_progress"}` {
+	if a := h.object(id).GetAnnotations(); a[annotationCheckRunID] != "55" || a[annotationTaskCheckIDs] != `{"build":56}` || a[annotationTaskCheckStates] != `{"build":"in_progress"}` {
 		t.Fatalf("annotations = %v", a)
 	}
 	completed := ci.ReportedCompleted
 	if err := h.r.Record(ctx, id, ci.Record{Reported: &completed, Done: true}); err != nil {
 		t.Fatal(err)
 	}
-	if run := h.get(id); !run.Done || run.Reported != ci.ReportedCompleted || run.ReportID != 55 || h.object(id).GetLabels()[LabelDone] != "true" {
+	if run := h.get(id); !run.Done || run.Reported != ci.ReportedCompleted || run.ReportID != 55 || h.object(id).GetLabels()[labelDone] != "true" {
 		t.Fatalf("a run let go = %+v", run)
 	}
 }
@@ -414,10 +414,10 @@ func TestList(t *testing.T) {
 
 func TestTriggerFallback(t *testing.T) {
 	pr := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": APIVersion, "kind": KindPipelineRun,
+		"apiVersion": apiVersion, "kind": kindPipelineRun,
 		"metadata": map[string]any{"name": "r", "namespace": "ns",
-			"labels":      map[string]any{LabelRepositoryID: "1001", LabelPipeline: "ci", LabelEvent: "push"},
-			"annotations": map[string]any{AnnotationRepository: "octo-org/demo", AnnotationInstallationID: "7", AnnotationSHA: shaA, AnnotationContext: `{"v":99}`},
+			"labels":      map[string]any{labelRepositoryID: "1001", labelPipeline: "ci", labelEvent: "push"},
+			"annotations": map[string]any{annotationRepository: "octo-org/demo", annotationInstallationID: "7", annotationSHA: shaA, annotationContext: `{"v":99}`},
 		},
 	}}
 	want := ci.Trigger{Event: "push", InstallationID: 7, Repository: ci.Repository{ID: 1001, Owner: "octo-org", Name: "demo", FullName: "octo-org/demo"}, Revision: shaA, Pipeline: "ci"}
@@ -441,8 +441,8 @@ func TestTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(secret.Data[TokenSecretKey]) != "t1" || len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].UID != h.object(run.ID).GetUID() ||
-		secret.Annotations[AnnotationRepository] != "octo-org/demo" || secret.Annotations[AnnotationInstallationID] != "7" || secret.Annotations[AnnotationPermissions] != `{"contents":"read"}` {
+	if string(secret.Data[tokenSecretKey]) != "t1" || len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].UID != h.object(run.ID).GetUID() ||
+		secret.Annotations[annotationRepository] != "octo-org/demo" || secret.Annotations[annotationInstallationID] != "7" || secret.Annotations[annotationPermissions] != `{"contents":"read"}` {
 		t.Fatalf("token Secret = %+v", secret)
 	}
 	second := first.Add(time.Hour)
@@ -450,8 +450,8 @@ func TestTokens(t *testing.T) {
 		t.Fatalf("SetToken again: %v", err)
 	}
 	secret, _ = h.kube.CoreV1().Secrets(demoNS).Get(ctx, "demo-ci-1111111-1-github-token", metav1.GetOptions{})
-	if expires, ok, err := h.r.TokenExpiry(ctx, run.ID); string(secret.Data[TokenSecretKey]) != "t2" || !ok || err != nil || !expires.Equal(second) {
-		t.Fatalf("after a refresh: token %q, expiry %v, %v, %v", secret.Data[TokenSecretKey], expires, ok, err)
+	if expires, ok, err := h.r.TokenExpiry(ctx, run.ID); string(secret.Data[tokenSecretKey]) != "t2" || !ok || err != nil || !expires.Equal(second) {
+		t.Fatalf("after a refresh: token %q, expiry %v, %v, %v", secret.Data[tokenSecretKey], expires, ok, err)
 	}
 	gone := run
 	gone.ID.Name = "missing"
@@ -463,7 +463,7 @@ func TestTokens(t *testing.T) {
 func (h *runnerHarness) taskRun(run ci.RunID, name, task string, created time.Time, status map[string]any) {
 	h.t.Helper()
 	tr := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": APIVersion, "kind": "TaskRun",
+		"apiVersion": apiVersion, "kind": "TaskRun",
 		"metadata": map[string]any{"name": name, "namespace": run.Tenant,
 			"labels": map[string]any{"tekton.dev/pipelineRun": run.Name, labelPipelineTask: task}},
 		"status": status,
@@ -561,7 +561,7 @@ func TestFreeResources(t *testing.T) {
 		pr := h.object(id)
 		pr.Object["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Succeeded", "status": "True"}}, "completionTime": at.Format(time.RFC3339)}
 		labels := pr.GetLabels()
-		labels[LabelDone] = "true"
+		labels[labelDone] = "true"
 		pr.SetLabels(labels)
 		h.update(pr)
 		return pr
@@ -570,7 +570,7 @@ func TestFreeResources(t *testing.T) {
 	pvc := func(name string, owner *unstructured.Unstructured) {
 		claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: demoNS}}
 		if owner != nil {
-			claim.OwnerReferences = []metav1.OwnerReference{{APIVersion: APIVersion, Kind: KindPipelineRun, Name: owner.GetName(), UID: owner.GetUID()}}
+			claim.OwnerReferences = []metav1.OwnerReference{{APIVersion: apiVersion, Kind: kindPipelineRun, Name: owner.GetName(), UID: owner.GetUID()}}
 		}
 		if _, err := h.kube.CoreV1().PersistentVolumeClaims(demoNS).Create(ctx, claim, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
@@ -592,7 +592,7 @@ func TestFreeResources(t *testing.T) {
 	if !slices.Equal(names, []string{"pvc-recent", "pvc-unrelated"}) {
 		t.Fatalf("remaining PVCs = %v", names)
 	}
-	if h.object(old.ID).GetLabels()[LabelPVCsFreed] != "true" {
+	if h.object(old.ID).GetLabels()[labelPVCsFreed] != "true" {
 		t.Fatalf("a freed run must be marked so it is not examined again")
 	}
 	if n, _ := h.r.FreeResources(ctx, now.Add(-time.Hour)); n != 0 {

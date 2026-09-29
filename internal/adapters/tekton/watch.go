@@ -24,7 +24,7 @@ const (
 )
 
 // liveRuns selects the runs Octomaton has not let go.
-const liveRuns = LabelManagedBy + "=" + ManagedByValue + ",!" + LabelDone
+const liveRuns = labelManagedBy + "=" + managedByValue + ",!" + labelDone
 
 // Watch hands w every live PipelineRun in every namespace when it changes, when w asks to look again
 // and on every resync, until ctx ends. A run deleted before it was let go is handed to w.Deleted.
@@ -93,7 +93,7 @@ func (r *Runner) handler(queue workqueue.TypedRateLimitingInterface[string]) cac
 			}
 			// A run labelled done leaves the watch as a deletion too; only a run deleted before it
 			// was let go needs attention.
-			if pr, ok := obj.(*unstructured.Unstructured); ok && pr.GetLabels()[LabelDone] == "" {
+			if pr, ok := obj.(*unstructured.Unstructured); ok && pr.GetLabels()[labelDone] == "" {
 				r.rememberDeleted(pr)
 				enqueue(pr)
 			}

@@ -5,9 +5,9 @@ import (
 	"net/url"
 
 	"github.com/google/go-github/v92/github"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/tekton"
 )
 
 // createCompleted creates a completed check run whose output carries the trigger

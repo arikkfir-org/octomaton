@@ -12,12 +12,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/services/ci"
 	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/tekton"
 )
 
 // maxNameTries bounds retries when another delivery takes a run name first.
@@ -58,7 +58,7 @@ type prepared struct {
 // prepare resolves the namespace, loads the PipelineRun file and renders params
 // and the concurrency group. Problems are returned as Markdown for the check run.
 func (s *Service) prepare(ctx context.Context, gh githubapp.Client, c checkrun.Context, p *pipelines.Pipeline) (*prepared, string) {
-	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(c.Repository))
+	ns, err := s.Namespaces.Resolve(c.Repository)
 	if err != nil {
 		return nil, fmt.Sprintf("Could not determine the namespace for %s: %v", c.Repository.FullName, err)
 	}

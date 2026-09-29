@@ -26,12 +26,12 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	"octomaton.dev/internal/adapters/github/githubtest"
 	webhook "octomaton.dev/internal/adapters/http"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/reporter"
 	"octomaton.dev/internal/system/config"
 	"octomaton.dev/internal/system/metrics/metricstest"
-	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/trigger"
 )
 
@@ -124,7 +124,7 @@ func setup(t *testing.T) *env {
 		tekton.TaskRuns:     "TaskRunList",
 	})
 	runs := &tekton.Client{Dynamic: dyn, Kube: kube}
-	namespaces, err := config.NewNamespaces("ci-{{ .Repository.Name }}", map[string]string{"arikkfir-org/.github": "ci-github"})
+	namespaces, err := tekton.NewNamespaces("ci-{{ .Repository.Name }}", map[string]string{"arikkfir-org/.github": "ci-github"})
 	if err != nil {
 		t.Fatal(err)
 	}

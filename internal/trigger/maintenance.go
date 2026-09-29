@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
-	"octomaton.dev/internal/tekton"
+	"octomaton.dev/internal/adapters/tekton"
 )
 
 // Maintenance defaults.

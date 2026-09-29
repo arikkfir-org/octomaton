@@ -9,11 +9,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/services/ci"
-	"octomaton.dev/internal/services/pipelines"
-	"octomaton.dev/internal/tekton"
 )
 
 // SupersededByHead prefixes the superseded-by annotation of a run stood down
@@ -317,7 +316,7 @@ func (s *Service) Resume(ctx context.Context, run *unstructured.Unstructured) er
 // CancelMergeGroup cancels the unfinished runs of a destroyed merge group.
 func (s *Service) CancelMergeGroup(ctx context.Context, c checkrun.Context, reason string) {
 	log := s.logFor(c)
-	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(c.Repository))
+	ns, err := s.Namespaces.Resolve(c.Repository)
 	if err != nil {
 		log.Error("Could not resolve namespace", "error", err)
 		return

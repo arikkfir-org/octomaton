@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/services/pipelines"
-	"octomaton.dev/internal/tekton"
 	"sigs.k8s.io/yaml"
 )
 

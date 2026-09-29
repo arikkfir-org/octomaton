@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"octomaton.dev/internal/tekton"
+	"octomaton.dev/internal/adapters/tekton"
 )
 
 func TestRefreshTokens(t *testing.T) {

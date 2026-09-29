@@ -16,11 +16,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	webhook "octomaton.dev/internal/adapters/http"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
+	"octomaton.dev/internal/services/ci"
 	"octomaton.dev/internal/services/pipelines"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/tekton"
 )
 
 // ApproveAction is the identifier of the "Approve and run" check-run action.
@@ -45,9 +46,9 @@ type Runs interface {
 
 var _ Runs = (*tekton.Client)(nil)
 
-// NamespaceResolver maps a repository to its namespace; *config.Namespaces implements it.
+// NamespaceResolver maps a repository to its namespace; *tekton.Namespaces implements it.
 type NamespaceResolver interface {
-	Resolve(repo pipelines.Repository) (string, error)
+	Resolve(repo ci.Repository) (string, error)
 }
 
 // ScheduleNotifier is told when a repository's default branch changes, so its

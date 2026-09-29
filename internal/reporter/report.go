@@ -13,9 +13,9 @@ import (
 	"github.com/google/go-github/v92/github"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/tekton"
 )
 
 const (

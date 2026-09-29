@@ -12,9 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/tekton"
 )
 
 func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {

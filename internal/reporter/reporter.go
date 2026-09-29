@@ -25,10 +25,10 @@ import (
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/tekton"
 )
 
 const (

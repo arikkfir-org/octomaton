@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/services/pipelines"
-	"octomaton.dev/internal/tekton"
 )
 
 func commentDedupe(id int64) map[string]string {

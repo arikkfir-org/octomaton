@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/tekton"
 )
 
 const scheduleConfig = `

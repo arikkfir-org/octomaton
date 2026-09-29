@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
-	"octomaton.dev/internal/tekton"
 )
 
 func checkRunFor(cr githubtest.CheckRun) *github.CheckRun {

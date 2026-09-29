@@ -96,6 +96,16 @@ type Retention struct {
 	FreePVCsAfter time.Duration `envconfig:"FREE_PVCS_AFTER" default:"1h"`
 }
 
+// Namespaces maps repositories to the Kubernetes namespaces their PipelineRuns run in; the Tekton
+// adapter validates it when it starts.
+type Namespaces struct {
+	// Template is a Go template over .Repository whose output is sanitized into a DNS label.
+	Template string `envconfig:"TEMPLATE" default:"ci-{{ .Repository.Name }}"`
+	// Overrides maps "owner/name" to a namespace, bypassing the template; the variable lists them
+	// as "owner/name:namespace" pairs separated by commas.
+	Overrides map[string]string `envconfig:"OVERRIDES"`
+}
+
 // Pod identifies this replica in the leader election; set it from the downward API.
 type Pod struct {
 	// Name defaults to the host name.
@@ -136,7 +146,6 @@ func (c *Config) validate() []string {
 		problems = append(problems, checkURL("OCTOMATON_TEKTON_DASHBOARD_URL", u)...)
 		c.Tekton.DashboardURL = strings.TrimRight(u, "/")
 	}
-	problems = append(problems, c.Namespaces.init()...)
 	for _, u := range c.Relay.URLs {
 		problems = append(problems, checkURL("OCTOMATON_RELAY_URLS", u)...)
 	}

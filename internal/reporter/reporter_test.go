@@ -18,10 +18,10 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/system/metrics/metricstest"
-	"octomaton.dev/internal/tekton"
 )
 
 const (

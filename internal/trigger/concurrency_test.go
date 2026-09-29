@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
-	"octomaton.dev/internal/tekton"
 )
 
 func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {

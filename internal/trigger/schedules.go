@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/services/pipelines"
-	"octomaton.dev/internal/tekton"
 )
 
 // Scheduler defaults.
@@ -231,7 +231,7 @@ func (sc *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline st
 	s := sc.Service
 	gh := s.GitHub.Installation(entry.installationID)
 	repo := entry.repo
-	ns, err := s.Namespaces.Resolve(pipelines.RepositoryOf(repo))
+	ns, err := s.Namespaces.Resolve(repo)
 	if err != nil {
 		return err
 	}

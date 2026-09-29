@@ -21,11 +21,11 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"octomaton.dev/internal/adapters/github/githubtest"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/checkrun"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/system/config"
 	"octomaton.dev/internal/system/metrics/metricstest"
-	"octomaton.dev/internal/tekton"
 )
 
 const (
@@ -119,7 +119,7 @@ func newHarness(t *testing.T) *harness {
 		return false, nil, nil
 	})
 	h.runs = &tekton.Client{Dynamic: h.dyn, Kube: h.kube}
-	namespaces, err := config.NewNamespaces("ci-{{ .Repository.Name }}", nil)
+	namespaces, err := tekton.NewNamespaces("ci-{{ .Repository.Name }}", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

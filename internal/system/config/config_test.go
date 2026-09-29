@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"octomaton.dev/internal/services/pipelines"
 )
 
 func testKeyPEM(t *testing.T) string {
@@ -102,10 +100,6 @@ func TestLoadProblems(t *testing.T) {
 		{name: "repository as owner", variable: "OCTOMATON_GITHUB_ALLOWED_OWNERS", value: "arikkfir-org/docs", want: "not a GitHub user or organization"},
 		{name: "relative dashboard URL", variable: "OCTOMATON_TEKTON_DASHBOARD_URL", value: "tekton.dev.kfirs.com", want: "OCTOMATON_TEKTON_DASHBOARD_URL"},
 		{name: "bad relay URL", variable: "OCTOMATON_RELAY_URLS", value: "ftp://x", want: "OCTOMATON_RELAY_URLS"},
-		{name: "bad template", variable: "OCTOMATON_NAMESPACE_TEMPLATE", value: "{{ .Nope", want: "OCTOMATON_NAMESPACE_TEMPLATE"},
-		{name: "unusable template", variable: "OCTOMATON_NAMESPACE_TEMPLATE", value: "___", want: "not usable as a namespace"},
-		{name: "override key without owner", variable: "OCTOMATON_NAMESPACE_OVERRIDES", value: "docs:ci-docs", want: `key "docs" must be`},
-		{name: "override with bad namespace", variable: "OCTOMATON_NAMESPACE_OVERRIDES", value: "a/b:Not_OK", want: "not a valid namespace name"},
 		{name: "zero retention", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "0s", want: "must be positive"},
 		{name: "no workers", variable: "OCTOMATON_WEBHOOK_WORKERS", value: "0", want: "must be positive"},
 		{name: "bad duration", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "soon", want: "OCTOMATON_RETENTION_FREE_PVCS_AFTER"},
@@ -143,52 +137,5 @@ func TestLoadNeverPrintsThePrivateKey(t *testing.T) {
 	_, err := Load()
 	if err == nil || strings.Contains(err.Error(), "c2VjcmV0") {
 		t.Fatalf("Load() error = %v", err)
-	}
-}
-
-func TestSanitizeDNSLabel(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"ci-octomaton", "ci-octomaton"},
-		{"CI-Docs", "ci-docs"},
-		{".github", "github"},
-		{"...dots", "dots"},
-		{"ci-.github", "ci--github"},
-		{"ci-my_repo.name", "ci-my-repo-name"},
-		{"ci-a__..b", "ci-a-b"},
-		{"-leading-and-trailing-", "leading-and-trailing"},
-		{"ci-" + strings.Repeat("x", 80), "ci-" + strings.Repeat("x", 60)},
-		{"ci-" + strings.Repeat("x", 59) + "-y", "ci-" + strings.Repeat("x", 59)},
-		{"ünïcode", "n-code"},
-		{"___", ""},
-	}
-	for _, tt := range tests {
-		if got := SanitizeDNSLabel(tt.in); got != tt.want {
-			t.Errorf("SanitizeDNSLabel(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-		if got := SanitizeDNSLabel(tt.in); len(got) > 63 {
-			t.Errorf("SanitizeDNSLabel(%q) is longer than 63 characters", tt.in)
-		}
-	}
-}
-
-func TestResolveNamespace(t *testing.T) {
-	n, err := NewNamespaces("ci-{{ .Repository.Name }}", map[string]string{"arikkfir-org/.github": "ci-github"})
-	if err != nil {
-		t.Fatalf("NewNamespaces: %v", err)
-	}
-	tests := []struct {
-		repo pipelines.Repository
-		want string
-	}{
-		{pipelines.Repository{Owner: "arikkfir-org", Name: "octomaton", FullName: "arikkfir-org/octomaton"}, "ci-octomaton"},
-		{pipelines.Repository{Owner: "arikkfir-org", Name: ".github", FullName: "arikkfir-org/.github"}, "ci-github"},
-		{pipelines.Repository{Owner: "Arikkfir-Org", Name: ".GitHub", FullName: "Arikkfir-Org/.GitHub"}, "ci-github"},
-		{pipelines.Repository{Owner: "arikkfir-org", Name: "My_Repo", FullName: "arikkfir-org/My_Repo"}, "ci-my-repo"},
-	}
-	for _, tt := range tests {
-		got, err := n.Resolve(tt.repo)
-		if err != nil || got != tt.want {
-			t.Errorf("Resolve(%s) = %q, %v; want %q", tt.repo.FullName, got, err, tt.want)
-		}
 	}
 }

@@ -14,12 +14,12 @@ import (
 	"octomaton.dev/internal/adapters/kube"
 	"octomaton.dev/internal/adapters/leader"
 	"octomaton.dev/internal/adapters/relay"
+	"octomaton.dev/internal/adapters/tekton"
 	"octomaton.dev/internal/githubapp"
 	"octomaton.dev/internal/reporter"
 	"octomaton.dev/internal/system/buildinfo"
 	"octomaton.dev/internal/system/config"
 	"octomaton.dev/internal/system/metrics"
-	"octomaton.dev/internal/tekton"
 	"octomaton.dev/internal/trigger"
 )
 
@@ -37,10 +37,11 @@ const (
 // app is Octomaton's server: the HTTP endpoints and the webhook workers on every replica and, on
 // the elected leader, the reporter, the scheduler and the maintenance jobs.
 type app struct {
-	cfg     *config.Config
-	kube    *kube.Clients
-	github  *githubapp.App
-	metrics *metrics.Metrics
+	cfg        *config.Config
+	kube       *kube.Clients
+	github     *githubapp.App
+	metrics    *metrics.Metrics
+	namespaces *tekton.Namespaces
 
 	trigger   *trigger.Service
 	scheduler *trigger.Scheduler
@@ -65,6 +66,9 @@ func newApp(cfg *config.Config) (*app, error) {
 
 func (a *app) connect() error {
 	var err error
+	if a.namespaces, err = tekton.NewNamespaces(a.cfg.Namespaces.Template, a.cfg.Namespaces.Overrides); err != nil {
+		return err
+	}
 	if a.kube, err = kube.NewClients("octomaton/" + buildinfo.Version()); err != nil {
 		return err
 	}
@@ -84,7 +88,7 @@ func (a *app) wireTrigger() {
 	a.trigger = &trigger.Service{
 		GitHub:       a.github,
 		Runs:         runs,
-		Namespaces:   &a.cfg.Namespaces,
+		Namespaces:   a.namespaces,
 		DashboardURL: a.cfg.Tekton.DashboardURL,
 		OwnerAllowed: a.cfg.GitHub.OwnerAllowed,
 		Logger:       component("trigger"),

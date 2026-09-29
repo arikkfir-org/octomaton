@@ -13,5 +13,6 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      # VERSION when set (the release pipeline sets it), else the git tag, else "dev".
-      - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") .Git.Tag "dev" }}
+      # VERSION when set (the release pipeline and `make image` set it), else the commit's short SHA,
+      # else "dev".
+      - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") (printf "%.7s" .Git.FullCommit) "dev" }}

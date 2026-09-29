@@ -13,17 +13,16 @@ pipelines:
       revision: "{{ .Revision }}"
     timeout: 30m
 
-  # Publish the image: sha-<short> (and main) for pushes to main, the tag name for v* tags.
+  # Publish the image of every push to main, tagged with the commit's short SHA (also the version the
+  # binary reports) and "main". There are no version tags.
   - name: release
     pipelineRun: .tekton/release.yaml
     on:
       push:
         branches: [main]
-        tags: ["v*"]
     params:
       repo-url: "{{ .Repository.CloneURL }}"
       revision: "{{ .Revision }}"
-      ref: "{{ .Ref }}"
     timeout: 30m
     # Pushes to main publish the "main" tag: only the newest waiting release may run.
     concurrency:

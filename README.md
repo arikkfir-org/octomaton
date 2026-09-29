@@ -302,7 +302,7 @@ repository, so the linter installs with:
 go install octomaton.dev/cmd/octomaton-lint@latest
 ```
 
-Requirements: Go 1.27, and [ko](https://ko.build) for images.
+Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as the release pipeline does.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
@@ -351,16 +351,18 @@ itself is tested by `internal/architecture`, which fails on any import that poin
 
 ## Releases
 
-Octomaton builds itself: `.octomaton.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the
-merge queue, and `release` on pushes to `main` (image tags `sha-<short>` and `main`) and `v*` tags (the tag name). Images
-go to `me-west1-docker.pkg.dev/arikkfir/images/octomaton`.
+Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
+`.octomaton.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the merge queue, and `release` on
+pushes to `main`. `release` publishes the image to `me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the
+commit's short SHA (for example `afa6953`) and `main`. The same short SHA is the version the binary reports and the
+`service.version` of its telemetry. [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) pins the SHA
+tag it runs.
 
-The first image has to come from a workstation, before Octomaton runs:
+The first image has to come from a workstation, before Octomaton runs. `make image` builds and pushes the image of
+`HEAD` the way the release pipeline would, except for the `main` tag, and refuses uncommitted changes:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev
-git tag v0.1.0 && git push origin v0.1.0
-KO_DOCKER_REPO=me-west1-docker.pkg.dev/arikkfir/images/octomaton ko build --bare --tags=v0.1.0 ./cmd/octomaton
+git clone https://github.com/arikkfir-org/octomaton && cd octomaton
+make image
 ```
-
-(`make image` does the same with the version from `git describe`.)

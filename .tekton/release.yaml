@@ -1,7 +1,8 @@
-# Octomaton's release: build and push the image with ko. Pushes to main are
-# tagged sha-<short> and main; v* tags are tagged with the tag name. The pod
-# authenticates to Artifact Registry through Workload Identity (ko's Google
-# keychain uses Application Default Credentials). Octomaton sets the params.
+# Octomaton's release: build and push the image of a commit on main with ko,
+# tagged with the commit's short SHA (also the version the binary reports) and
+# main. The pod authenticates to Artifact Registry through Workload Identity
+# (ko's Google keychain uses Application Default Credentials). Octomaton sets
+# the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -20,9 +21,6 @@ spec:
       - name: revision
         type: string
         description: Commit to release.
-      - name: ref
-        type: string
-        description: The pushed ref (refs/heads/main or refs/tags/v...).
     workspaces:
       - name: source
     tasks:
@@ -32,8 +30,6 @@ spec:
             value: $(params.repo-url)
           - name: revision
             value: $(params.revision)
-          - name: ref
-            value: $(params.ref)
         workspaces:
           - name: source
             workspace: source
@@ -42,8 +38,6 @@ spec:
             - name: repo-url
               type: string
             - name: revision
-              type: string
-            - name: ref
               type: string
           workspaces:
             - name: source
@@ -82,29 +76,12 @@ spec:
               env:
                 - name: REVISION
                   value: $(params.revision)
-                - name: REF
-                  value: $(params.ref)
                 - name: KO_DOCKER_REPO
                   value: me-west1-docker.pkg.dev/arikkfir/images/octomaton
               script: |
                 #!/bin/sh
                 set -eu
-                short=$(printf '%s' "$REVISION" | cut -c1-7)
-                case "$REF" in
-                  refs/tags/v*)
-                    # Image tags allow [A-Za-z0-9_.-] only.
-                    VERSION=$(printf '%s' "${REF#refs/tags/}" | tr -c 'A-Za-z0-9_.-' '-')
-                    tags="$VERSION"
-                    ;;
-                  refs/heads/main)
-                    VERSION="sha-$short"
-                    tags="sha-$short,main"
-                    ;;
-                  *)
-                    VERSION="sha-$short"
-                    tags="sha-$short"
-                    ;;
-                esac
+                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $tags"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$tags" ./cmd/octomaton
+                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton

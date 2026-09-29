@@ -53,5 +53,7 @@
 ## Commands
 
 - `make test`, `make lint`, `make build`, `make image` (ko; needs registry credentials).
+- Releases have no version tags: every push to `main` publishes an image tagged with the commit's short SHA, which is
+  also the version the binary reports.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

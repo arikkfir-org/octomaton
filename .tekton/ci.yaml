@@ -1,0 +1,101 @@
+# Octomaton's CI: lint its own .octomaton.yaml, vet, test (with the race
+# detector) and build. A plain Tekton PipelineRun; Octomaton sets the params.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: octomaton-ci-
+spec:
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  workspaces:
+    - name: source
+      emptyDir: {}
+  pipelineSpec:
+    params:
+      - name: repo-url
+        type: string
+        description: Git URL of the repository.
+      - name: revision
+        type: string
+        description: Commit to test.
+    workspaces:
+      - name: source
+    tasks:
+      - name: ci
+        params:
+          - name: repo-url
+            value: $(params.repo-url)
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: source
+            workspace: source
+        taskSpec:
+          params:
+            - name: repo-url
+              type: string
+            - name: revision
+              type: string
+          workspaces:
+            - name: source
+          volumes:
+            - name: go-cache
+              emptyDir: {}
+          stepTemplate:
+            workingDir: $(workspaces.source.path)
+            env:
+              - name: GOCACHE
+                value: /go-cache/build
+              - name: GOMODCACHE
+                value: /go-cache/mod
+              - name: GOTOOLCHAIN
+                value: local
+              - name: GOFLAGS
+                value: -mod=readonly
+            volumeMounts:
+              - name: go-cache
+                mountPath: /go-cache
+          steps:
+            - name: clone
+              image: alpine/git:2.54.0
+              env:
+                - name: REPO_URL
+                  value: $(params.repo-url)
+                - name: REVISION
+                  value: $(params.revision)
+              script: |
+                #!/bin/sh
+                set -eu
+                git init --quiet .
+                git remote add origin "$REPO_URL"
+                git fetch --quiet --depth=1 origin "$REVISION"
+                git checkout --quiet --detach FETCH_HEAD
+                git log -1 --format='Testing %H: %s'
+            - name: lint
+              image: golang:1.27.1
+              script: |
+                #!/bin/sh
+                set -eu
+                go run ./cmd/octomaton-lint .
+            - name: vet
+              image: golang:1.27.1
+              script: |
+                #!/bin/sh
+                set -eu
+                go vet ./...
+            - name: test
+              image: golang:1.27.1
+              script: |
+                #!/bin/sh
+                set -eu
+                go test -race ./...
+            - name: build
+              image: golang:1.27.1
+              env:
+                - name: CGO_ENABLED
+                  value: "0"
+              script: |
+                #!/bin/sh
+                set -eu
+                go build -trimpath -o /tmp/bin/ ./cmd/...
+                /tmp/bin/octomaton-lint -version

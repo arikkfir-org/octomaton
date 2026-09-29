@@ -1,0 +1,31 @@
+# Octomaton's own CI and release, run by Octomaton. Schema: README.md.
+apiVersion: octomaton.dev/v1
+pipelines:
+  # Lint, vet, test and build every pull request into main and every merge queue group.
+  - name: ci
+    pipelineRun: .tekton/ci.yaml
+    on:
+      pull_request:
+        branches: [main]
+      merge_group: {}
+    params:
+      repo-url: "{{ .Repository.CloneURL }}"
+      revision: "{{ .Revision }}"
+    timeout: 30m
+
+  # Publish the image: sha-<short> (and main) for pushes to main, the tag name for v* tags.
+  - name: release
+    pipelineRun: .tekton/release.yaml
+    on:
+      push:
+        branches: [main]
+        tags: ["v*"]
+    params:
+      repo-url: "{{ .Repository.CloneURL }}"
+      revision: "{{ .Revision }}"
+      ref: "{{ .Ref }}"
+    timeout: 30m
+    # Pushes to main publish the "main" tag: only the newest waiting release may run.
+    concurrency:
+      group: "release-{{ .Ref }}"
+      policy: latest

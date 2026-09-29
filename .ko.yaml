@@ -1,0 +1,17 @@
+# ko build configuration (https://ko.build/configuration/).
+# Release images are built by .tekton/release.yaml; the first one by hand (see README).
+defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
+defaultPlatforms:
+  - linux/amd64
+builds:
+  - id: octomaton
+    dir: .
+    main: ./cmd/octomaton
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      # VERSION when set (the release pipeline sets it), else the git tag, else "dev".
+      - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") .Git.Tag "dev" }}

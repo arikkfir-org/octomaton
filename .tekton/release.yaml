@@ -1,0 +1,110 @@
+# Octomaton's release: build and push the image with ko. Pushes to main are
+# tagged sha-<short> and main; v* tags are tagged with the tag name. The pod
+# authenticates to Artifact Registry through Workload Identity (ko's Google
+# keychain uses Application Default Credentials). Octomaton sets the params.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: octomaton-release-
+spec:
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  workspaces:
+    - name: source
+      emptyDir: {}
+  pipelineSpec:
+    params:
+      - name: repo-url
+        type: string
+        description: Git URL of the repository.
+      - name: revision
+        type: string
+        description: Commit to release.
+      - name: ref
+        type: string
+        description: The pushed ref (refs/heads/main or refs/tags/v...).
+    workspaces:
+      - name: source
+    tasks:
+      - name: release
+        params:
+          - name: repo-url
+            value: $(params.repo-url)
+          - name: revision
+            value: $(params.revision)
+          - name: ref
+            value: $(params.ref)
+        workspaces:
+          - name: source
+            workspace: source
+        taskSpec:
+          params:
+            - name: repo-url
+              type: string
+            - name: revision
+              type: string
+            - name: ref
+              type: string
+          workspaces:
+            - name: source
+          volumes:
+            - name: go-cache
+              emptyDir: {}
+          stepTemplate:
+            workingDir: $(workspaces.source.path)
+            env:
+              - name: GOCACHE
+                value: /go-cache/build
+              - name: GOMODCACHE
+                value: /go-cache/mod
+              - name: GOTOOLCHAIN
+                value: local
+            volumeMounts:
+              - name: go-cache
+                mountPath: /go-cache
+          steps:
+            - name: clone
+              image: alpine/git:2.54.0
+              env:
+                - name: REPO_URL
+                  value: $(params.repo-url)
+                - name: REVISION
+                  value: $(params.revision)
+              script: |
+                #!/bin/sh
+                set -eu
+                git init --quiet .
+                git remote add origin "$REPO_URL"
+                git fetch --quiet --depth=1 origin "$REVISION"
+                git checkout --quiet --detach FETCH_HEAD
+            - name: publish
+              image: golang:1.27.1
+              env:
+                - name: REVISION
+                  value: $(params.revision)
+                - name: REF
+                  value: $(params.ref)
+                - name: KO_DOCKER_REPO
+                  value: me-west1-docker.pkg.dev/arikkfir/images/octomaton
+              script: |
+                #!/bin/sh
+                set -eu
+                short=$(printf '%s' "$REVISION" | cut -c1-7)
+                case "$REF" in
+                  refs/tags/v*)
+                    # Image tags allow [A-Za-z0-9_.-] only.
+                    VERSION=$(printf '%s' "${REF#refs/tags/}" | tr -c 'A-Za-z0-9_.-' '-')
+                    tags="$VERSION"
+                    ;;
+                  refs/heads/main)
+                    VERSION="sha-$short"
+                    tags="sha-$short,main"
+                    ;;
+                  *)
+                    VERSION="sha-$short"
+                    tags="sha-$short"
+                    ;;
+                esac
+                export VERSION
+                echo "Publishing $KO_DOCKER_REPO with tags $tags"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$tags" ./cmd/octomaton

@@ -1,0 +1,16 @@
+# The hub's deployment of Octomaton. Argo CD applies it from main (the Application octomaton in
+# arikkfir-org/delivery); names and wiring follow the hub reference. Octomaton itself never reads this directory.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service-account.yaml
+  - rbac.yaml
+  - config-map.yaml
+  - external-secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - go-import-config-map.yaml
+  - go-import-deployment.yaml
+  - go-import-service.yaml
+  - http-route.yaml
+  - network-policy.yaml

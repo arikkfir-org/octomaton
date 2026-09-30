@@ -1,0 +1,137 @@
+# Cluster-wide: watch runs everywhere and look up tenant namespaces.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+rules:
+  - apiGroups:
+      - tekton.dev
+    resources:
+      - pipelineruns
+      - taskruns
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: octomaton
+subjects:
+  - kind: ServiceAccount
+    name: octomaton
+    namespace: octomaton
+---
+# Leader election for the check-run reconciler.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: octomaton
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: octomaton
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: octomaton
+subjects:
+  - kind: ServiceAccount
+    name: octomaton
+    namespace: octomaton
+---
+# What Octomaton may do inside a tenant namespace. Bound per namespace by RoleBinding "octomaton" (see ci-tenants).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: octomaton-tenant
+  labels:
+    app.kubernetes.io/name: octomaton
+rules:
+  - apiGroups:
+      - tekton.dev
+    resources:
+      - pipelineruns
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - patch
+      - update
+      - delete
+  - apiGroups:
+      - tekton.dev
+    resources:
+      - taskruns
+    verbs:
+      - get
+      - list
+      - watch
+  # Installation-token Secrets, created before each run and re-minted by the token refresher.
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+      - get
+      - patch
+      - update
+      - delete
+  # Workspace volumes of finished runs are freed after retention.freePVCsAfter.
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - get
+      - list
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get

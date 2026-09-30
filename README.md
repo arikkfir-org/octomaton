@@ -263,7 +263,9 @@ webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the App b
 
 ## Deployment
 
-Octomaton is deployed by Argo CD from [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery): namespace
+The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize): the Argo CD Application `octomaton` in
+[`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main` and tags the image with the
+synced commit's short SHA, so every merge to `main` rolls out once `release` has published that image. Namespace
 `octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
@@ -352,14 +354,15 @@ itself is tested by `internal/architecture`, which fails on any import that poin
 ## Releases
 
 Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
-`.octomaton.yaml` runs `ci` (lint, vet, race tests, build) on pull requests and in the merge queue, and `release` on
-pushes to `main`. `release` publishes the image to `me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the
-commit's short SHA (for example `afa6953`) and `main`. The same short SHA is the version the binary reports and the
-`service.version` of its telemetry. [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) pins the SHA
-tag it runs.
+`.octomaton.yaml` runs `ci` (lint, `deploy/` validation, vet, race tests, build) on pull requests and in the merge
+queue, and `release` on pushes to `main`. `release` publishes the image to
+`me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the commit's short SHA (for example `afa6953`) and
+`main`. The same short SHA is the version the binary reports and the `service.version` of its telemetry. Argo CD runs
+the image of the newest commit on `main` ([Deployment](#deployment)).
 
-The first image has to come from a workstation, before Octomaton runs. `make image` builds and pushes the image of
-`HEAD` the way the release pipeline would, except for the `main` tag, and refuses uncommitted changes:
+The first image has to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
+commit Argo CD deploys. `make image` builds and pushes the image of `HEAD` the way the release pipeline would, except
+for the `main` tag, and refuses uncommitted changes:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev

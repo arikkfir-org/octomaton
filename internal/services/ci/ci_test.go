@@ -19,8 +19,7 @@ func pullRequestTrigger() Trigger {
 		Branch:         "feature",
 		Sender:         "alice",
 		Pipeline:       "ci",
-		PullRequest:    &PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "abc", HeadRepo: "fork/repo", AuthorAssociation: "NONE"},
-		ApprovedBy:     "bob",
+		PullRequest:    &PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "abc", HeadRepo: "octo/repo"},
 	}
 }
 
@@ -38,8 +37,7 @@ func TestTriggerJSON(t *testing.T) {
 			want: `{"v":1,"event":"pull_request","action":"synchronize","deliveryID":"d-1","installationID":7,` +
 				`"repository":{"id":42,"owner":"octo","name":"repo","fullName":"octo/repo","cloneURL":"https://github.com/octo/repo.git","defaultBranch":"main"},` +
 				`"revision":"0123456789abcdef0123456789abcdef01234567","ref":"refs/pull/5/head","branch":"feature","sender":"alice","pipeline":"ci",` +
-				`"pullRequest":{"number":5,"headRef":"feature","headSHA":"0123456789abcdef0123456789abcdef01234567","baseRef":"main","baseSHA":"abc","headRepo":"fork/repo","authorAssociation":"NONE"},` +
-				`"approvedBy":"bob"}`,
+				`"pullRequest":{"number":5,"headRef":"feature","headSHA":"0123456789abcdef0123456789abcdef01234567","baseRef":"main","baseSHA":"abc","headRepo":"octo/repo"}}`,
 		},
 		{
 			name: "every event object",
@@ -63,6 +61,42 @@ func TestTriggerJSON(t *testing.T) {
 			data, err := json.Marshal(tt.trigger)
 			if err != nil || string(data) != tt.want {
 				t.Fatalf("json.Marshal = %s, %v\nwant %s", data, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestTriggerReadsEarlierVersions reads a trigger stored by a version that recorded pull request
+// approvals: the fields it no longer has are ignored.
+func TestTriggerReadsEarlierVersions(t *testing.T) {
+	stored := `{"v":1,"event":"pull_request","installationID":7,"repository":{"id":42,"owner":"octo","name":"repo","fullName":"octo/repo"},` +
+		`"revision":"abc","pullRequest":{"number":5,"headRef":"feature","headSHA":"abc","baseRef":"main","baseSHA":"def","headRepo":"octo/repo","authorAssociation":"NONE"},` +
+		`"approvedBy":"bob","rerunBy":"carol"}`
+	var got Trigger
+	if err := json.Unmarshal([]byte(stored), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if got.PullRequest == nil || got.PullRequest.Number != 5 || got.RerunBy != "carol" {
+		t.Fatalf("trigger = %+v", got)
+	}
+}
+
+func TestFromFork(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger Trigger
+		want    bool
+	}{
+		{"push", Trigger{Repository: Repository{FullName: "octo/repo"}}, false},
+		{"branch of the repository", pullRequestTrigger(), false},
+		{"branch of the repository, other letter case", Trigger{Repository: Repository{FullName: "Octo/Repo"}, PullRequest: &PullRequest{HeadRepo: "octo/repo"}}, false},
+		{"fork", Trigger{Repository: Repository{FullName: "octo/repo"}, PullRequest: &PullRequest{HeadRepo: "stranger/repo"}}, true},
+		{"deleted head repository", Trigger{Repository: Repository{FullName: "octo/repo"}, PullRequest: &PullRequest{}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.trigger.FromFork(); got != tt.want {
+				t.Fatalf("FromFork() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -100,9 +134,9 @@ func TestDescribe(t *testing.T) {
 		trigger Trigger
 		want    string
 	}{
-		{"pull request", pullRequestTrigger(), "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice; approved by @bob"},
-		{"re-run", rerun, "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice; approved by @bob; re-run by @carol"},
-		{"comment", comment, "`/deploy` on pull request #5 at `0123456` by @alice; approved by @bob"},
+		{"pull request", pullRequestTrigger(), "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice"},
+		{"re-run", rerun, "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice; re-run by @carol"},
+		{"comment", comment, "`/deploy` on pull request #5 at `0123456` by @alice"},
 		{"schedule", Trigger{Event: EventSchedule, Branch: "main", Revision: "abcdef0123", Schedule: &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"}},
 			"Schedule `0 3 * * *` (slot 2026-01-01T03:00:00Z) on `main` at `abcdef0`"},
 		{"push", Trigger{Event: EventPush, Branch: "main", Revision: "abcdef0123"}, "Push to `main` at `abcdef0`"},

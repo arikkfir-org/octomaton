@@ -14,7 +14,7 @@ import (
 func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, ciConfig, ciRun)
-	tr := trustedPR(sha1)
+	tr := branchPR(sha1)
 	h.evaluate(tr, EvalOptions{ReportConfigErrors: true})
 
 	runs := h.runner.Runs()
@@ -60,8 +60,8 @@ func TestEvaluatePullRequestCreatesAndReleasesARun(t *testing.T) {
 func TestEvaluateIsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, ciConfig, ciRun)
-	h.evaluate(trustedPR(sha1), EvalOptions{})
-	h.evaluate(trustedPR(sha1), EvalOptions{})              // a redelivery
+	h.evaluate(branchPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})               // a redelivery
 	h.evaluate(pushTrigger(sha1, "feature"), EvalOptions{}) // another event for the commit: ci does not run on pushes to feature
 	if runs := h.runner.Runs(); len(runs) != 1 {
 		t.Fatalf("runs = %d, want 1", len(runs))
@@ -93,7 +93,7 @@ func TestEvaluateConfigProblems(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			tt.setup(h)
-			h.evaluate(trustedPR(sha1), EvalOptions{ReportConfigErrors: tt.report})
+			h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: tt.report})
 			if len(h.runner.Runs()) != 0 {
 				t.Fatalf("no run may start")
 			}
@@ -131,10 +131,10 @@ func TestEvaluatePathFilters(t *testing.T) {
 		wantRun  bool
 		wantSkip bool
 	}{
-		{name: "no relevant change is reported as skipped", trigger: trustedPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md", "docs/a.md"}, Complete: true}, wantSkip: true},
-		{name: "a relevant change runs", trigger: trustedPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md", "src/main.go"}, Complete: true}, wantRun: true},
-		{name: "an incomplete list fails open", trigger: trustedPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md"}}, wantRun: true},
-		{name: "unknown changes fail open", trigger: trustedPR(sha1), wantRun: true},
+		{name: "no relevant change is reported as skipped", trigger: branchPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md", "docs/a.md"}, Complete: true}, wantSkip: true},
+		{name: "a relevant change runs", trigger: branchPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md", "src/main.go"}, Complete: true}, wantRun: true},
+		{name: "an incomplete list fails open", trigger: branchPR(sha1), files: &ci.ChangedFiles{Files: []string{"README.md"}}, wantRun: true},
+		{name: "unknown changes fail open", trigger: branchPR(sha1), wantRun: true},
 		{name: "a new branch changes everything", trigger: func() ci.Trigger { p := pushTrigger(sha1, "main"); p.Push.Created = true; return p }(), wantRun: true},
 	}
 	for _, tt := range tests {
@@ -159,51 +159,29 @@ func TestEvaluatePathFilters(t *testing.T) {
 	}
 }
 
-func TestEvaluateUntrustedPullRequestNeedsApproval(t *testing.T) {
-	h := newHarness(t)
-	h.files(sha1, ciConfig, ciRun)
-	h.evaluate(prTrigger(sha1, 7, "CONTRIBUTOR", "stranger/demo"), EvalOptions{})
-	if len(h.runner.Runs()) != 0 {
-		t.Fatalf("an untrusted pull request must not run")
-	}
-	r := h.onlyReport("ci")
-	if r.Conclusion != ci.ActionRequired || r.Title != "Approval required" || r.URL != "https://github.com/octo-org/demo/pull/7" ||
-		!reflect.DeepEqual(r.Actions, []ci.Action{{Label: "Approve and run", Description: "Run the pipeline for this commit", ID: ci.ApproveAction}}) {
-		t.Fatalf("report = %+v", r)
-	}
-	mustContain(t, r.Summary, "@alice", "`contributor`", "`stranger/demo`")
-
-	// A branch of the repository itself is trusted whatever the association.
-	h.files(sha2, ciConfig, ciRun)
-	h.evaluate(prTrigger(sha2, 8, "NONE", repo.FullName), EvalOptions{})
-	if len(h.runner.Runs()) != 1 {
-		t.Fatalf("a pull request from the repository itself must run")
-	}
-}
-
-func TestTrusted(t *testing.T) {
+func TestEvaluateIgnoresForks(t *testing.T) {
 	tests := []struct {
-		association, headRepo string
-		want                  bool
+		name     string
+		headRepo string
+		wantRun  bool
 	}{
-		{"OWNER", "fork/demo", true},
-		{"MEMBER", "fork/demo", true},
-		{"COLLABORATOR", "fork/demo", true},
-		{"member", "fork/demo", true},
-		{"CONTRIBUTOR", "fork/demo", false},
-		{"FIRST_TIME_CONTRIBUTOR", "fork/demo", false},
-		{"NONE", "", false},
-		{"NONE", repo.FullName, true},
-		{"NONE", "OCTO-ORG/Demo", true},
+		{name: "pull request from a fork", headRepo: "stranger/demo"},
+		{name: "pull request from a deleted repository", headRepo: ""},
+		{name: "pull request from a branch of the repository", headRepo: repo.FullName, wantRun: true},
+		{name: "branch of the repository, other letter case", headRepo: "OCTO-ORG/Demo", wantRun: true},
 	}
 	for _, tt := range tests {
-		pr := &ci.PullRequest{AuthorAssociation: tt.association, HeadRepo: tt.headRepo}
-		if got := Trusted(pr, repo.FullName); got != tt.want {
-			t.Errorf("Trusted(%s, %s) = %v, want %v", tt.association, tt.headRepo, got, tt.want)
-		}
-	}
-	if !Trusted(nil, repo.FullName) {
-		t.Fatalf("events other than pull requests are trusted")
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.files(sha1, ciConfig, ciRun)
+			h.evaluate(prTrigger(sha1, 7, tt.headRepo), EvalOptions{ReportConfigErrors: true})
+			if runs := h.runner.Runs(); (len(runs) == 1) != tt.wantRun {
+				t.Fatalf("runs = %d, want a run: %v", len(runs), tt.wantRun)
+			}
+			if !tt.wantRun && len(h.host.Reports()) != 0 {
+				t.Fatalf("a pull request from a fork got reports: %+v", h.host.Reports())
+			}
+		})
 	}
 }
 
@@ -239,7 +217,7 @@ func TestEvaluateRefusals(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(h)
 			}
-			h.evaluate(trustedPR(sha1), EvalOptions{})
+			h.evaluate(branchPR(sha1), EvalOptions{})
 			if len(h.runner.Runs()) != 0 {
 				t.Fatalf("no run may be created")
 			}
@@ -259,7 +237,7 @@ func TestStartAbortsWhenTheTokenCannotBeMinted(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, ciConfig, ciRun)
 	h.host.Fail("RepositoryToken", errors.New("the permissions requested are not granted"))
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	run := h.run("demo-ci-1111111-1")
 	if !run.CancelRequested || run.Cancellation.Reason != "could not be started" || !run.Done || run.Reported != ci.ReportedCompleted {
 		t.Fatalf("the run must be cancelled and let go: %+v", run)
@@ -277,7 +255,7 @@ func TestStartAbortsWhenTheTokenCannotBeMinted(t *testing.T) {
 func TestTaskReportsAreOpened(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, strings.Replace(ciConfig, "githubToken: {workspace: github-token}", "taskChecks: true", 1), ciRun)
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	build, test := h.onlyReport("ci / build"), h.onlyReport("ci / test")
 	run := h.run("demo-ci-1111111-1")
 	if run.TaskReportIDs["build"] != build.ID || run.TaskReportIDs["test"] != test.ID || run.Phase != ci.Released {
@@ -287,14 +265,4 @@ func TestTaskReportsAreOpened(t *testing.T) {
 		t.Fatalf("task report = %+v", build)
 	}
 	mustContain(t, build.Summary, "Task `build` of **PipelineRun:**")
-}
-
-func TestMissingAssociationIsReadFromThePullRequest(t *testing.T) {
-	h := newHarness(t)
-	h.files(sha1, ciConfig, ciRun)
-	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 11, HeadSHA: sha1, HeadRepo: "member/demo", AuthorAssociation: "MEMBER"}, State: "open"})
-	h.evaluate(prTrigger(sha1, 11, "", "member/demo"), EvalOptions{})
-	if len(h.runner.Runs()) != 1 {
-		t.Fatalf("a member's fork pull request must run when the payload lacks the association")
-	}
 }

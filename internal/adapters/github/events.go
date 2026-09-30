@@ -22,9 +22,9 @@ var handledEvents = map[string]bool{
 func (a *App) Handles(event string) bool { return handledEvents[event] }
 
 // Decode turns a verified webhook delivery into a ci.Event. It returns no event, and the reason,
-// when the delivery is not for Octomaton: an event or action it ignores, a repository owner it does
-// not serve, another App's check run, an incomplete payload. It returns an error when the payload
-// cannot be parsed.
+// when the delivery is not for Octomaton: an event or action it ignores, a repository that is a fork
+// or a pull request from one, a repository owner it does not serve, another App's check run, an
+// incomplete payload. It returns an error when the payload cannot be parsed.
 func (a *App) Decode(event, delivery string, body []byte) (ci.Event, string, error) {
 	payload, err := github.ParseWebHook(event, body)
 	if err != nil {
@@ -34,38 +34,41 @@ func (a *App) Decode(event, delivery string, body []byte) (ci.Event, string, err
 		ev     ci.Event
 		reason string
 		owner  string
+		fork   bool
 	)
 	switch p := payload.(type) {
 	case *github.PushEvent:
 		var t ci.Trigger
 		t, reason = pushTrigger(p, delivery)
-		ev, owner = &ci.TriggerEvent{Trigger: t}, t.Repository.Owner
+		ev, owner, fork = &ci.TriggerEvent{Trigger: t}, t.Repository.Owner, p.GetRepo().GetFork()
 	case *github.PullRequestEvent:
 		var (
 			t     ci.Trigger
 			draft bool
 		)
 		t, draft, reason = pullRequestTrigger(p, delivery)
-		ev, owner = &ci.TriggerEvent{Trigger: t, Draft: draft}, t.Repository.Owner
+		ev, owner, fork = &ci.TriggerEvent{Trigger: t, Draft: draft}, t.Repository.Owner, p.GetRepo().GetFork()
 	case *github.MergeGroupEvent:
 		ev, reason = mergeGroupEvent(p, delivery)
-		owner = p.GetRepo().GetOwner().GetLogin()
+		owner, fork = p.GetRepo().GetOwner().GetLogin(), p.GetRepo().GetFork()
 	case *github.IssueCommentEvent:
 		var c *ci.CommandEvent
 		c, reason = commandEvent(p, delivery)
-		ev, owner = c, c.Repository.Owner
+		ev, owner, fork = c, c.Repository.Owner, p.GetRepo().GetFork()
 	case *github.CheckRunEvent:
 		var r *ci.RerunEvent
 		r, reason = a.checkRunRerun(p, delivery)
-		ev, owner = r, r.Repository.Owner
+		ev, owner, fork = r, r.Repository.Owner, p.GetRepo().GetFork()
 	case *github.CheckSuiteEvent:
 		var r *ci.RerunEvent
 		r, reason = a.checkSuiteRerun(p, delivery)
-		ev, owner = r, r.Repository.Owner
+		ev, owner, fork = r, r.Repository.Owner, p.GetRepo().GetFork()
 	default:
 		reason = "unhandled event " + event
 	}
 	switch {
+	case fork:
+		return nil, "repository is a fork", nil
 	case reason != "":
 		return nil, reason, nil
 	case !a.serves(owner):
@@ -177,16 +180,18 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 		Branch:         pr.GetHead().GetRef(),
 		Sender:         ev.GetSender().GetLogin(),
 		PullRequest: &ci.PullRequest{
-			Number:            number,
-			HeadRef:           pr.GetHead().GetRef(),
-			HeadSHA:           pr.GetHead().GetSHA(),
-			BaseRef:           pr.GetBase().GetRef(),
-			BaseSHA:           pr.GetBase().GetSHA(),
-			HeadRepo:          pr.GetHead().GetRepo().GetFullName(),
-			Author:            pr.GetUser().GetLogin(),
-			AuthorAssociation: pr.GetAuthorAssociation(),
-			HTMLURL:           pr.GetHTMLURL(),
+			Number:   number,
+			HeadRef:  pr.GetHead().GetRef(),
+			HeadSHA:  pr.GetHead().GetSHA(),
+			BaseRef:  pr.GetBase().GetRef(),
+			BaseSHA:  pr.GetBase().GetSHA(),
+			HeadRepo: pr.GetHead().GetRepo().GetFullName(),
+			Author:   pr.GetUser().GetLogin(),
+			HTMLURL:  pr.GetHTMLURL(),
 		},
+	}
+	if t.FromFork() {
+		return t, pr.GetDraft(), "pull request from a fork"
 	}
 	return t, pr.GetDraft(), incomplete(t)
 }
@@ -263,8 +268,7 @@ func firstLine(body string) string {
 	return strings.TrimSpace(line)
 }
 
-// checkRunRerun accepts a re-run of one of the App's check runs, or the press of its "Approve and
-// run" button.
+// checkRunRerun accepts a re-run of one of the App's check runs.
 func (a *App) checkRunRerun(ev *github.CheckRunEvent, delivery string) (*ci.RerunEvent, string) {
 	cr := ev.GetCheckRun()
 	r := &ci.RerunEvent{
@@ -274,14 +278,7 @@ func (a *App) checkRunRerun(ev *github.CheckRunEvent, delivery string) (*ci.Reru
 		Requester:      ev.GetSender().GetLogin(),
 		DeliveryID:     delivery,
 	}
-	switch ev.GetAction() {
-	case "rerequested":
-	case "requested_action":
-		if ev.GetRequestedAction() == nil || ev.GetRequestedAction().Identifier != ci.ApproveAction {
-			return r, "unknown requested action"
-		}
-		r.Approve = true
-	default:
+	if ev.GetAction() != "rerequested" {
 		return r, "unhandled check_run action " + ev.GetAction()
 	}
 	if cr.GetApp().GetID() != a.id {

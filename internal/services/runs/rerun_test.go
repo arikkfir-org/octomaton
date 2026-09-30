@@ -45,7 +45,7 @@ func TestRerunOfSkippedReportRunsThePipeline(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, pathsConfig, ciRun)
 	h.host.SetPullRequestFiles(repo, 5, ci.ChangedFiles{Files: []string{"README.md"}, Complete: true})
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	skipped := h.onlyReport("ci")
 	if skipped.Conclusion != ci.Skipped || len(h.runner.Runs()) != 0 {
 		t.Fatalf("setup: the pipeline must be skipped")
@@ -56,35 +56,27 @@ func TestRerunOfSkippedReportRunsThePipeline(t *testing.T) {
 	}
 }
 
-func TestApproveAndRun(t *testing.T) {
+// TestRerunIgnoresForks re-runs reports whose stored trigger is a pull request from a fork, as an
+// earlier version could have created: nothing runs and nothing is reported.
+func TestRerunIgnoresForks(t *testing.T) {
 	tests := []struct {
-		name      string
-		requester string
-		approve   bool
-		wantRun   bool
+		name     string
+		pipeline string
 	}{
-		{name: "approved by a maintainer", requester: "maintainer", approve: true, wantRun: true},
-		{name: "a re-run of the pending report approves too", requester: "maintainer", wantRun: true},
-		{name: "not by a reader", requester: "reader", approve: true},
+		{name: "a pipeline's report", pipeline: "ci"},
+		{name: "the configuration's report", pipeline: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.files(sha1, ciConfig, ciRun)
-			h.evaluate(prTrigger(sha1, 9, "NONE", "stranger/demo"), EvalOptions{})
-			pending := h.onlyReport("ci")
-			if pending.Conclusion != ci.ActionRequired {
-				t.Fatalf("setup: approval must be required")
-			}
-			e := rerun(tt.requester, pending)
-			e.Approve = tt.approve
+			fork := prTrigger(sha1, 9, "stranger/demo")
+			fork.Pipeline = tt.pipeline
+			e := rerun("maintainer")
+			e.Reports = []ci.ReportRef{{ID: 99, Name: "ci", Revision: sha1, Conclusion: ci.Failure, Trigger: &fork}}
 			h.svc.Handle(context.Background(), e)
-			runs := h.runner.Runs()
-			if (len(runs) == 1) != tt.wantRun {
-				t.Fatalf("runs = %d, want a run: %v", len(runs), tt.wantRun)
-			}
-			if tt.wantRun && (runs[0].Trigger.ApprovedBy != tt.requester || runs[0].Trigger.PullRequest.Number != 9) {
-				t.Fatalf("approved trigger = %+v", runs[0].Trigger)
+			if len(h.runner.Runs()) != 0 || len(h.host.Reports()) != 0 {
+				t.Fatalf("runs = %+v, reports = %+v, want none", h.runner.Runs(), h.host.Reports())
 			}
 		})
 	}
@@ -106,7 +98,7 @@ func TestRerunSuiteRunsEachPipelineOnce(t *testing.T) {
 func TestRerunOfTheConfigReportEvaluatesAgain(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, "apiVersion: v0\n", "")
-	h.evaluate(trustedPR(sha1), EvalOptions{ReportConfigErrors: true})
+	h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: true})
 	config := h.onlyReport(ci.ConfigReportName)
 	// The file cannot change at the same commit, but a transient problem can go away.
 	h.files(sha1, ciConfig, ciRun)
@@ -119,9 +111,9 @@ func TestRerunOfTheConfigReportEvaluatesAgain(t *testing.T) {
 func TestRerunIgnoresReportsWithoutAMatchingTrigger(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, ciConfig, ciRun)
-	other := trustedPR(sha1)
+	other := branchPR(sha1)
 	other.Repository.FullName = "someone/else"
-	stale := trustedPR(sha1)
+	stale := branchPR(sha1)
 	stale.Revision = sha2
 	for _, tr := range []*ci.Trigger{nil, &other, &stale} {
 		id := h.host.AddReport(repo, ci.Report{Name: "ci", Revision: sha1, Trigger: tr})
@@ -136,7 +128,7 @@ func TestRerunIgnoresReportsWithoutAMatchingTrigger(t *testing.T) {
 func TestRerunOfAPipelineThatIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.files(sha1, ciConfig, ciRun)
-	gone := trustedPR(sha1)
+	gone := branchPR(sha1)
 	gone.Pipeline = "release"
 	id := h.host.AddReport(repo, ci.Report{Name: "release", Revision: sha1, Conclusion: ci.Failure, Trigger: &gone})
 	r, _ := h.host.Report(id)

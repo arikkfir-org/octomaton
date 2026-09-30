@@ -1,6 +1,6 @@
 // Package runs turns events into runs: it reads .octomaton.yaml for a trigger, starts the pipelines
-// it matches (weighing pull request trust and changed paths), lets runs go per their concurrency
-// policy, re-runs reports, and runs pull request comment commands.
+// it matches (weighing changed paths), lets runs go per their concurrency policy, re-runs reports,
+// and runs pull request comment commands. It never acts on pull requests from forks.
 package runs
 
 import (
@@ -94,34 +94,25 @@ type EvalOptions struct {
 	ReportConfigErrors bool
 	// Draft is set for events of draft pull requests.
 	Draft bool
-	// ApprovedBy, when set, is a user with write access who approved running pipelines for an
-	// untrusted pull request.
-	ApprovedBy string
 	// RerunBy, when set, is the user who asked to evaluate the trigger again.
 	RerunBy string
 }
 
 // Evaluate reads .octomaton.yaml at the commit under test and starts every pipeline the trigger
-// matches. A repository without the file is ignored.
+// matches. A repository without the file is ignored, and so is a pull request from a fork: it gets
+// no report and no run.
 func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) {
 	log := s.logFor(t)
+	if t.FromFork() {
+		log.InfoContext(ctx, "Ignoring a pull request from a fork", "headRepository", t.PullRequest.HeadRepo)
+		return
+	}
 	gh := s.Host.Installation(t.InstallationID)
 	cfg, ok := s.loadConfig(ctx, gh, t, opts.ReportConfigErrors)
 	if !ok {
 		return
 	}
 	ev := matchEvent(t, opts.Draft)
-	if pr := t.PullRequest; pr != nil && pr.AuthorAssociation == "" && !Trusted(pr, t.Repository.FullName) {
-		// Webhook payloads carry the author's association; should one lack it, read it from the pull
-		// request rather than treat a member as a stranger.
-		if current, err := gh.PullRequest(ctx, t.Repository, pr.Number); err == nil {
-			withAssociation := *pr
-			withAssociation.AuthorAssociation = current.AuthorAssociation
-			t.PullRequest = &withAssociation
-		} else {
-			log.WarnContext(ctx, "Could not read the pull request's author association", "error", err)
-		}
-	}
 	var files *ci.ChangedFiles
 	matched := 0
 	for i := range cfg.Pipelines {
@@ -132,7 +123,7 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 		}
 		matched++
 		pt := t
-		pt.Pipeline, pt.ApprovedBy, pt.RerunBy = p.Name, opts.ApprovedBy, opts.RerunBy
+		pt.Pipeline, pt.RerunBy = p.Name, opts.RerunBy
 		if filter.Active() {
 			if files == nil {
 				f := s.changedFiles(ctx, gh, t)
@@ -142,10 +133,6 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 				s.reportSkipped(ctx, gh, pt, filter, len(files.Files))
 				continue
 			}
-		}
-		if pt.ApprovedBy == "" && !Trusted(t.PullRequest, t.Repository.FullName) {
-			s.reportApprovalRequired(ctx, gh, pt)
-			continue
 		}
 		if _, err := s.start(ctx, gh, pt, p, false); err != nil {
 			var refusal *Refusal
@@ -216,7 +203,7 @@ func markdownLine(s string) string {
 func (s *Service) reportConfigProblem(ctx context.Context, gh ci.Installation, t ci.Trigger, title, summary string) {
 	t.Pipeline = ""
 	s.Metrics.RunCreated(ctx, metrics.RunFailed)
-	s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Failure, title, summary, nil, "")
+	s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Failure, title, summary)
 }
 
 func (s *Service) reportSkipped(ctx context.Context, gh ci.Installation, t ci.Trigger, f pipelines.PathFilter, changed int) {
@@ -231,28 +218,15 @@ func (s *Service) reportSkipped(ctx context.Context, gh ci.Installation, t ci.Tr
 	b.WriteString("\nRe-run this check to run the pipeline anyway.")
 	s.logFor(t).InfoContext(ctx, "Pipeline skipped: no relevant changes")
 	s.Metrics.RunCreated(ctx, metrics.RunSkipped)
-	s.openCompleted(ctx, gh, t, t.Pipeline, ci.Skipped, "Skipped: no relevant changes", b.String(), nil, "")
-}
-
-func (s *Service) reportApprovalRequired(ctx context.Context, gh ci.Installation, t ci.Trigger) {
-	pr := t.PullRequest
-	summary := fmt.Sprintf("Pull request #%d was opened by @%s (association: `%s`) from `%s`, so pipeline `%s` does not run automatically.\n\n"+
-		"A user with write access to %s should review the changes and then click **Approve and run** to run the pipeline for commit `%s`. "+
-		"Every new commit requires a new approval.",
-		pr.Number, pr.Author, strings.ToLower(orNone(pr.AuthorAssociation)), orNone(pr.HeadRepo), t.Pipeline,
-		t.Repository.FullName, ci.ShortSHA(t.Revision))
-	actions := []ci.Action{{Label: "Approve and run", Description: "Run the pipeline for this commit", ID: ci.ApproveAction}}
-	s.logFor(t).InfoContext(ctx, "Pipeline requires approval", "author", pr.Author, "association", pr.AuthorAssociation)
-	s.Metrics.RunCreated(ctx, metrics.RunActionRequired)
-	s.openCompleted(ctx, gh, t, t.Pipeline, ci.ActionRequired, "Approval required", summary, actions, pr.HTMLURL)
+	s.openCompleted(ctx, gh, t, t.Pipeline, ci.Skipped, "Skipped: no relevant changes", b.String())
 }
 
 // openCompleted opens a completed report that stores the trigger, so it can be re-run.
-func (s *Service) openCompleted(ctx context.Context, gh ci.Installation, t ci.Trigger, name string, conclusion ci.Conclusion, title, summary string, actions []ci.Action, url string) {
+func (s *Service) openCompleted(ctx context.Context, gh ci.Installation, t ci.Trigger, name string, conclusion ci.Conclusion, title, summary string) {
 	now := s.now()
 	r := ci.Report{
 		Name: name, Revision: t.Revision, Status: ci.StatusCompleted, Conclusion: conclusion, Started: now, Completed: now,
-		Title: title, Summary: summary, URL: url, Actions: actions, Trigger: &t,
+		Title: title, Summary: summary, Trigger: &t,
 	}
 	if _, err := gh.OpenReport(ctx, t.Repository, r); err != nil {
 		s.logFor(t).ErrorContext(ctx, "Could not open the report", "report", name, "conclusion", conclusion, "error", err)
@@ -305,22 +279,6 @@ func matchEvent(t ci.Trigger, draft bool) pipelines.Event {
 		ev.Branch, ev.Tag = t.Branch, t.Tag
 	}
 	return ev
-}
-
-// trustedAssociations may run pipelines on their pull requests without approval.
-var trustedAssociations = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
-
-// Trusted reports whether a pull request's pipelines may run without approval: its author is an
-// owner, member or collaborator of the repository, or its head branch lives in the base repository
-// itself (which takes write access).
-func Trusted(pr *ci.PullRequest, baseRepoFullName string) bool {
-	if pr == nil {
-		return true
-	}
-	if trustedAssociations[strings.ToUpper(pr.AuthorAssociation)] {
-		return true
-	}
-	return pr.HeadRepo != "" && strings.EqualFold(pr.HeadRepo, baseRepoFullName)
 }
 
 func isZeroSHA(sha string) bool {

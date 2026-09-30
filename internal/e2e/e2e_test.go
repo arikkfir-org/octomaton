@@ -306,7 +306,19 @@ func TestEndToEnd(t *testing.T) {
 	// Events from other owners are ignored.
 	foreign := pullRequestPayload("opened")
 	foreign["repository"] = map[string]any{"id": 1, "name": "x", "full_name": "someone/x", "owner": map[string]any{"login": "someone"}}
+	foreign["pull_request"].(map[string]any)["head"] = map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"full_name": "someone/x"}}
 	if rec := e.deliver("pull_request", "d-4", foreign, true); !strings.Contains(rec.Body.String(), "owner is not allowed") {
 		t.Fatalf("foreign owner: %s", rec.Body.String())
+	}
+
+	// Pull requests from forks are ignored before anything is read or reported.
+	checks := len(e.gh.CheckRuns())
+	fork := pullRequestPayload("opened")
+	fork["pull_request"].(map[string]any)["head"] = map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"full_name": "stranger/" + repoName}}
+	if rec := e.deliver("pull_request", "d-5", fork, true); rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), "pull request from a fork") {
+		t.Fatalf("fork: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := len(e.gh.CheckRuns()); got != checks {
+		t.Fatalf("a pull request from a fork got check runs: %d, want %d", got, checks)
 	}
 }

@@ -14,7 +14,8 @@ import (
 // line. The configuration and pipeline definitions are read from the default branch (so a pull
 // request cannot change what its own commands run), at the pull request's head commit. The commenter
 // needs write access, and the pull request must be open and not a draft. Started commands get an
-// "eyes" reaction; declined ones a thumbs-down and a reply saying why.
+// "eyes" reaction; declined ones a thumbs-down and a reply saying why. Commands on pull requests from
+// forks are ignored without a reaction or a reply.
 func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 	log := s.Logger.With("repository", e.Repository.FullName, "pullRequest", e.Number, "comment", e.CommentID, "author", e.Author, "delivery", e.DeliveryID)
 	gh := s.Host.Installation(e.InstallationID)
@@ -57,6 +58,9 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 	case err != nil:
 		log.ErrorContext(ctx, "Could not read the pull request", "error", err)
 		decline("Octomaton could not read the pull request; see its logs")
+		return
+	case pr.FromFork(e.Repository.FullName):
+		log.InfoContext(ctx, "Ignoring a comment command on a pull request from a fork", "headRepository", pr.HeadRepo)
 		return
 	case pr.State != "open":
 		decline("the pull request is closed")

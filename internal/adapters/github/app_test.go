@@ -183,7 +183,7 @@ func TestPullRequestAndBranchHead(t *testing.T) {
 	pr, err := gh.PullRequest(ctx, repo, 3)
 	want := ci.PullRequestState{
 		PullRequest: ci.PullRequest{Number: 3, HeadRef: "topic", HeadSHA: "abc", BaseRef: "main", BaseSHA: "def", HeadRepo: "fork/octo-repo",
-			Author: "carol", AuthorAssociation: "NONE", HTMLURL: "https://github.com/octo-org/octo-repo/pull/3"},
+			Author: "carol", HTMLURL: "https://github.com/octo-org/octo-repo/pull/3"},
 		State: "open", Draft: true,
 	}
 	if err != nil || pr != want {

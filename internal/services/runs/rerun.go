@@ -10,11 +10,11 @@ import (
 )
 
 // Rerun replays the trigger stored with each report as a new attempt. Re-running a pipeline's report
-// (or one of its task reports) always runs the pipeline: path filters are not applied again, and the
-// requester's write access stands in for pull request trust. Re-running the "octomaton" report
-// evaluates the whole event again.
+// (or one of its task reports) always runs the pipeline: path filters are not applied again.
+// Re-running the "octomaton" report evaluates the whole event again. Reports of pull requests from
+// forks are never re-run.
 func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
-	log := s.Logger.With("repository", e.Repository.FullName, "requester", e.Requester, "delivery", e.DeliveryID, "approve", e.Approve)
+	log := s.Logger.With("repository", e.Repository.FullName, "requester", e.Requester, "delivery", e.DeliveryID)
 	gh := s.Host.Installation(e.InstallationID)
 
 	level, err := gh.Permission(ctx, e.Repository, e.Requester)
@@ -41,6 +41,10 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		if !ok {
 			continue
 		}
+		if t.FromFork() {
+			log.InfoContext(ctx, "Ignoring a re-run for a pull request from a fork", "report", ref.Name, "headRepository", t.PullRequest.HeadRepo)
+			continue
+		}
 		t.InstallationID, t.DeliveryID, t.RerunBy = e.InstallationID, e.DeliveryID, e.Requester
 		key := t.Revision + " " + t.Pipeline + " " + t.Head()
 		if done[key] {
@@ -49,13 +53,9 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		done[key] = true
 
 		if t.Pipeline == "" {
-			// The configuration's report: evaluate the whole event again. Untrusted pull requests
-			// still need an explicit approval afterwards.
-			s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, ApprovedBy: t.ApprovedBy, RerunBy: e.Requester})
+			// The configuration's report: evaluate the whole event again.
+			s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester})
 			continue
-		}
-		if e.Approve || ref.Conclusion == ci.ActionRequired {
-			t.ApprovedBy = e.Requester
 		}
 		cfg, ok := configs[t.ConfigAt()]
 		if !ok {
@@ -67,10 +67,10 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		p := cfg.Pipeline(t.Pipeline)
 		if p == nil {
 			s.openCompleted(ctx, gh, t, t.Pipeline, ci.Failure, "Pipeline not found",
-				fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", pipelines.FileName, ci.ShortSHA(t.ConfigAt()), t.Pipeline), nil, "")
+				fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", pipelines.FileName, ci.ShortSHA(t.ConfigAt()), t.Pipeline))
 			continue
 		}
-		s.logFor(t).InfoContext(ctx, "Re-running the pipeline", "requester", e.Requester, "approved", t.ApprovedBy != "")
+		s.logFor(t).InfoContext(ctx, "Re-running the pipeline", "requester", e.Requester)
 		if _, err := s.start(ctx, gh, t, p, true); err != nil {
 			s.logFor(t).WarnContext(ctx, "The re-run did not start", "error", err)
 		}

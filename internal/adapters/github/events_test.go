@@ -49,12 +49,20 @@ func TestDecodeReasons(t *testing.T) {
 	otherCheck := &github.CheckRun{ID: new(int64(1)), App: &github.App{ID: new(int64(1))}}
 	installation := &github.Installation{ID: new(int64(installationID))}
 	sender := &github.User{Login: new("maintainer")}
-	prPayload := func(ownerLogin string) *github.PullRequestEvent {
+	// prPayload is a pull request into ownerLogin's repository from headRepo (nil: a deleted one).
+	prPayload := func(ownerLogin string, headRepo *github.Repository) *github.PullRequestEvent {
 		return &github.PullRequestEvent{
 			Action: new("opened"), Number: new(5), Repo: ghRepo(ownerLogin), Installation: installation, Sender: sender,
-			PullRequest: &github.PullRequest{Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("feature")}, Base: &github.PullRequestBranch{Ref: new("main")}},
+			PullRequest: &github.PullRequest{Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("feature"), Repo: headRepo}, Base: &github.PullRequestBranch{Ref: new("main")}},
 		}
 	}
+	forkRepo := func() *github.Repository {
+		r := ghRepo(owner)
+		r.Fork = new(true)
+		return r
+	}
+	forkPush := pushEvent("refs/heads/main", sha1, false)
+	forkPush.Repo.Fork = new(true)
 	comment := func(action, text string, onPR bool) *github.IssueCommentEvent {
 		issue := &github.Issue{Number: new(5)}
 		if onPR {
@@ -63,6 +71,8 @@ func TestDecodeReasons(t *testing.T) {
 		return &github.IssueCommentEvent{Action: new(action), Issue: issue, Repo: ghRepo(owner), Installation: installation, Sender: sender,
 			Comment: &github.IssueComment{ID: new(int64(9)), Body: new(text), User: sender}}
 	}
+	forkComment := comment("created", "/deploy", true)
+	forkComment.Repo = forkRepo()
 	mergeGroup := func(action string) *github.MergeGroupEvent {
 		return &github.MergeGroupEvent{Action: new(action), Reason: new("dequeued"), Repo: ghRepo(owner), Installation: installation,
 			MergeGroup: &github.MergeGroup{HeadSHA: new(sha1), HeadRef: new("refs/heads/gh-readonly-queue/main/x"), BaseRef: new("refs/heads/main")}}
@@ -79,8 +89,13 @@ func TestDecodeReasons(t *testing.T) {
 		{"deleted branch", "push", pushEvent("refs/heads/main", "0000000000000000000000000000000000000000", true), "ref was deleted", ""},
 		{"merge queue branch", "push", pushEvent("refs/heads/gh-readonly-queue/main/pr-1-abc", sha1, false), "push to a merge queue branch (merge_group events cover it)", ""},
 		{"notes ref", "push", pushEvent("refs/notes/x", sha1, false), "ref is neither a branch nor a tag", ""},
-		{"pull request", "pull_request", prPayload(owner), "", "pull_request octo-org/demo@1111111"},
-		{"owner not allowed", "pull_request", prPayload("stranger"), "repository owner is not allowed", ""},
+		{"pull request", "pull_request", prPayload(owner, ghRepo(owner)), "", "pull_request octo-org/demo@1111111"},
+		{"pull request from a fork", "pull_request", prPayload(owner, ghRepo("stranger")), "pull request from a fork", ""},
+		{"pull request from a deleted repository", "pull_request", prPayload(owner, nil), "pull request from a fork", ""},
+		{"owner not allowed", "pull_request", prPayload("stranger", ghRepo("stranger")), "repository owner is not allowed", ""},
+		{"push to a fork", "push", forkPush, "repository is a fork", ""},
+		{"comment in a fork", "issue_comment", forkComment, "repository is a fork", ""},
+		{"check run in a fork", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: appCheck, Repo: forkRepo(), Installation: installation, Sender: sender}, "repository is a fork", ""},
 		{"pull request without its pull request", "pull_request", &github.PullRequestEvent{Action: new("opened"), Repo: ghRepo(owner)}, "no pull request in payload", ""},
 		{"merge group checks requested", "merge_group", mergeGroup("checks_requested"), "", "merge_group octo-org/demo@1111111"},
 		{"merge group destroyed", "merge_group", mergeGroup("destroyed"), "", "merge_group destroyed octo-org/demo"},
@@ -88,8 +103,7 @@ func TestDecodeReasons(t *testing.T) {
 		{"other merge group action", "merge_group", mergeGroup("created"), "unhandled merge_group action created", ""},
 		{"check run rerequested", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: appCheck, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "", "re-run octo-org/demo"},
 		{"check run of another app", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: otherCheck, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "check run belongs to another app", ""},
-		{"approve action", "check_run", &github.CheckRunEvent{Action: new("requested_action"), RequestedAction: &github.RequestedAction{Identifier: ci.ApproveAction}, CheckRun: appCheck, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "", "re-run octo-org/demo"},
-		{"unknown action", "check_run", &github.CheckRunEvent{Action: new("requested_action"), RequestedAction: &github.RequestedAction{Identifier: "other"}, CheckRun: appCheck, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "unknown requested action", ""},
+		{"requested action", "check_run", &github.CheckRunEvent{Action: new("requested_action"), RequestedAction: &github.RequestedAction{Identifier: "approve"}, CheckRun: appCheck, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "unhandled check_run action requested_action", ""},
 		{"check run created", "check_run", &github.CheckRunEvent{Action: new("created"), CheckRun: appCheck}, "unhandled check_run action created", ""},
 		{"check run without a sender", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: appCheck, Repo: ghRepo(owner), Installation: installation}, "no sender in payload", ""},
 		{"check suite rerequested", "check_suite", &github.CheckSuiteEvent{Action: new("rerequested"), CheckSuite: &github.CheckSuite{ID: new(int64(3)), App: &github.App{ID: new(int64(appID))}}, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "", "re-run octo-org/demo"},
@@ -126,18 +140,16 @@ func TestDecodeEvents(t *testing.T) {
 		Action: new("ready_for_review"), Number: new(12), Repo: ghRepo(owner),
 		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
 		PullRequest: &github.PullRequest{
-			Draft: new(true),
-			//lint:ignore SA1019 webhook payloads (unlike the Events API) carry author_association
-			AuthorAssociation: new("CONTRIBUTOR"), User: &github.User{Login: new("carol")}, HTMLURL: new("https://github.com/octo-org/demo/pull/12"),
-			Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new("carol/demo")}},
+			Draft: new(true), User: &github.User{Login: new("carol")}, HTMLURL: new("https://github.com/octo-org/demo/pull/12"),
+			Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new(owner + "/" + repoName)}},
 			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
 		},
 	}
 	trigger := sampleTrigger()
 	marker, _ := Marker(trigger)
 	checkRun := &github.CheckRunEvent{
-		Action: new("requested_action"), RequestedAction: &github.RequestedAction{Identifier: ci.ApproveAction},
-		CheckRun: &github.CheckRun{ID: new(int64(55)), Name: new("ci"), HeadSHA: new(sha1), Conclusion: new("action_required"),
+		Action: new("rerequested"),
+		CheckRun: &github.CheckRun{ID: new(int64(55)), Name: new("ci"), HeadSHA: new(sha1), Conclusion: new("failure"),
 			App: &github.App{ID: new(int64(appID))}, Output: &github.CheckRunOutput{Text: new(marker)}},
 		Repo: ghRepo(owner), Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("maintainer")},
 	}
@@ -167,15 +179,15 @@ func TestDecodeEvents(t *testing.T) {
 			want: &ci.TriggerEvent{Draft: true, Trigger: ci.Trigger{
 				Version: ci.TriggerVersion, Event: ci.EventPullRequest, Action: "ready_for_review", DeliveryID: "d", InstallationID: installationID,
 				Repository: repository, Revision: sha1, Ref: "refs/pull/12/head", Branch: "topic", Sender: "bob",
-				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: "carol/demo",
-					Author: "carol", AuthorAssociation: "CONTRIBUTOR", HTMLURL: "https://github.com/octo-org/demo/pull/12"},
+				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: owner + "/" + repoName,
+					Author: "carol", HTMLURL: "https://github.com/octo-org/demo/pull/12"},
 			}},
 		},
 		{
-			name: "an approval carries the check run's trigger", event: "check_run", payload: checkRun,
+			name: "a re-run carries the check run's trigger", event: "check_run", payload: checkRun,
 			want: &ci.RerunEvent{
-				InstallationID: installationID, Repository: repository, Requester: "maintainer", Approve: true, DeliveryID: "d",
-				Reports: []ci.ReportRef{{ID: 55, Name: "ci", Revision: sha1, Conclusion: ci.ActionRequired, Trigger: &trigger}},
+				InstallationID: installationID, Repository: repository, Requester: "maintainer", DeliveryID: "d",
+				Reports: []ci.ReportRef{{ID: 55, Name: "ci", Revision: sha1, Conclusion: ci.Failure, Trigger: &trigger}},
 			},
 		},
 		{

@@ -35,7 +35,7 @@ func setupComment(h *harness) {
 func openPR(change func(*ci.PullRequestState)) ci.PullRequestState {
 	pr := ci.PullRequestState{
 		PullRequest: ci.PullRequest{Number: 5, HeadRef: "feature", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA,
-			HeadRepo: "stranger/demo", Author: "stranger", AuthorAssociation: "NONE"},
+			HeadRepo: repo.FullName, Author: "alice"},
 		State: "open",
 	}
 	change(&pr)
@@ -136,7 +136,7 @@ func TestCommentsThatAreNotCommandsAreIgnored(t *testing.T) {
 }
 
 func TestHandle(t *testing.T) {
-	labeled := trustedPR(sha1)
+	labeled := branchPR(sha1)
 	labeled.Action = "labeled"
 	tests := []struct {
 		name         string
@@ -149,7 +149,7 @@ func TestHandle(t *testing.T) {
 			wantRuns: 1, wantReports: []string{"ci"}, wantNotified: []string{repo.FullName}},
 		{name: "a push to another branch", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "feature")}},
 		{name: "a pull request labeled has no configuration problems reported", event: &ci.TriggerEvent{Trigger: labeled}},
-		{name: "a draft pull request runs by default", event: &ci.TriggerEvent{Trigger: trustedPR(sha1), Draft: true}, wantRuns: 1, wantReports: []string{"ci"}},
+		{name: "a draft pull request runs by default", event: &ci.TriggerEvent{Trigger: branchPR(sha1), Draft: true}, wantRuns: 1, wantReports: []string{"ci"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,6 +165,27 @@ func TestHandle(t *testing.T) {
 			}
 			if len(h.runner.Runs()) != tt.wantRuns || !reflect.DeepEqual(reports, tt.wantReports) || !reflect.DeepEqual(h.notified, tt.wantNotified) {
 				t.Fatalf("runs %d, reports %v, notified %v; want %d, %v, %v", len(h.runner.Runs()), reports, h.notified, tt.wantRuns, tt.wantReports, tt.wantNotified)
+			}
+		})
+	}
+}
+
+func TestCommentCommandOnForkIsIgnored(t *testing.T) {
+	tests := []struct {
+		name     string
+		headRepo string
+	}{
+		{name: "pull request from a fork", headRepo: "stranger/demo"},
+		{name: "pull request from a deleted repository", headRepo: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			setupComment(h)
+			h.host.SetPullRequest(repo, openPR(func(pr *ci.PullRequestState) { pr.HeadRepo = tt.headRepo }))
+			h.svc.Handle(context.Background(), command(101, "maintainer", "/deploy staging"))
+			if len(h.runner.Runs()) != 0 || len(h.host.Reactions()) != 0 || len(h.host.Comments()) != 0 {
+				t.Fatalf("runs = %d, reactions = %+v, comments = %+v, want none", len(h.runner.Runs()), h.host.Reactions(), h.host.Comments())
 			}
 		})
 	}

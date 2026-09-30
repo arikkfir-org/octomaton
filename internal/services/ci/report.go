@@ -20,17 +20,12 @@ type Conclusion string
 
 // Conclusions.
 const (
-	Success        Conclusion = "success"
-	Failure        Conclusion = "failure"
-	Cancelled      Conclusion = "cancelled"
-	TimedOut       Conclusion = "timed_out"
-	Skipped        Conclusion = "skipped"
-	ActionRequired Conclusion = "action_required"
+	Success   Conclusion = "success"
+	Failure   Conclusion = "failure"
+	Cancelled Conclusion = "cancelled"
+	TimedOut  Conclusion = "timed_out"
+	Skipped   Conclusion = "skipped"
 )
-
-// ApproveAction identifies the report action that approves running an untrusted pull request's
-// pipelines.
-const ApproveAction = "approve"
 
 // Report is the status of a pipeline (or of one of its tasks) shown on the code host, next to the
 // commit it ran for. Zero fields are left as they are when a report is updated.

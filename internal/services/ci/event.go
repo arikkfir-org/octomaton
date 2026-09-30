@@ -35,8 +35,7 @@ type CommandEvent struct {
 	DeliveryID string
 }
 
-// RerunEvent asks to run reports again: a report's re-run, the re-run of a whole suite of reports,
-// or the approval of an untrusted pull request's pipelines.
+// RerunEvent asks to run reports again: a report's re-run, or the re-run of a whole suite of reports.
 type RerunEvent struct {
 	InstallationID int64
 	Repository     Repository
@@ -45,9 +44,7 @@ type RerunEvent struct {
 	// SuiteID runs the latest report of every name in the suite again.
 	SuiteID int64
 	// Requester asked for it; they need write access to the repository.
-	Requester string
-	// Approve is set when the requester approved running an untrusted pull request's pipelines.
-	Approve    bool
+	Requester  string
 	DeliveryID string
 }
 

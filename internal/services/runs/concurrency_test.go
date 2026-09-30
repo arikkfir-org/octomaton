@@ -14,13 +14,13 @@ func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {
 	h.files(sha1, ciConfig, ciRun)
 	h.files(sha2, ciConfig, ciRun)
 	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	if first := h.run("demo-ci-1111111-1"); first.Phase != ci.Released || first.CancelRequested {
 		t.Fatalf("the first run must go: %+v", first)
 	}
 
 	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
-	h.evaluate(trustedPR(sha2), EvalOptions{})
+	h.evaluate(branchPR(sha2), EvalOptions{})
 	first, second := h.run("demo-ci-1111111-1"), h.run("demo-ci-2222222-1")
 	if !first.CancelRequested || first.Cancellation.SupersededBy != second.ID.Name {
 		t.Fatalf("the older commit's run must be superseded: %+v", first)
@@ -30,7 +30,7 @@ func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {
 	}
 
 	// A late delivery for the old commit must not stand the head's run down.
-	late := trustedPR(sha1)
+	late := branchPR(sha1)
 	late.DeliveryID = "late"
 	h.svc.Evaluate(ctx, late, EvalOptions{})
 	if stale := h.run("demo-ci-1111111-2"); !stale.CancelRequested || stale.Cancellation.NewerCommit != sha2 {
@@ -46,10 +46,10 @@ func TestSupersedeOfSameCommitKeepsTheNewestReport(t *testing.T) {
 	ctx := context.Background()
 	h.files(sha1, ciConfig, ciRun)
 	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	// A re-run of the same commit is a new attempt with a newer report: it wins.
-	cfg, _ := h.svc.LoadConfig(ctx, trustedPR(sha1))
-	tr := trustedPR(sha1)
+	cfg, _ := h.svc.LoadConfig(ctx, branchPR(sha1))
+	tr := branchPR(sha1)
 	tr.Pipeline = "ci"
 	if _, err := h.svc.start(ctx, h.host.Installation(installationID), tr, cfg.Pipeline("ci"), true); err != nil {
 		t.Fatalf("start: %v", err)
@@ -68,7 +68,7 @@ func TestSupersedeWaitsForARivalOpeningItsReport(t *testing.T) {
 	ctx := context.Background()
 	h.files(sha1, ciConfig, ciRun)
 	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
-	h.evaluate(trustedPR(sha1), EvalOptions{})
+	h.evaluate(branchPR(sha1), EvalOptions{})
 	first := h.run("demo-ci-1111111-1")
 	// A second attempt of the commit, held, whose start has not opened its report yet.
 	rival, err := h.runner.Create(ctx, h.runner.Spec(first.ID), 2)

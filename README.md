@@ -32,8 +32,7 @@ sequenceDiagram
 1. Every webhook is verified (HMAC-SHA256) before anything else, then processed asynchronously on a bounded worker
    pool. A full queue answers 503, so GitHub records a failed delivery that can be redelivered.
 2. The event is matched against each pipeline's triggers. A matching pipeline whose path filters do not match gets a
-   check run concluded `skipped` (required checks do not block); a pull request from an untrusted fork gets an
-   `action_required` check with an **Approve and run** button.
+   check run concluded `skipped` (required checks do not block). Forks are ignored outright: see [Security](#security).
 3. Runs are named `<repo>-<pipeline>-<sha7>-<attempt>`. A redelivery, or a second event for the same commit, pipeline and
    branch, finds the existing run; re-runs create the next attempt.
 4. Runs are created held, then their check run and token Secret are created, then they are released per their
@@ -208,13 +207,14 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 
 - Only webhooks with a valid signature are processed; only installations on `OCTOMATON_GITHUB_ALLOWED_OWNERS` are
   served.
-- Pull requests run automatically when their author is an owner, member or collaborator, or their branch is in the
-  repository itself. Other pull requests need **Approve and run** (or a re-run) from someone with write access, for
-  every new commit.
+- Octomaton never acts on forks. It ignores every event from a repository that is itself a fork, and every pull
+  request whose head branch lives in another repository (or in one that no longer exists), whoever opened it: no check
+  run, no run, no reaction or reply to comment commands on it, and no re-run of reports stored for it. Pull requests
+  from the repository's own branches run automatically: pushing a branch there takes write access.
 - A run may mount no Secret other than the token Octomaton binds (volumes, workspaces, projected sources, `env` and
   `envFrom` are checked). Tokens are scoped to the event's repository with least permissions.
-- Namespaces, not pipelines, are the isolation boundary: trusted pull requests can change their own pipeline files and
-  thereby use their namespace's service account.
+- Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
+  use their namespace's service account.
 
 ## Server configuration
 
@@ -283,7 +283,7 @@ the leader, the PipelineRun informer synced).
 
 **Metrics** (in Cloud Monitoring under `prometheus.googleapis.com/`): counters `octomaton.webhooks.received{event}`,
 `octomaton.webhooks.rejected{event,reason}`, `octomaton.runs.created{result}` (`created`, `existing`, `skipped`,
-`action_required`, `failed`, `error`) and `octomaton.github.checkrun.errors{operation}`; histogram
+`failed`, `error`) and `octomaton.github.checkrun.errors{operation}`; histogram
 `octomaton.reconcile.duration{result}` (seconds); gauges `octomaton.webhook.queue.depth` and `octomaton.leader`; and
 OpenTelemetry's HTTP server metrics for `/github/hooks` (`http.server.request.duration`, …). **Traces:** a span per
 webhook request.

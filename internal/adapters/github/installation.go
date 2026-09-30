@@ -117,15 +117,14 @@ func (c *installation) PullRequest(ctx context.Context, repo ci.Repository, numb
 	}
 	return ci.PullRequestState{
 		PullRequest: ci.PullRequest{
-			Number:            pr.GetNumber(),
-			HeadRef:           pr.GetHead().GetRef(),
-			HeadSHA:           pr.GetHead().GetSHA(),
-			BaseRef:           pr.GetBase().GetRef(),
-			BaseSHA:           pr.GetBase().GetSHA(),
-			HeadRepo:          pr.GetHead().GetRepo().GetFullName(),
-			Author:            pr.GetUser().GetLogin(),
-			AuthorAssociation: pr.GetAuthorAssociation(),
-			HTMLURL:           pr.GetHTMLURL(),
+			Number:   pr.GetNumber(),
+			HeadRef:  pr.GetHead().GetRef(),
+			HeadSHA:  pr.GetHead().GetSHA(),
+			BaseRef:  pr.GetBase().GetRef(),
+			BaseSHA:  pr.GetBase().GetSHA(),
+			HeadRepo: pr.GetHead().GetRepo().GetFullName(),
+			Author:   pr.GetUser().GetLogin(),
+			HTMLURL:  pr.GetHTMLURL(),
 		},
 		State: pr.GetState(),
 		Draft: pr.GetDraft(),

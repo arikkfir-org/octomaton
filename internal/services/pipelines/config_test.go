@@ -17,6 +17,9 @@ pipelines:
   - name: ci                           # identifies the pipeline and its runs; unique; [a-z0-9][a-z0-9-]*
     displayName: Continuous Integration  # optional: the check's name on GitHub (default: name); unique
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
+    # pipelineRun:                     # or a file in another repository of the same owner, read at its default branch
+    #   repository: tooling
+    #   path: reviewer/pipelinerun.yaml
     on:
       pull_request:
         branches: [main]               # base-branch globs; omitted = all
@@ -33,6 +36,9 @@ pipelines:
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line; commenter needs write access
         branches: [main]               # optional pull request base-branch globs
+      review_request:                  # a review is requested from one of these users on a pull request
+        reviewers: [arikkfir-reviewer] # GitHub logins, case-insensitive; required
+        branches: [main]               # optional pull request base-branch globs
       schedule:                        # cron, 5 fields, UTC; runs at the default branch head
         - cron: "0 3 * * *"
     params:                            # set/override PipelineRun spec.params; values are Go templates
@@ -41,8 +47,12 @@ pipelines:
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
+    secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
+                                       # trigger reads definitions from the default branch (comment, review_request,
+                                       # schedule)
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
-    concurrency:                       # optional; default for pull_request: group "pr-<number>", policy supersede
+    concurrency:                       # optional; default for pull_request and review_request:
+                                       # group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
@@ -77,7 +87,7 @@ func TestParseReferenceExample(t *testing.T) {
 	}
 	p := cfg.Pipelines[0]
 	on := p.On
-	if on.PullRequest == nil || on.MergeGroup == nil || on.Push == nil || on.Comment == nil || len(on.Schedule) != 1 {
+	if on.PullRequest == nil || on.MergeGroup == nil || on.Push == nil || on.Comment == nil || on.ReviewRequest == nil || len(on.Schedule) != 1 {
 		t.Fatalf("triggers not all parsed: %+v", on)
 	}
 	if p.TimeoutDuration() != time.Hour || p.TokenWorkspace() != "github-token" || p.TokenPermissions()["contents"] != "read" {
@@ -89,7 +99,10 @@ func TestParseReferenceExample(t *testing.T) {
 	if p.Name != "ci" || p.CheckName() != "Continuous Integration" {
 		t.Fatalf("name %q, check name %q", p.Name, p.CheckName())
 	}
-	if got := p.Events(); strings.Join(got, ",") != "push,pull_request,merge_group,comment,schedule" {
+	if p.PipelineRun != (PipelineRunRef{Path: ".tekton/ci.yaml"}) || len(p.Secrets) != 0 {
+		t.Fatalf("pipelineRun %+v, secrets %v", p.PipelineRun, p.Secrets)
+	}
+	if got := p.Events(); strings.Join(got, ",") != "push,pull_request,merge_group,comment,review_request,schedule" {
 		t.Fatalf("Events() = %v", got)
 	}
 }
@@ -184,6 +197,26 @@ func TestParseProblems(t *testing.T) {
 		{name: "bad cron", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"61 * * * *\"}]}}\n", want: "not a valid 5-field cron"},
 		{name: "cron with time zone", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"TZ=UTC 0 3 * * *\"}]}}\n", want: "time zones are not supported"},
 		{name: "empty cron", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"\"}]}}\n", want: "cron is required"},
+		{name: "review_requested as a pull_request type", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {types: [review_requested]}}}\n", want: "on.pull_request.types[0]: review requests trigger on.review_request, not on.pull_request"},
+		{name: "review_request without reviewers", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {}}}\n", want: "on.review_request.reviewers is required"},
+		{name: "null review_request", yaml: head + "  - name: review\n    pipelineRun: a.yaml\n    on:\n      review_request:\n", want: "on.review_request.reviewers is required"},
+		{name: "reviewer that is not a login", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-org/reviewers]}}}\n", want: `on.review_request.reviewers[0]: "octo-org/reviewers" is not a GitHub login`},
+		{name: "reviewer with a leading hyphen", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [-bot]}}}\n", want: "is not a GitHub login"},
+		{name: "bad review_request branch glob", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [bot], branches: [\"[\"]}}}\n", want: "on.review_request.branches[0]: invalid glob"},
+		{name: "unknown review_request key", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewer: bot}}}\n", want: "field reviewer not found in on.review_request"},
+		{name: "pipelineRun that is not a string", yaml: head + "  - {name: ci, pipelineRun: 42, on: {push: {}}}\n", want: "pipelineRun must be a file path, or a mapping with repository and path"},
+		{name: "pipelineRun as a list", yaml: head + "  - {name: ci, pipelineRun: [a.yaml], on: {push: {}}}\n", want: "pipelineRun must be a file path, or a mapping with repository and path"},
+		{name: "unknown pipelineRun key", yaml: head + "  - {name: ci, pipelineRun: {repository: tooling, path: a.yaml, ref: main}, on: {push: {}}}\n", want: "field ref not found in pipelineRun (only repository and path)"},
+		{name: "pipelineRun without a path", yaml: head + "  - {name: ci, pipelineRun: {repository: tooling}, on: {push: {}}}\n", want: "pipelineRun is required"},
+		{name: "escaping pipelineRun path in another repository", yaml: head + "  - {name: ci, pipelineRun: {repository: tooling, path: ../a.yaml}, on: {push: {}}}\n", want: "clean repository-relative"},
+		{name: "pipelineRun repository with an owner", yaml: head + "  - {name: ci, pipelineRun: {repository: octo-org/tooling, path: a.yaml}, on: {push: {}}}\n", want: `pipelineRun.repository "octo-org/tooling" is not a repository name`},
+		{name: "pipelineRun repository ..", yaml: head + "  - {name: ci, pipelineRun: {repository: \"..\", path: a.yaml}, on: {push: {}}}\n", want: "is not a repository name"},
+		{name: "secrets with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, secrets: [api-key]}\n", want: "secrets: only pipelines whose every trigger is comment, review_request or schedule may mount Secrets"},
+		{name: "secrets with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, secrets: [api-key]}\n", want: "secrets: only pipelines"},
+		{name: "secrets with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, secrets: [api-key]}\n", want: "secrets: only pipelines"},
+		{name: "secret name with capitals", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [API_KEY]}\n", want: `secrets[0]: "API_KEY" is not a Secret name`},
+		{name: "secret name too long", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [" + strings.Repeat("a", 254) + "]}\n", want: "secrets[0]: " + `"` + strings.Repeat("a", 254) + `" is not a Secret name`},
+		{name: "duplicate secret", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [api-key, api-key]}\n", want: `secrets[1]: duplicate Secret "api-key"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -230,7 +263,7 @@ pipelines:
 		t.Fatalf("RenderParams(pull_request) = %v, %v", got, err)
 	}
 	_, err = p.RenderParams(SampleFor("push"))
-	if err == nil || !strings.Contains(err.Error(), `param "pr"`) || !strings.Contains(err.Error(), ".PullRequest is only set for pull_request events") {
+	if err == nil || !strings.Contains(err.Error(), `param "pr"`) || !strings.Contains(err.Error(), ".PullRequest is only set for pull_request, comment and review_request events") {
 		t.Fatalf("RenderParams(push) error = %v, want a clear nil-object error for param pr", err)
 	}
 	if cfg.Pipeline("missing") != nil {
@@ -307,5 +340,73 @@ func TestCheckName(t *testing.T) {
 				t.Fatalf("CheckName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPipelineRunRef(t *testing.T) {
+	tests := []struct {
+		name, yaml string
+		want       PipelineRunRef
+		wantString string
+	}{
+		{"a path", "pipelineRun: .tekton/ci.yaml", PipelineRunRef{Path: ".tekton/ci.yaml"}, ".tekton/ci.yaml"},
+		{"a quoted path", `pipelineRun: "ci.yaml"`, PipelineRunRef{Path: "ci.yaml"}, "ci.yaml"},
+		{"a mapping with only a path", "pipelineRun: {path: .tekton/ci.yaml}", PipelineRunRef{Path: ".tekton/ci.yaml"}, ".tekton/ci.yaml"},
+		{"another repository", "pipelineRun: {repository: tooling, path: reviewer/pipelinerun.yaml}", PipelineRunRef{Repository: "tooling", Path: "reviewer/pipelinerun.yaml"}, "tooling:reviewer/pipelinerun.yaml"},
+		{"a repository name with dots", "pipelineRun: {repository: .github, path: ci.yaml}", PipelineRunRef{Repository: ".github", Path: "ci.yaml"}, ".github:ci.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - name: ci\n    "+tt.yaml+"\n    on: {push: {}}\n")
+			got := cfg.Pipelines[0].PipelineRun
+			if got != tt.want || got.String() != tt.wantString {
+				t.Fatalf("pipelineRun = %+v (%q), want %+v (%q)", got, got.String(), tt.want, tt.wantString)
+			}
+		})
+	}
+}
+
+// TestSecretsOnDefaultBranchTriggers covers the pipelines that may list Secrets: those whose every trigger
+// reads its definitions from the default branch.
+func TestSecretsOnDefaultBranchTriggers(t *testing.T) {
+	tests := []struct {
+		name, on string
+	}{
+		{"comment", `{comment: {pattern: "^/deploy"}}`},
+		{"review_request", "{review_request: {reviewers: [octo-reviewer]}}"},
+		{"schedule", `{schedule: [{cron: "0 3 * * *"}]}`},
+		{"all three", `{comment: {pattern: "^/review"}, review_request: {reviewers: [octo-reviewer]}, schedule: [{cron: "0 3 * * *"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key, bot.token]}\n")
+			if got := cfg.Pipelines[0].Secrets; strings.Join(got, ",") != "api-key,bot.token" {
+				t.Fatalf("secrets = %v", got)
+			}
+		})
+	}
+}
+
+func TestReviewRequestConcurrency(t *testing.T) {
+	cfg := mustParse(t, `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-reviewer]}}}
+  - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy"}}}
+`)
+	tests := []struct {
+		pipeline, event string
+		want            ci.Concurrency
+	}{
+		// Runs of the same pipeline on the same pull request supersede each other, as for pull_request.
+		{"review", "review_request", ci.Concurrency{Group: "pr-1", Key: "review/pr-1", Policy: ci.Supersede}},
+		// Comment commands stay unconstrained.
+		{"deploy", "comment", ci.Concurrency{}},
+	}
+	for _, tt := range tests {
+		got, err := cfg.Pipeline(tt.pipeline).ConcurrencyFor(SampleFor(tt.event))
+		if err != nil || got != tt.want {
+			t.Errorf("%s on %s: ConcurrencyFor = %+v, %v; want %+v", tt.pipeline, tt.event, got, err, tt.want)
+		}
 	}
 }

@@ -82,9 +82,15 @@ func (s *Service) Handle(ctx context.Context, ev ci.Event) {
 
 // reportsConfigErrors reports whether a trigger's configuration problems are reported. For pull
 // requests, only the actions that normally run pipelines report them, so that labeling or editing a
-// pull request does not add failures.
+// pull request does not add failures. Review requests never do: most are for people, not pipelines.
 func reportsConfigErrors(t ci.Trigger) bool {
-	return t.Event != ci.EventPullRequest || slices.Contains(pipelines.DefaultPullRequestTypes, t.Action)
+	switch t.Event {
+	case ci.EventPullRequest:
+		return slices.Contains(pipelines.DefaultPullRequestTypes, t.Action)
+	case ci.EventReviewRequest:
+		return false
+	}
+	return true
 }
 
 // EvalOptions tunes Evaluate.
@@ -98,9 +104,9 @@ type EvalOptions struct {
 	RerunBy string
 }
 
-// Evaluate reads .octomaton.yaml at the commit under test and starts every pipeline the trigger
-// matches. A repository without the file is ignored, and so is a pull request from a fork: it gets
-// no report and no run.
+// Evaluate reads .octomaton.yaml where the trigger says (the commit under test, or the default
+// branch for review requests) and starts every pipeline the trigger matches. A repository without
+// the file is ignored, and so is a pull request from a fork: it gets no report and no run.
 func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) {
 	log := s.logFor(t)
 	if t.FromFork() {
@@ -254,6 +260,8 @@ func eventNoun(t ci.Trigger) string {
 		return "pull request"
 	case ci.EventMergeGroup:
 		return "merge group"
+	case ci.EventReviewRequest:
+		return "review request"
 	default:
 		return "push"
 	}
@@ -270,6 +278,9 @@ func codeList(items []string) string {
 // matchEvent extracts what pipeline matching looks at.
 func matchEvent(t ci.Trigger, draft bool) pipelines.Event {
 	ev := pipelines.Event{Name: t.Event, Action: t.Action, Draft: draft}
+	if t.ReviewRequest != nil {
+		ev.Reviewer = t.ReviewRequest.Reviewer
+	}
 	switch {
 	case t.PullRequest != nil:
 		ev.Branch = t.PullRequest.BaseRef

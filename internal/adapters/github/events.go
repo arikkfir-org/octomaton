@@ -193,7 +193,32 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 	if t.FromFork() {
 		return t, pr.GetDraft(), "pull request from a fork"
 	}
+	if ev.GetAction() == "review_requested" {
+		t, reason := reviewRequestTrigger(t, ev)
+		return t, pr.GetDraft(), reason
+	}
 	return t, pr.GetDraft(), incomplete(t)
+}
+
+// reviewRequestTrigger turns a review requested from a user on an open pull request into a
+// review_request trigger, read at the default branch like a comment command. GitHub sends one
+// delivery per requested reviewer; team requests are ignored.
+func reviewRequestTrigger(t ci.Trigger, ev *github.PullRequestEvent) (ci.Trigger, string) {
+	reviewer := ev.GetRequestedReviewer().GetLogin()
+	switch {
+	case ev.GetRequestedTeam() != nil && reviewer == "":
+		return t, "review requested from a team"
+	case reviewer == "":
+		return t, "no requested reviewer in payload"
+	case ev.GetPullRequest().GetState() != "open":
+		return t, "review requested on a pull request that is not open"
+	case t.Repository.DefaultBranch == "":
+		return t, "no default branch in payload"
+	}
+	t.Event = ci.EventReviewRequest
+	t.ReviewRequest = &ci.ReviewRequest{Reviewer: reviewer}
+	t.ConfigRef = t.Repository.DefaultBranch
+	return t, incomplete(t)
 }
 
 // mergeGroupEvent converts a merge group ready for checks, or one the queue destroyed.

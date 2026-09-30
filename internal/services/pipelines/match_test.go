@@ -17,6 +17,8 @@ pipelines:
   - {name: no-drafts, pipelineRun: a.yaml, on: {pull_request: {drafts: false}}}
   - {name: queue, pipelineRun: a.yaml, on: {merge_group: {branches: [main]}}}
   - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy(\\s|$)", branches: [main]}}}
+  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [Octo-Reviewer, second-bot]}}}
+  - {name: review-main, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-reviewer], branches: [main]}}}
 `
 
 func TestMatch(t *testing.T) {
@@ -52,6 +54,14 @@ func TestMatch(t *testing.T) {
 		{"merge group base branch", "queue", Event{Name: "merge_group", Branch: "main"}, true},
 		{"merge group other base", "queue", Event{Name: "merge_group", Branch: "dev"}, false},
 		{"comment trigger does not match events", "deploy", Event{Name: "push", Branch: "main"}, false},
+		{"review requested from a listed reviewer", "review", Event{Name: "review_request", Action: "review_requested", Reviewer: "second-bot", Branch: "dev"}, true},
+		{"reviewers match case-insensitively", "review", Event{Name: "review_request", Reviewer: "octo-reviewer"}, true},
+		{"review requested from someone else", "review", Event{Name: "review_request", Reviewer: "alice"}, false},
+		{"review requests include drafts", "review", Event{Name: "review_request", Reviewer: "second-bot", Draft: true}, true},
+		{"review request base branch filter", "review-main", Event{Name: "review_request", Reviewer: "octo-reviewer", Branch: "main"}, true},
+		{"review request into another base", "review-main", Event{Name: "review_request", Reviewer: "octo-reviewer", Branch: "dev"}, false},
+		{"review_request does not match pull request events", "review", Event{Name: "pull_request", Action: "review_requested", Reviewer: "second-bot"}, false},
+		{"pull_request does not match review requests", "prs", Event{Name: "review_request", Action: "review_requested", Reviewer: "octo-reviewer"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,5 +136,16 @@ func TestMatchComment(t *testing.T) {
 	}
 	if cfg.Pipeline("prs").IsCommand("/deploy") {
 		t.Fatalf("a pipeline without a comment trigger has no command")
+	}
+}
+
+func TestReviewRequestMatchHasNoPathFilter(t *testing.T) {
+	cfg := mustParse(t, matchConfig)
+	f, ok := cfg.Pipeline("review").Match(Event{Name: "review_request", Reviewer: "second-bot"})
+	if !ok || f.Active() {
+		t.Fatalf("Match = %+v, %v; want a match without path filters", f, ok)
+	}
+	if got := cfg.Pipeline("review").Events(); len(got) != 1 || got[0] != "review_request" {
+		t.Fatalf("Events() = %v", got)
 	}
 }

@@ -63,9 +63,18 @@ func TestReadFile(t *testing.T) {
 	if _, err := gh.ReadFile(ctx, repo, ".tekton/ci.yaml", "other"); !errors.Is(err, ci.ErrNotFound) {
 		t.Fatalf("ReadFile at an unknown ref: err = %v, want ErrNotFound", err)
 	}
+	// An empty ref reads the default branch, as for a pipelineRun in another repository.
+	tooling := ci.Repository{Owner: "octo-org", Name: "tooling", FullName: "octo-org/tooling"}
+	srv.AddFile(tooling.FullName, "", "reviewer/pipelinerun.yaml", "kind: PipelineRun\n")
+	if data, err := gh.ReadFile(ctx, tooling, "reviewer/pipelinerun.yaml", ""); err != nil || string(data) != "kind: PipelineRun\n" {
+		t.Fatalf("ReadFile at the default branch = %q, %v", data, err)
+	}
 	srv.SetFailFiles(true)
-	if _, err := gh.ReadFile(ctx, repo, ".tekton/ci.yaml", "abc"); err == nil || errors.Is(err, ci.ErrNotFound) {
-		t.Fatalf("ReadFile on a server error: err = %v, want another error than ErrNotFound", err)
+	if _, err := gh.ReadFile(ctx, repo, ".tekton/ci.yaml", "abc"); err == nil || errors.Is(err, ci.ErrNotFound) || !strings.Contains(err.Error(), ".tekton/ci.yaml@abc") {
+		t.Fatalf("ReadFile on a server error: err = %v, want another error than ErrNotFound, naming the file and ref", err)
+	}
+	if _, err := gh.ReadFile(ctx, tooling, "reviewer/pipelinerun.yaml", ""); err == nil || !strings.Contains(err.Error(), "reviewer/pipelinerun.yaml on the default branch") {
+		t.Fatalf("ReadFile at the default branch on a server error: err = %v, want one naming the default branch", err)
 	}
 }
 

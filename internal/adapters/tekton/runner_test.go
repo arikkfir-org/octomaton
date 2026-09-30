@@ -228,7 +228,7 @@ func TestRefusals(t *testing.T) {
 		spec.Definition = []byte(def)
 		return spec
 	}
-	noTasks := withDefinition("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n")
+	noTasks := withDefinition("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineSpec: {}}\n")
 	noTasks.Token = nil
 	tests := []struct {
 		name      string
@@ -246,6 +246,7 @@ func TestRefusals(t *testing.T) {
 		{name: "an invalid file", spec: withDefinition("kind: TaskRun\n"), wantTitle: "Could not start the pipeline", wantText: "`.tekton/ci.yaml` is not a valid PipelineRun file"},
 		{name: "another namespace", spec: withDefinition(strings.Replace(demoDef, "generateName: ci-", "namespace: prod", 1)), wantTitle: "Could not start the pipeline", wantText: "sets namespace `prod`"},
 		{name: "task reports without tasks", spec: func() ci.RunSpec { s := noTasks; s.TaskReports = true; return s }(), wantTitle: "Could not start the pipeline", wantText: "sets `taskChecks`"},
+		{name: "a remote pipeline", spec: withDefinition("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {resolver: git}}\n"), wantTitle: "Could not start the pipeline", wantText: "fetches a definition through spec.pipelineRef"},
 		{name: "a mounted Secret", spec: func() ci.RunSpec {
 			s := withDefinition(demoDef + "  workspaces:\n    - {name: creds, secret: {secretName: prod-db}}\n")
 			return s

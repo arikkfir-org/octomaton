@@ -55,16 +55,24 @@ func (c *installation) ReadFile(ctx context.Context, repo ci.Repository, path, r
 		if isNotFound(resp) {
 			return nil, ci.ErrNotFound
 		}
-		return nil, fmt.Errorf("fetching %s@%s: %w", path, ref, err)
+		return nil, fmt.Errorf("fetching %s: %w", fileAt(path, ref), err)
 	}
 	if file == nil {
-		return nil, fmt.Errorf("fetching %s@%s: path is a directory", path, ref)
+		return nil, fmt.Errorf("fetching %s: path is a directory", fileAt(path, ref))
 	}
 	content, err := file.GetContent()
 	if err != nil {
-		return nil, fmt.Errorf("decoding %s@%s: %w", path, ref, err)
+		return nil, fmt.Errorf("decoding %s: %w", fileAt(path, ref), err)
 	}
 	return []byte(content), nil
+}
+
+// fileAt names a file at a ref in messages; the empty ref is the default branch.
+func fileAt(path, ref string) string {
+	if ref == "" {
+		return path + " on the default branch"
+	}
+	return path + "@" + ref
 }
 
 func (c *installation) PullRequestFiles(ctx context.Context, repo ci.Repository, number int) (ci.ChangedFiles, error) {

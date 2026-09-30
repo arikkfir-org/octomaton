@@ -54,6 +54,11 @@ type Comment struct {
 	Arguments string // the rest of the comment's first line, trimmed
 }
 
+// ReviewRequest holds the review request that started a run; it is nil for other events.
+type ReviewRequest struct {
+	Reviewer string // login of the user the review was requested from
+}
+
 // Schedule holds the schedule that started a run; it is nil for other events.
 type Schedule struct {
 	Cron string // the cron expression, as configured
@@ -62,7 +67,7 @@ type Schedule struct {
 
 // TemplateContext is the data passed to pipeline param and concurrency group templates.
 type TemplateContext struct {
-	Event       string // push, pull_request, merge_group, comment or schedule
+	Event       string // push, pull_request, merge_group, comment, review_request or schedule
 	Action      string // event action, empty for push and schedule
 	Repository  Repository
 	Revision    string // the commit SHA under test
@@ -75,7 +80,9 @@ type TemplateContext struct {
 	PullRequest *PullRequest
 	MergeGroup  *MergeGroup
 	Comment     *Comment
-	Schedule    *Schedule
+	// ReviewRequest is set for review_request events.
+	ReviewRequest *ReviewRequest
+	Schedule      *Schedule
 }
 
 // NamespaceContext is the data passed to the namespace template.
@@ -100,9 +107,10 @@ func ExecuteTemplate(t *template.Template, data any) (string, error) {
 
 var nilHints = []struct{ typeName, hint string }{
 	{"*pipelines.Push", ".Push is only set for push events"},
-	{"*pipelines.PullRequest", ".PullRequest is only set for pull_request events"},
+	{"*pipelines.PullRequest", ".PullRequest is only set for pull_request, comment and review_request events"},
 	{"*pipelines.MergeGroup", ".MergeGroup is only set for merge_group events"},
 	{"*pipelines.Comment", ".Comment is only set for comment events"},
+	{"*pipelines.ReviewRequest", ".ReviewRequest is only set for review_request events"},
 	{"*pipelines.Schedule", ".Schedule is only set for schedule events"},
 }
 
@@ -131,17 +139,18 @@ func Sample() TemplateContext {
 			DefaultBranch: "main",
 			Private:       false,
 		},
-		Revision:    "0123456789abcdef0123456789abcdef01234567",
-		Ref:         "refs/pull/1/head",
-		Branch:      "feature",
-		Tag:         "v1.0.0",
-		Sender:      "octocat",
-		Pipeline:    "ci",
-		Push:        &Push{Before: "1111111111111111111111111111111111111111", After: "0123456789abcdef0123456789abcdef01234567"},
-		PullRequest: &PullRequest{Number: 1, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "2222222222222222222222222222222222222222"},
-		MergeGroup:  &MergeGroup{HeadRef: "refs/heads/gh-readonly-queue/main/pr-1-2222222222222222222222222222222222222222", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "refs/heads/main", BaseSHA: "2222222222222222222222222222222222222222"},
-		Comment:     &Comment{ID: 1, Author: "octocat", Command: "/deploy", Arguments: "staging"},
-		Schedule:    &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
+		Revision:      "0123456789abcdef0123456789abcdef01234567",
+		Ref:           "refs/pull/1/head",
+		Branch:        "feature",
+		Tag:           "v1.0.0",
+		Sender:        "octocat",
+		Pipeline:      "ci",
+		Push:          &Push{Before: "1111111111111111111111111111111111111111", After: "0123456789abcdef0123456789abcdef01234567"},
+		PullRequest:   &PullRequest{Number: 1, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "2222222222222222222222222222222222222222"},
+		MergeGroup:    &MergeGroup{HeadRef: "refs/heads/gh-readonly-queue/main/pr-1-2222222222222222222222222222222222222222", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "refs/heads/main", BaseSHA: "2222222222222222222222222222222222222222"},
+		Comment:       &Comment{ID: 1, Author: "octocat", Command: "/deploy", Arguments: "staging"},
+		ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},
+		Schedule:      &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
 	}
 }
 
@@ -150,7 +159,7 @@ func Sample() TemplateContext {
 func SampleFor(event string) TemplateContext {
 	c := Sample()
 	c.Event = event
-	c.Push, c.PullRequest, c.MergeGroup, c.Comment, c.Schedule = nil, nil, nil, nil, nil
+	c.Push, c.PullRequest, c.MergeGroup, c.Comment, c.ReviewRequest, c.Schedule = nil, nil, nil, nil, nil, nil
 	full := Sample()
 	switch event {
 	case "push":
@@ -167,6 +176,9 @@ func SampleFor(event string) TemplateContext {
 	case "comment":
 		c.Action, c.Tag = "created", ""
 		c.PullRequest, c.Comment = full.PullRequest, full.Comment
+	case "review_request":
+		c.Action, c.Tag = "review_requested", ""
+		c.PullRequest, c.ReviewRequest = full.PullRequest, full.ReviewRequest
 	case "schedule":
 		c.Action, c.Ref, c.Branch, c.Tag, c.Sender = "", "refs/heads/main", "main", "", ""
 		c.Schedule = full.Schedule

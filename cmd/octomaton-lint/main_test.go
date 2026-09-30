@@ -19,7 +19,7 @@ func TestRun(t *testing.T) {
 	}
 	write(valid, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines:\n"+
 		"  - {name: ci, pipelineRun: run.yaml, on: {push: {branches: [main]}}, params: {revision: \"{{ .Revision }}\"}}\n")
-	write(valid, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: p}}\n")
+	write(valid, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineSpec: {tasks: [{name: t, taskSpec: {steps: [{name: s, image: busybox}]}}]}}\n")
 	invalid := t.TempDir()
 	write(invalid, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: [{name: ci}]\n")
 

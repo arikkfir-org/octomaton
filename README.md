@@ -34,7 +34,8 @@ sequenceDiagram
 2. The event is matched against each pipeline's triggers. A matching pipeline whose path filters do not match gets a
    check run concluded `skipped` (required checks do not block). Forks are ignored outright: see [Security](#security).
 3. Runs are named `<repo>-<pipeline>-<sha7>-<attempt>`. A redelivery, or a second event for the same commit, pipeline and
-   branch, finds the existing run; re-runs create the next attempt.
+   branch, finds the existing run. Each comment command and review request gets its own run, and re-runs create the
+   next attempt.
 4. Runs are created held, then their check run and token Secret are created, then they are released per their
    concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
    five minutes is resumed by the leader (which also serves as the poll for queued runs).
@@ -52,6 +53,9 @@ pipelines:
   - name: ci                           # identifies the pipeline and its runs; unique; [a-z0-9][a-z0-9-]*
     displayName: Continuous Integration  # optional: the check's name on GitHub (default: name); unique
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
+    # pipelineRun:                     # or a file in another repository of the same owner, read at its default branch
+    #   repository: tooling
+    #   path: reviewer/pipelinerun.yaml
     on:
       pull_request:
         branches: [main]               # base-branch globs; omitted = all
@@ -68,6 +72,9 @@ pipelines:
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line; commenter needs write access
         branches: [main]               # optional pull request base-branch globs
+      review_request:                  # a review is requested from one of these users on a pull request
+        reviewers: [arikkfir-reviewer] # GitHub logins, case-insensitive; required
+        branches: [main]               # optional pull request base-branch globs
       schedule:                        # cron, 5 fields, UTC; runs at the default branch head
         - cron: "0 3 * * *"
     params:                            # set/override PipelineRun spec.params; values are Go templates
@@ -76,8 +83,12 @@ pipelines:
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
+    secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
+                                       # trigger reads definitions from the default branch (comment, review_request,
+                                       # schedule)
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
-    concurrency:                       # optional; default for pull_request: group "pr-<number>", policy supersede
+    concurrency:                       # optional; default for pull_request and review_request:
+                                       # group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
@@ -91,6 +102,7 @@ pipelines:
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
+| `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people. |
 | `schedule` | each `cron` slot (5 fields, UTC) | Runs at the head of the default branch, once per slot, up to 10 minutes late. |
 
 Globs use [doublestar](https://github.com/bmatcuk/doublestar) syntax: `*` stays within a path segment, `**` crosses
@@ -101,8 +113,9 @@ changed files cannot be determined (a new branch or tag, an API error, more file
 ignored and the pipeline runs.
 
 **Where definitions are read:** pull requests, merge groups and pushes read `.octomaton.yaml` and the PipelineRun file
-at the commit under test; comment commands and schedules read them from the default branch (comment commands still run
-against the pull request's head commit, so a pull request cannot change what its own commands run).
+at the commit under test. Comment commands, review requests and schedules read them from the default branch (comment
+commands and review requests still run against the pull request's head commit, so a pull request cannot change what
+they run). A `pipelineRun` in another repository is always read at that repository's default branch.
 
 ### Pipeline settings
 
@@ -110,9 +123,10 @@ against the pull request's head commit, so a pull request cannot change what its
 | --- | --- |
 | `name` | Identifies the pipeline: in run names, labels, concurrency groups and `{{ .Pipeline }}`. Unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names; `octomaton` is reserved. |
-| `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`. Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. |
+| `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun must be self-contained: remote references are refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
+| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only a pipeline whose every trigger is `comment`, `review_request` or `schedule` may list any, because only those read definitions from the default branch. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -126,17 +140,18 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 | `queue` (default) | One run at a time, oldest first. |
 | `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled. |
 
-Without `concurrency`, pull request runs of the same pipeline and pull request share the group `pr-<number>` (per
-pipeline) with policy `supersede`; other runs are unconstrained.
+Without `concurrency`, pull request and review request runs of the same pipeline and pull request share the group
+`pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained.
 
 ### Template context
 
-`.Event` (`push`, `pull_request`, `merge_group`, `comment`, `schedule`), `.Action`, `.Repository` (`Owner`, `Name`,
-`FullName`, `CloneURL`, `HTMLURL`, `DefaultBranch`, `Private`), `.Revision` (SHA under test), `.Ref`, `.Branch`, `.Tag`,
-`.Sender`, `.Pipeline`, `.Push` (`Before`, `After`), `.PullRequest` (`Number`, `HeadRef`, `HeadSHA`, `BaseRef`,
-`BaseSHA`), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`), `.Comment` (`ID`, `Author`, `Command`,
-`Arguments`), `.Schedule` (`Cron`, `Slot`). Event-specific objects are nil for other events; referencing a missing
-value fails the check with the rendering error. Guard optional objects with `{{ if .PullRequest }}…{{ end }}`.
+`.Event` (`push`, `pull_request`, `merge_group`, `comment`, `review_request`, `schedule`), `.Action`, `.Repository`
+(`Owner`, `Name`, `FullName`, `CloneURL`, `HTMLURL`, `DefaultBranch`, `Private`), `.Revision` (SHA under test), `.Ref`,
+`.Branch`, `.Tag`, `.Sender`, `.Pipeline`, `.Push` (`Before`, `After`), `.PullRequest` (`Number`, `HeadRef`, `HeadSHA`,
+`BaseRef`, `BaseSHA`), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`), `.Comment` (`ID`, `Author`,
+`Command`, `Arguments`), `.ReviewRequest` (`Reviewer`), `.Schedule` (`Cron`, `Slot`). Event-specific objects are nil for
+other events; referencing a missing value fails the check with the rendering error. Guard optional objects with
+`{{ if .PullRequest }}…{{ end }}`.
 
 | Event | `.Revision` | `.Ref` | `.Branch` | Objects set |
 | --- | --- | --- | --- | --- |
@@ -144,6 +159,7 @@ value fails the check with the rendering error. Guard optional objects with `{{ 
 | `pull_request` | head commit | `refs/pull/<n>/head` | head branch | `.PullRequest` |
 | `merge_group` | merge group head | merge group ref | merge group branch | `.MergeGroup` (`HeadRef`/`BaseRef` are full refs) |
 | `comment` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.Comment` (`Command` is the first word, `Arguments` the rest of the first line) |
+| `review_request` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.ReviewRequest` (`Reviewer` as GitHub sent it; `.Action` is `review_requested`) |
 | `schedule` | head of the default branch | `refs/heads/<default>` | default branch | `.Schedule` (`Slot` is RFC 3339, UTC) |
 
 Values such as `.Comment.Arguments`, branch names and `.Sender` come from users: pass params to scripts through
@@ -183,6 +199,14 @@ pipelines:
       schedule: [{cron: "0 3 * * *"}]
     params:
       slot: "{{ .Schedule.Slot }}"
+  - name: review                             # a review requested from review-bot, run from another repository
+    pipelineRun: {repository: shared-pipelines, path: review/pipelinerun.yaml}
+    on:
+      review_request: {reviewers: [review-bot]}
+    params:
+      number: "{{ .PullRequest.Number }}"
+      revision: "{{ .Revision }}"
+    secrets: [model-api-key]                 # every trigger reads the default branch, so it may mount a Secret
 ```
 
 Validate a configuration and the PipelineRun files it references with `octomaton-lint [-render] PATH...` (PATH is
@@ -214,8 +238,15 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   request whose head branch lives in another repository (or in one that no longer exists), whoever opened it: no check
   run, no run, no reaction or reply to comment commands on it, and no re-run of reports stored for it. Pull requests
   from the repository's own branches run automatically: pushing a branch there takes write access.
-- A run may mount no Secret other than the token Octomaton binds (volumes, workspaces, projected sources, `env` and
-  `envFrom` are checked). Tokens are scoped to the event's repository with least permissions.
+- A run may mount no Secret other than the token Octomaton binds and those its pipeline lists in `secrets` (volumes,
+  workspaces, projected sources, `env` and `envFrom` are checked). Only a pipeline whose every trigger reads its
+  definitions from the default branch may list any, so definitions at a pull request's head never reach a listed
+  Secret. Tokens are scoped to the event's repository with least permissions.
+- Remote Tekton references are refused (`pipelineRef`, `taskRef`, a step's `ref`, any `resolver` or `bundle`), because
+  Octomaton can only check the definitions it can see: a PipelineRun holds its whole `spec.pipelineSpec`, with a
+  `taskSpec` per task.
+- A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
+  must come from the repository's own branches.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service account.
 

@@ -44,15 +44,17 @@ func TestTriggerJSON(t *testing.T) {
 			trigger: Trigger{
 				Version: TriggerVersion, Event: EventComment, InstallationID: 1, Repository: Repository{ID: 2, Owner: "o", Name: "r", FullName: "o/r", HTMLURL: "https://github.com/o/r", Private: true},
 				Revision: "abc", Tag: "v1", Push: &Push{Before: "a", After: "b", Created: true},
-				MergeGroup: &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b"},
-				Comment:    &Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
-				Schedule:   &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
-				ConfigRef:  "main", RerunBy: "carol",
+				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b"},
+				Comment:       &Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
+				ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},
+				Schedule:      &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
+				ConfigRef:     "main", RerunBy: "carol",
 			},
 			want: `{"v":1,"event":"comment","installationID":1,"repository":{"id":2,"owner":"o","name":"r","fullName":"o/r","htmlURL":"https://github.com/o/r","private":true},` +
 				`"revision":"abc","tag":"v1","push":{"before":"a","after":"b","created":true},` +
 				`"mergeGroup":{"headRef":"refs/heads/q","headSHA":"h","baseRef":"refs/heads/main","baseSHA":"b"},` +
-				`"comment":{"id":3,"author":"alice","command":"/deploy","arguments":"prod"},"schedule":{"cron":"0 3 * * *","slot":"2026-01-01T03:00:00Z"},` +
+				`"comment":{"id":3,"author":"alice","command":"/deploy","arguments":"prod"},"reviewRequest":{"reviewer":"octo-reviewer"},` +
+				`"schedule":{"cron":"0 3 * * *","slot":"2026-01-01T03:00:00Z"},` +
 				`"configRef":"main","rerunBy":"carol"}`,
 		},
 	}
@@ -129,6 +131,9 @@ func TestDescribe(t *testing.T) {
 	comment.Comment = &Comment{ID: 1, Author: "alice", Command: "/deploy", Arguments: "prod"}
 	rerun := pullRequestTrigger()
 	rerun.RerunBy = "carol"
+	review := pullRequestTrigger()
+	review.Event, review.Action, review.ConfigRef = EventReviewRequest, "review_requested", "main"
+	review.ReviewRequest = &ReviewRequest{Reviewer: "octo-reviewer"}
 	tests := []struct {
 		name    string
 		trigger Trigger
@@ -137,6 +142,7 @@ func TestDescribe(t *testing.T) {
 		{"pull request", pullRequestTrigger(), "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice"},
 		{"re-run", rerun, "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice; re-run by @carol"},
 		{"comment", comment, "`/deploy` on pull request #5 at `0123456` by @alice"},
+		{"review request", review, "Review requested from @octo-reviewer on pull request #5 at `0123456` by @alice"},
 		{"schedule", Trigger{Event: EventSchedule, Branch: "main", Revision: "abcdef0123", Schedule: &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"}},
 			"Schedule `0 3 * * *` (slot 2026-01-01T03:00:00Z) on `main` at `abcdef0`"},
 		{"push", Trigger{Event: EventPush, Branch: "main", Revision: "abcdef0123"}, "Push to `main` at `abcdef0`"},

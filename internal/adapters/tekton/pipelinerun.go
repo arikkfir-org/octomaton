@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -364,16 +366,65 @@ func secrets(obj map[string]any) []string {
 	return out
 }
 
-// checkSecrets refuses a PipelineRun that references any Secret other than
-// allowed (its own token Secret, or none).
-func checkSecrets(pr *unstructured.Unstructured, allowed string) error {
+// checkSecrets refuses a PipelineRun that references any Secret other than its own token Secret
+// (token, when it has one) and the Secrets its pipeline declares.
+func checkSecrets(pr *unstructured.Unstructured, token string, declared []string) error {
 	for _, name := range secrets(pr.Object) {
-		if name != allowed {
-			if allowed == "" {
-				return fmt.Errorf("the PipelineRun references Secret %q; runs may not mount Secrets (use githubToken for a GitHub token)", name)
-			}
-			return fmt.Errorf("the PipelineRun references Secret %q; runs may only mount their own token Secret %q", name, allowed)
+		if (token != "" && name == token) || slices.Contains(declared, name) {
+			continue
 		}
+		allowed := "no Secrets"
+		if names := slices.DeleteFunc(append([]string{token}, declared...), func(n string) bool { return n == "" }); len(names) > 0 {
+			allowed = "only " + quoteAll(names)
+		}
+		return fmt.Errorf("the PipelineRun references Secret %q; its runs may mount %s (a GitHub token comes from githubToken, other Secrets must be listed in the pipeline's secrets)", name, allowed)
+	}
+	return nil
+}
+
+func quoteAll(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = strconv.Quote(n)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// remoteKeys are the fields through which Tekton fetches definitions from elsewhere.
+var remoteKeys = map[string]bool{"pipelineRef": true, "taskRef": true, "resolver": true, "bundle": true}
+
+// checkRemoteRefs refuses a PipelineRun that fetches any definition from elsewhere: a pipelineRef, a
+// taskRef, a step's ref, a resolver or a bundle. Octomaton checks definitions (their Secrets
+// included) only as the file holds them, so a run must be self-contained. Params and metadata may
+// hold any keys, so they are not searched.
+func checkRemoteRefs(obj map[string]any) error {
+	var found string
+	var walk func(path string, v any, inSteps bool)
+	walk = func(path string, v any, inSteps bool) {
+		switch t := v.(type) {
+		case map[string]any:
+			for _, k := range slices.Sorted(maps.Keys(t)) {
+				if found != "" {
+					return
+				}
+				switch {
+				case k == "params" || k == "metadata":
+					continue
+				case remoteKeys[k] || (inSteps && k == "ref"):
+					found = path + "." + k
+					return
+				}
+				walk(path+"."+k, t[k], false)
+			}
+		case []any:
+			for i, child := range t {
+				walk(fmt.Sprintf("%s[%d]", path, i), child, strings.HasSuffix(path, ".steps"))
+			}
+		}
+	}
+	walk("", obj, false)
+	if found != "" {
+		return fmt.Errorf("the PipelineRun fetches a definition through %s; Octomaton runs only self-contained PipelineRuns (spec.pipelineSpec, a taskSpec per task, steps without ref)", strings.TrimPrefix(found, "."))
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 
 // Event is the part of an event that decides which pipelines it triggers.
 type Event struct {
-	// Name is push, pull_request or merge_group.
+	// Name is push, pull_request, merge_group or review_request.
 	Name string
 	// Action is the pull_request action.
 	Action string
@@ -21,6 +21,8 @@ type Event struct {
 	Tag string
 	// Draft is set for draft pull requests.
 	Draft bool
+	// Reviewer is the login a review was requested from (review_request).
+	Reviewer string
 }
 
 // PathFilter restricts a matched pipeline to events that change relevant files.
@@ -113,6 +115,16 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 			return PathFilter{}, false
 		}
 		return PathFilter{Paths: t.Paths, PathsIgnore: t.PathsIgnore}, true
+
+	case ci.EventReviewRequest:
+		t := p.On.ReviewRequest
+		if t == nil || !slices.ContainsFunc(t.Reviewers, func(r string) bool { return strings.EqualFold(r, ev.Reviewer) }) {
+			return PathFilter{}, false
+		}
+		if len(t.Branches) > 0 && !anyGlob(t.Branches, ev.Branch) {
+			return PathFilter{}, false
+		}
+		return PathFilter{}, true
 	}
 	return PathFilter{}, false
 }
@@ -161,6 +173,9 @@ func (p *Pipeline) Events() []string {
 	}
 	if p.On.Comment != nil {
 		out = append(out, ci.EventComment)
+	}
+	if p.On.ReviewRequest != nil {
+		out = append(out, ci.EventReviewRequest)
 	}
 	if len(p.On.Schedule) > 0 {
 		out = append(out, ci.EventSchedule)

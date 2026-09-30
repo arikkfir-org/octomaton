@@ -146,8 +146,10 @@ type RunSpec struct {
 	// Params set or override the definition's parameters.
 	Params map[string]string
 	// Timeout, when positive, bounds the run.
-	Timeout     time.Duration
-	Token       *TokenSettings
+	Timeout time.Duration
+	Token   *TokenSettings
+	// Secrets name the Secrets in the run's namespace it may mount besides its token.
+	Secrets     []string
 	TaskReports bool
 	Concurrency Concurrency
 }

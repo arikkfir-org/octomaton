@@ -97,6 +97,9 @@ func (r *Runner) definition(spec ci.RunSpec, ns string) (*unstructured.Unstructu
 	if fileNS := pr.GetNamespace(); fileNS != "" && fileNS != ns {
 		return nil, refusal("`%s` sets namespace `%s`, but this repository's runs must be created in namespace `%s`. Remove `metadata.namespace` from the file.", spec.Path, fileNS, ns)
 	}
+	if err := checkRemoteRefs(pr.Object); err != nil {
+		return nil, refusal("`%s`: %v.", spec.Path, err)
+	}
 	if spec.TaskReports && len(taskNames(pr)) == 0 {
 		return nil, refusal("Pipeline `%s` sets `taskChecks`, which needs the PipelineRun's own `spec.pipelineSpec` to list its tasks.", spec.Trigger.Pipeline)
 	}
@@ -116,15 +119,15 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 	}
 	name := runName(t.Repository.Name, t.Pipeline, t.Revision, attempt)
 	in := renderInput{Namespace: ns, Name: name, Params: spec.Params, Timeout: spec.Timeout, Labels: runLabels(spec), Annotations: runAnnotations(spec, attempt), Held: true}
-	allowed := ""
+	token := ""
 	if spec.Token != nil {
-		in.TokenWorkspace, allowed = spec.Token.Workspace, tokenSecretName(name)
+		in.TokenWorkspace, token = spec.Token.Workspace, tokenSecretName(name)
 	}
 	pr, err := render(src, in)
 	if err != nil {
 		return ci.Run{}, refusal("%v", err)
 	}
-	if err := checkSecrets(pr, allowed); err != nil {
+	if err := checkSecrets(pr, token, spec.Secrets); err != nil {
 		return ci.Run{}, &ci.Refusal{Title: "Refused", Reason: err.Error()}
 	}
 	created, err := r.client().Create(ctx, pr)

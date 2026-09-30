@@ -27,7 +27,7 @@ type Account struct {
 type Installation interface {
 	// Repositories lists the installation's repositories that can run pipelines (not archived).
 	Repositories(ctx context.Context) ([]Repository, error)
-	// ReadFile returns a file at ref, or ErrNotFound.
+	// ReadFile returns a file at ref (the repository's default branch when empty), or ErrNotFound.
 	ReadFile(ctx context.Context, repo Repository, path, ref string) ([]byte, error)
 	// PullRequestFiles lists the files a pull request changes.
 	PullRequestFiles(ctx context.Context, repo Repository, number int) (ChangedFiles, error)

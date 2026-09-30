@@ -322,3 +322,80 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("a pull request from a fork got check runs: %d, want %d", got, checks)
 	}
 }
+
+// reviewYAML runs "review" when a review is requested from arikkfir-reviewer. Its definition lives in repository
+// shared, and it may mount Secret api-key.
+const reviewYAML = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - name: review
+    displayName: AI Review
+    pipelineRun: {repository: shared, path: review/pipelinerun.yaml}
+    on:
+      review_request: {reviewers: [arikkfir-reviewer]}
+    params:
+      number: "{{ .PullRequest.Number }}"
+      reviewer: "{{ .ReviewRequest.Reviewer }}"
+    secrets: [api-key]
+`
+
+const reviewRunYAML = `
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: review-
+spec:
+  pipelineSpec:
+    params:
+      - {name: number, type: string}
+      - {name: reviewer, type: string}
+    tasks:
+      - name: review
+        taskSpec:
+          steps:
+            - name: review
+              image: alpine:3.22
+              env:
+                - name: API_KEY
+                  valueFrom: {secretKeyRef: {name: api-key, key: api-key}}
+              script: echo reviewing
+`
+
+func reviewRequestPayload(reviewer string) map[string]any {
+	p := pullRequestPayload("review_requested")
+	p["pull_request"].(map[string]any)["state"] = "open"
+	p["requested_reviewer"] = map[string]any{"login": reviewer}
+	return p
+}
+
+func TestReviewRequestEndToEnd(t *testing.T) {
+	e := setup(t)
+	// Review requests read the default branch's configuration, and this definition from the other repository's.
+	e.gh.AddFile(fullName, "main", ".octomaton.yaml", reviewYAML)
+	e.gh.AddFile(owner+"/shared", "", "review/pipelinerun.yaml", reviewRunYAML)
+
+	// A review requested from someone else runs nothing.
+	checks := len(e.gh.CheckRuns())
+	if rec := e.deliver("pull_request", "r-1", reviewRequestPayload("alice"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec := e.deliver("pull_request", "r-2", reviewRequestPayload("arikkfir-reviewer"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	run, pr := e.waitForRun("octomaton-review-abcdef0-1")
+	params, _, _ := unstructured.NestedSlice(pr.Object, "spec", "params")
+	if fmt.Sprint(params) != fmt.Sprint([]any{map[string]any{"name": "number", "value": "12"}, map[string]any{"name": "reviewer", "value": "arikkfir-reviewer"}}) {
+		t.Fatalf("params = %v", params)
+	}
+	if run.Trigger.Event != ci.EventReviewRequest || run.Trigger.ConfigRef != "main" || run.Trigger.Revision != headSHA {
+		t.Fatalf("trigger = %+v", run.Trigger)
+	}
+	check, _ := e.gh.CheckRun(int64(run.ReportID))
+	if check.Name != "AI Review" || check.HeadSHA != headSHA {
+		t.Fatalf("check run = %+v", check)
+	}
+	if got := len(e.gh.CheckRuns()); got != checks+1 {
+		t.Fatalf("check runs = %d, want %d: only the reviewer's request runs", got, checks+1)
+	}
+}

@@ -91,8 +91,9 @@ func (r *Runner) handler(queue workqueue.TypedRateLimitingInterface[string]) cac
 			if tomb, ok := obj.(cache.DeletedFinalStateUnknown); ok {
 				obj = tomb.Obj
 			}
-			// A run labelled done leaves the watch as a deletion too; only a run deleted before it
-			// was let go needs attention.
+			// A run deleted before it was let go needs attention. A run labelled done leaves the
+			// watch as a deletion too, and that event carries the run as it was before the label,
+			// so handOver checks that the run is really gone.
 			if pr, ok := obj.(*unstructured.Unstructured); ok && pr.GetLabels()[labelDone] == "" {
 				r.rememberDeleted(pr)
 				enqueue(pr)
@@ -156,10 +157,19 @@ func (r *Runner) handOver(ctx context.Context, key string, indexer cache.Indexer
 		return 0, err
 	}
 	if !exists {
-		if pr := r.takeDeleted(key); pr != nil {
-			return 0, w.Deleted(ctx, runOf(pr))
+		pr := r.takeDeleted(key)
+		if pr == nil {
+			return 0, nil
 		}
-		return 0, nil
+		live, err := r.client().Get(ctx, pr.GetNamespace(), pr.GetName())
+		if err != nil {
+			r.rememberDeleted(pr) // for the retry
+			return 0, err
+		}
+		if live != nil {
+			return 0, nil // it only left the watch, e.g. labelled done
+		}
+		return 0, w.Deleted(ctx, runOf(pr))
 	}
 	pr, ok := obj.(*unstructured.Unstructured)
 	if !ok {

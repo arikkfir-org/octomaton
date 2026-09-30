@@ -69,8 +69,8 @@ func New(urls []string, workers, queueSize int, logger *slog.Logger) *Relay {
 func (r *Relay) Forward(header http.Header, body []byte) {
 	d := delivery{header: http.Header{}, body: body}
 	for _, h := range forwardedHeaders {
-		if v := header.Values(h); len(v) > 0 {
-			d.header[h] = append([]string(nil), v...)
+		for _, v := range header.Values(h) {
+			d.header.Add(h, v)
 		}
 	}
 	r.mu.RLock()

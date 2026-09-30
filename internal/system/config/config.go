@@ -84,7 +84,7 @@ type Tekton struct {
 	DashboardURL string `envconfig:"DASHBOARD_URL"`
 }
 
-// Relay forwards verified push and pull_request deliveries to other webhook receivers.
+// Relay forwards verified push and ping deliveries to other webhook receivers.
 type Relay struct {
 	URLs []string `envconfig:"URLS"`
 }

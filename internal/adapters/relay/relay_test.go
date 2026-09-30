@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -60,4 +62,57 @@ func TestRelayForwardsDeliveries(t *testing.T) {
 		rec.mu.Unlock()
 	}
 	r.Forward(header, []byte("late")) // after Close: dropped, no panic
+}
+
+func TestRelayWarningsNameTheDelivery(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		wantWarn bool
+	}{
+		{name: "receiver refuses the delivery", status: http.StatusBadRequest, wantWarn: true},
+		{name: "receiver fails", status: http.StatusInternalServerError, wantWarn: true},
+		{name: "receiver accepts the delivery", status: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer((&receiver{}).handler(tt.status))
+			defer srv.Close()
+			var logs bytes.Buffer
+			r := New([]string{srv.URL}, 1, 10, slog.New(slog.NewJSONHandler(&logs, nil)))
+
+			// Headers as net/http parses them from GitHub's request: canonical keys.
+			header := http.Header{}
+			header.Set("X-GitHub-Event", "push")
+			header.Set("X-GitHub-Delivery", "d-42")
+			r.Forward(header, []byte(`{}`))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			r.Close(ctx)
+
+			var warnings []map[string]any
+			dec := json.NewDecoder(&logs)
+			for dec.More() {
+				var rec map[string]any
+				if err := dec.Decode(&rec); err != nil {
+					t.Fatalf("decoding log output: %v", err)
+				}
+				if rec["level"] == "WARN" {
+					warnings = append(warnings, rec)
+				}
+			}
+			if !tt.wantWarn {
+				if len(warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", warnings)
+				}
+				return
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("warnings = %v, want one", warnings)
+			}
+			if got := warnings[0]["delivery"]; got != "d-42" {
+				t.Fatalf("warning delivery = %v, want d-42", got)
+			}
+		})
+	}
 }

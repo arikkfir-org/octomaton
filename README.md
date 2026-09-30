@@ -19,7 +19,7 @@ sequenceDiagram
   GH->>SB: webhook (push, pull_request, merge_group, issue_comment, check_run, check_suite)
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
   SB->>GH: read .octomaton.yaml (and the PipelineRun file)
-  SB->>SB: match events, branches, tags and paths; apply trust rules
+  SB->>SB: match events, branches, tags and paths, then apply trust rules
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
   SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy
@@ -274,7 +274,9 @@ synced commit's short SHA, so every merge to `main` rolls out once `release` has
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
 Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
-refreshes tokens and deletes PVCs of finished runs.
+refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton` and of `go-import`, spread
+over nodes when there are several, each with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes
+both.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).

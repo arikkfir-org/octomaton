@@ -9,7 +9,8 @@ metadata:
     # Restart when the ConfigMap or the GitHub Secret changes.
     reloader.stakater.com/auto: "true"
 spec:
-  replicas: 1
+  # Two replicas and a PodDisruptionBudget keep it serving while a node drains.
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton
@@ -19,6 +20,14 @@ spec:
         app.kubernetes.io/name: octomaton
     spec:
       serviceAccountName: octomaton
+      # Prefer separate nodes, without making the system pool grow.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: octomaton
       # Octomaton reads OCTOMATON_* variables: no <SERVICE>_PORT variables from Services in the namespace.
       enableServiceLinks: false
       securityContext:

@@ -1,0 +1,22 @@
+# One replica at a time may be evicted (node upgrades, drains, scale-down); the other keeps serving.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: octomaton
+  namespace: octomaton
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: octomaton
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: go-import
+  namespace: octomaton
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-import

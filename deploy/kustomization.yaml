@@ -8,6 +8,7 @@ resources:
   - config-map.yaml
   - external-secret.yaml
   - deployment.yaml
+  - pod-disruption-budgets.yaml
   - service.yaml
   - go-import-config-map.yaml
   - go-import-deployment.yaml

@@ -23,8 +23,8 @@ func sampleTrigger() ci.Trigger {
 		Branch:         "feature",
 		Sender:         "alice",
 		Pipeline:       "ci",
-		PullRequest:    &ci.PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "abc", HeadRepo: "fork/repo", AuthorAssociation: "NONE"},
-		ApprovedBy:     "bob",
+		PullRequest:    &ci.PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "abc", HeadRepo: "octo/repo"},
+		RerunBy:        "bob",
 	}
 }
 

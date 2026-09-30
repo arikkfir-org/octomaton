@@ -82,15 +82,15 @@ func TestOpenCompletedReportWithActions(t *testing.T) {
 	app, srv := newApp(t)
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	id, err := app.Installation(installationID).OpenReport(context.Background(), repo, ci.Report{
-		Name: "ci", Revision: "abc", Status: ci.StatusCompleted, Conclusion: ci.ActionRequired, Started: now, Completed: now,
-		Title: "Approval required", Summary: "s", Actions: []ci.Action{{Label: "Approve and run", Description: "Run it", ID: ci.ApproveAction}},
+		Name: "ci", Revision: "abc", Status: ci.StatusCompleted, Conclusion: ci.Failure, Started: now, Completed: now,
+		Title: "Failed", Summary: "s", Actions: []ci.Action{{Label: "Fix it", Description: "Apply the fix", ID: "fix"}},
 	})
 	if err != nil {
 		t.Fatalf("OpenReport: %v", err)
 	}
 	cr, _ := srv.CheckRun(int64(id))
-	if cr.Conclusion != "action_required" || cr.StartedAt != "2026-01-02T03:04:05Z" || cr.DetailsURL != "" || cr.Text != "" ||
-		len(cr.Actions) != 1 || cr.Actions[0]["identifier"] != ci.ApproveAction || cr.Actions[0]["label"] != "Approve and run" {
+	if cr.Conclusion != "failure" || cr.StartedAt != "2026-01-02T03:04:05Z" || cr.DetailsURL != "" || cr.Text != "" ||
+		len(cr.Actions) != 1 || cr.Actions[0]["identifier"] != "fix" || cr.Actions[0]["label"] != "Fix it" {
 		t.Fatalf("check run = %+v", cr)
 	}
 }

@@ -43,15 +43,21 @@ type Push struct {
 
 // PullRequest is the pull-request-specific part of a Trigger. HeadRef and BaseRef are branch names.
 type PullRequest struct {
-	Number            int    `json:"number"`
-	HeadRef           string `json:"headRef"`
-	HeadSHA           string `json:"headSHA"`
-	BaseRef           string `json:"baseRef"`
-	BaseSHA           string `json:"baseSHA"`
-	HeadRepo          string `json:"headRepo,omitempty"`
-	Author            string `json:"author,omitempty"`
-	AuthorAssociation string `json:"authorAssociation,omitempty"`
-	HTMLURL           string `json:"htmlURL,omitempty"`
+	Number   int    `json:"number"`
+	HeadRef  string `json:"headRef"`
+	HeadSHA  string `json:"headSHA"`
+	BaseRef  string `json:"baseRef"`
+	BaseSHA  string `json:"baseSHA"`
+	HeadRepo string `json:"headRepo,omitempty"`
+	Author   string `json:"author,omitempty"`
+	HTMLURL  string `json:"htmlURL,omitempty"`
+}
+
+// FromFork reports whether the pull request's head branch lives outside repository (the full name
+// of its base repository): in a fork, or in a repository that no longer exists. Octomaton never acts
+// on those.
+func (pr *PullRequest) FromFork(repository string) bool {
+	return pr != nil && !strings.EqualFold(pr.HeadRepo, repository)
 }
 
 // MergeGroup is the merge-queue-specific part of a Trigger. HeadRef and BaseRef are full refs.
@@ -99,9 +105,13 @@ type Trigger struct {
 	Schedule       *Schedule    `json:"schedule,omitempty"`
 	// ConfigRef is the ref .octomaton.yaml and pipeline definitions are read at: the default branch
 	// for comment commands, the revision otherwise.
-	ConfigRef  string `json:"configRef,omitempty"`
-	ApprovedBy string `json:"approvedBy,omitempty"`
-	RerunBy    string `json:"rerunBy,omitempty"`
+	ConfigRef string `json:"configRef,omitempty"`
+	RerunBy   string `json:"rerunBy,omitempty"`
+}
+
+// FromFork reports whether the trigger is a pull request's from a fork, which Octomaton never acts on.
+func (t Trigger) FromFork() bool {
+	return t.PullRequest.FromFork(t.Repository.FullName)
 }
 
 // ConfigAt is the ref configuration is read at.
@@ -155,10 +165,7 @@ func (t Trigger) Describe() string {
 	if t.Sender != "" {
 		fmt.Fprintf(&b, " by @%s", t.Sender)
 	}
-	if t.ApprovedBy != "" {
-		fmt.Fprintf(&b, "; approved by @%s", t.ApprovedBy)
-	}
-	if t.RerunBy != "" && t.RerunBy != t.ApprovedBy {
+	if t.RerunBy != "" {
 		fmt.Fprintf(&b, "; re-run by @%s", t.RerunBy)
 	}
 	return b.String()

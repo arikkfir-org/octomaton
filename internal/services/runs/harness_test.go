@@ -98,17 +98,18 @@ func (h *harness) files(ref, cfg, run string) {
 	}
 }
 
-func prTrigger(sha string, number int, association, headRepo string) ci.Trigger {
+func prTrigger(sha string, number int, headRepo string) ci.Trigger {
 	return ci.Trigger{
 		Version: ci.TriggerVersion, Event: ci.EventPullRequest, Action: "synchronize", DeliveryID: "delivery-" + sha[:4],
 		InstallationID: installationID, Repository: repo, Revision: sha, Ref: fmt.Sprintf("refs/pull/%d/head", number), Branch: "feature",
 		Sender: "alice",
 		PullRequest: &ci.PullRequest{Number: number, HeadRef: "feature", HeadSHA: sha, BaseRef: "main", BaseSHA: baseSHA,
-			HeadRepo: headRepo, Author: "alice", AuthorAssociation: association, HTMLURL: fmt.Sprintf("https://github.com/%s/pull/%d", repo.FullName, number)},
+			HeadRepo: headRepo, Author: "alice", HTMLURL: fmt.Sprintf("https://github.com/%s/pull/%d", repo.FullName, number)},
 	}
 }
 
-func trustedPR(sha string) ci.Trigger { return prTrigger(sha, 5, "MEMBER", repo.FullName) }
+// branchPR is pull request #5 from a branch of the repository itself.
+func branchPR(sha string) ci.Trigger { return prTrigger(sha, 5, repo.FullName) }
 
 func pushTrigger(sha, branch string) ci.Trigger {
 	return ci.Trigger{

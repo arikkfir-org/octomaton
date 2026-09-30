@@ -17,6 +17,9 @@ import (
 // maxNameTries bounds the retries when other deliveries take the attempts a start tries.
 const maxNameTries = 10
 
+// errFromFork is returned for a trigger of a pull request from a fork: Octomaton never runs one.
+var errFromFork = errors.New("pull request from a fork")
+
 // Start starts a run of pipeline p for t, unless it runs already. A refused run is reported, and
 // returned as a *Refusal.
 func (s *Service) Start(ctx context.Context, t ci.Trigger, p *pipelines.Pipeline) error {
@@ -66,11 +69,15 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 // policy. Any failure after the run exists cancels it and fails its report.
 func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p *pipelines.Pipeline, rerun bool) (ci.Run, error) {
 	log := s.logFor(t)
+	if t.FromFork() {
+		// The callers ignore forks already; this keeps any other path from running a fork's code.
+		return ci.Run{}, errFromFork
+	}
 	refuse := func(r *ci.Refusal) (ci.Run, error) {
 		log.WarnContext(ctx, "Pipeline refused", "title", r.Title, "reason", r.Reason)
 		s.Metrics.RunCreated(ctx, metrics.RunFailed)
 		if t.Comment == nil {
-			s.openCompleted(ctx, gh, t, p.Name, ci.Failure, r.Title, r.Reason, nil, "")
+			s.openCompleted(ctx, gh, t, p.Name, ci.Failure, r.Title, r.Reason)
 		}
 		return ci.Run{}, &Refusal{Pipeline: p.Name, Reason: r.Reason}
 	}

@@ -18,8 +18,8 @@ func TestContextOf(t *testing.T) {
 			name: "pull request",
 			trigger: ci.Trigger{
 				Event: ci.EventPullRequest, Action: "synchronize", InstallationID: 7, Repository: repo, Revision: "abc", Ref: "refs/pull/5/head",
-				Branch: "feature", Sender: "alice", Pipeline: "ci", ApprovedBy: "bob", DeliveryID: "d-1",
-				PullRequest: &ci.PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "abc", BaseRef: "main", BaseSHA: "def", HeadRepo: "fork/repo", Author: "alice"},
+				Branch: "feature", Sender: "alice", Pipeline: "ci", DeliveryID: "d-1",
+				PullRequest: &ci.PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "abc", BaseRef: "main", BaseSHA: "def", HeadRepo: "octo/repo", Author: "alice"},
 			},
 			want: TemplateContext{
 				Event: "pull_request", Action: "synchronize", Repository: Repository{Owner: "octo", Name: "repo", FullName: "octo/repo",

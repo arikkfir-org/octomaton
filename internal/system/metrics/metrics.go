@@ -14,12 +14,11 @@ import (
 
 // Results recorded by RunCreated.
 const (
-	RunCreated        = "created"
-	RunSkipped        = "skipped"
-	RunActionRequired = "action_required"
-	RunFailed         = "failed"
-	RunError          = "error"
-	RunExisting       = "existing"
+	RunCreated  = "created"
+	RunSkipped  = "skipped"
+	RunFailed   = "failed"
+	RunError    = "error"
+	RunExisting = "existing"
 )
 
 // durationBuckets are Prometheus's default buckets, in seconds; the SDK's default ones suit
@@ -54,7 +53,7 @@ func New(meter metric.Meter) (*Metrics, error) {
 		webhooksReceived: counter("octomaton.webhooks.received", "Webhook deliveries received, by event."),
 		webhooksRejected: counter("octomaton.webhooks.rejected", "Webhook deliveries rejected, by event and reason."),
 		runsCreated: counter("octomaton.runs.created",
-			"Pipeline trigger outcomes: created, existing (deduplicated), skipped, action_required, failed (reported on a check run) or error."),
+			"Pipeline trigger outcomes: created, existing (deduplicated), skipped, failed (reported on a check run) or error."),
 		checkRunErrors: counter("octomaton.github.checkrun.errors", "Failed GitHub check-run API calls, by operation."),
 		queueDepth:     gauge("octomaton.webhook.queue.depth", "Webhook jobs waiting for a worker."),
 		leader:         gauge("octomaton.leader", "1 while this replica is the elected reporter leader."),

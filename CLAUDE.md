@@ -4,8 +4,10 @@
 
 - Application-agnostic: Octomaton knows nothing about what a repository builds, its language, layout, CI or CD. No
   conventional directories (`.tekton/` is only a path users choose), no defaults that assume a layout, no knowledge of
-  specific repositories.
-- The only repository files Octomaton reads are the root `.octomaton.yaml` and the PipelineRun files it references.
+  specific repositories. The one exception is GitHub's own convention: the owner's `.github` repository, whose
+  `.octomaton.yaml` may declare the organization pipelines every repository runs.
+- The only repository files Octomaton reads are the root `.octomaton.yaml` (the repository's own, and its owner's
+  `.github` one) and the PipelineRun files they reference.
 - Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. Labels and annotations under
   `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping Octomaton writes on its own objects.
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go

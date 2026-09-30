@@ -399,3 +399,43 @@ func TestReviewRequestEndToEnd(t *testing.T) {
 		t.Fatalf("check runs = %d, want %d: only the reviewer's request runs", got, checks+1)
 	}
 }
+
+// orgYAML is .github's configuration: organization pipeline lint, defined in .github.
+const orgYAML = `
+apiVersion: octomaton.dev/v1
+organization:
+  pipelines:
+    - name: lint
+      displayName: Lint
+      pipelineRun: .tekton/lint.yaml
+      on:
+        pull_request: {branches: [main]}
+      params:
+        repo-url: "{{ .Repository.CloneURL }}"
+        revision: "{{ .Revision }}"
+`
+
+func TestOrganizationPipelinesEndToEnd(t *testing.T) {
+	e := setup(t)
+	// Organization pipelines, and their definitions, are read at .github's default branch.
+	e.gh.AddFile(owner+"/.github", "", ".octomaton.yaml", orgYAML)
+	e.gh.AddFile(owner+"/.github", "", ".tekton/lint.yaml", strings.Replace(ciYAML, "generateName: ci-", "generateName: lint-", 1))
+
+	if rec := e.deliver("pull_request", "o-1", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	// The repository's own pipeline runs, and the organization's, in the repository's namespace.
+	e.waitForRun("octomaton-ci-abcdef0-1")
+	run, pr := e.waitForRun("octomaton-lint-abcdef0-1")
+	params, _, _ := unstructured.NestedSlice(pr.Object, "spec", "params")
+	if fmt.Sprint(params) != fmt.Sprint([]any{
+		map[string]any{"name": "repo-url", "value": "https://github.com/" + fullName + ".git"},
+		map[string]any{"name": "revision", "value": headSHA},
+	}) {
+		t.Fatalf("params = %v", params)
+	}
+	check, _ := e.gh.CheckRun(int64(run.ReportID))
+	if check.Name != "Lint" || check.HeadSHA != headSHA {
+		t.Fatalf("check run = %+v", check)
+	}
+}

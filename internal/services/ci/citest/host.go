@@ -66,6 +66,7 @@ type Host struct {
 	reactions   []Reaction
 	comments    []Comment
 	errs        map[string]error
+	fileErrs    map[string]error
 }
 
 var (
@@ -78,7 +79,8 @@ func NewHost(now func() time.Time) *Host {
 	return &Host{
 		now: now, repos: map[int64][]ci.Repository{}, files: map[string]string{}, changed: map[string]ci.ChangedFiles{},
 		pulls: map[string]ci.PullRequestState{}, branches: map[string]string{}, permissions: map[string]ci.Permission{},
-		reports: map[ci.ReportID]*Report{}, suites: map[string]int64{}, errs: map[string]error{}, nextID: 1000,
+		reports: map[ci.ReportID]*Report{}, suites: map[string]int64{}, errs: map[string]error{}, fileErrs: map[string]error{},
+		nextID: 1000,
 	}
 }
 
@@ -109,6 +111,13 @@ func (h *Host) SetFile(repo ci.Repository, ref, path, content string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.files[repo.FullName+"@"+ref+":"+path] = content
+}
+
+// FailFile makes reading one file at ref fail with err; a nil err makes it succeed again.
+func (h *Host) FailFile(repo ci.Repository, ref, path string, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.fileErrs[repo.FullName+"@"+ref+":"+path] = err
 }
 
 // SetPullRequest stores a pull request.
@@ -289,6 +298,9 @@ func (c *installation) ReadFile(_ context.Context, repo ci.Repository, path, ref
 	}
 	c.h.mu.Lock()
 	defer c.h.mu.Unlock()
+	if err := c.h.fileErrs[repo.FullName+"@"+ref+":"+path]; err != nil {
+		return nil, err
+	}
 	content, ok := c.h.files[repo.FullName+"@"+ref+":"+path]
 	if !ok {
 		return nil, ci.ErrNotFound

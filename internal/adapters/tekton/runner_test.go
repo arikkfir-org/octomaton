@@ -24,6 +24,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/cache"
 	"octomaton.dev/internal/services/ci"
 )
 
@@ -662,5 +663,56 @@ func TestWatch(t *testing.T) {
 	}
 	if h.r.Synced() {
 		t.Fatalf("a stopped Watch is not synced")
+	}
+}
+
+// TestHandOverOfARunThatLeftTheWatch hands over runs the informer reported as deleted. A run that is
+// labelled done leaves the watch as a deletion carrying its state from before the label; only a run
+// that is gone from the API is reported as deleted.
+func TestHandOverOfARunThatLeftTheWatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		exists      bool
+		getErr      error
+		wantDeleted bool
+		wantErr     bool
+	}{
+		{name: "labelled done, still there", exists: true},
+		{name: "deleted", wantDeleted: true},
+		{name: "cannot tell", getErr: errors.New("connection refused"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			run := h.create(demoSpec(pushTrigger(shaA)), 1)
+			pr, err := h.dyn.Resource(PipelineRuns).Namespace(demoNS).Get(context.Background(), run.ID.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tt.exists {
+				if err := h.dyn.Resource(PipelineRuns).Namespace(demoNS).Delete(context.Background(), run.ID.Name, metav1.DeleteOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.getErr != nil {
+				h.dyn.PrependReactor("get", "pipelineruns", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+			key := demoNS + "/" + run.ID.Name
+			h.r.rememberDeleted(pr)
+			w := &watcher{reconciled: map[string]int{}}
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			_, err = h.r.handOver(context.Background(), key, indexer, w)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("handOver error = %v, want an error: %v", err, tt.wantErr)
+			}
+			if _, deleted := w.seen(run.ID.Name); deleted != tt.wantDeleted {
+				t.Fatalf("reported deleted = %v, want %v", deleted, tt.wantDeleted)
+			}
+			if kept := h.r.takeDeleted(key) != nil; kept != tt.wantErr {
+				t.Fatalf("kept for a retry = %v, want %v", kept, tt.wantErr)
+			}
+		})
 	}
 }

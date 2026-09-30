@@ -174,3 +174,98 @@ func TestRun(t *testing.T) {
 		t.Fatalf("no paths is a usage error, exit %d", code)
 	}
 }
+
+// reviewConfig has a review pipeline whose definition is in another repository, beside one in the repository itself.
+const reviewConfig = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - name: review
+    pipelineRun: {repository: shared, path: review/pipelinerun.yaml}
+    on:
+      review_request: {reviewers: [octo-reviewer]}
+    params:
+      number: "{{ .PullRequest.Number }}"
+      reviewer: "{{ .ReviewRequest.Reviewer }}"
+    secrets: [api-key]
+  - name: local-review
+    pipelineRun: .tekton/review.yaml
+    on:
+      review_request: {reviewers: [octo-reviewer]}
+    params:
+      reviewer: "{{ .ReviewRequest.Reviewer }}"
+    secrets: [api-key]
+`
+
+func TestLintDefinitionsInOtherRepositories(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          string
+		want         []string
+		wantNotes    []string
+		wantRendered []string
+	}{
+		{
+			name:         "noted, with its templates still checked",
+			cfg:          reviewConfig,
+			wantNotes:    []string{"pipeline review: pipelineRun shared:review/pipelinerun.yaml is in another repository, so its runs are not rendered"},
+			wantRendered: []string{"local-review on review_request"},
+		},
+		{
+			name:      "a template that fails for its event",
+			cfg:       strings.Replace(reviewConfig, `number: "{{ .PullRequest.Number }}"`, `author: "{{ .Comment.Author }}"`, 1),
+			want:      []string{`.octomaton.yaml: pipeline review, on review_request: param "author": `},
+			wantNotes: []string{"pipeline review: pipelineRun shared:review/pipelinerun.yaml is in another repository, so its runs are not rendered"},
+			// The local pipeline still renders.
+			wantRendered: []string{"local-review on review_request"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := repoDir(t, tt.cfg, map[string]string{".tekton/review.yaml": "kind: PipelineRun\n"})
+			r := &renderer{}
+			res := (&Linter{Renderer: r}).Lint(filepath.Join(dir, ".octomaton.yaml"))
+			var problems []string
+			for _, p := range res.Problems {
+				problems = append(problems, strings.TrimPrefix(p.String(), dir+string(filepath.Separator)))
+			}
+			if len(problems) != len(tt.want) {
+				t.Fatalf("problems = %q, want %q", problems, tt.want)
+			}
+			for i, w := range tt.want {
+				if !strings.HasPrefix(problems[i], w) {
+					t.Fatalf("problem %d = %q, want it to start with %q", i, problems[i], w)
+				}
+			}
+			if !slices.Equal(res.Notes, tt.wantNotes) {
+				t.Fatalf("notes = %q, want %q", res.Notes, tt.wantNotes)
+			}
+			var rendered []string
+			for _, rr := range res.Rendered {
+				rendered = append(rendered, rr.Pipeline+" on "+rr.Event)
+			}
+			if !slices.Equal(rendered, tt.wantRendered) {
+				t.Fatalf("rendered = %q, want %q", rendered, tt.wantRendered)
+			}
+			for _, spec := range r.specs {
+				if spec.Trigger.Pipeline == "review" {
+					t.Fatalf("the other repository's definition must not reach the renderer: %+v", spec)
+				}
+				if !slices.Equal(spec.Secrets, []string{"api-key"}) || spec.Params["reviewer"] != "octo-reviewer" {
+					t.Fatalf("spec = %+v, want the pipeline's secrets and the sample reviewer", spec)
+				}
+			}
+		})
+	}
+}
+
+func TestRunPrintsNotes(t *testing.T) {
+	dir := repoDir(t, reviewConfig, map[string]string{".tekton/review.yaml": "kind: PipelineRun\n"})
+	var stdout, stderr bytes.Buffer
+	if code := (&Linter{Renderer: &renderer{}}).Run([]string{dir}, false, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("a note is not a problem: exit %d, stderr %q", code, stderr.String())
+	}
+	want := filepath.Join(dir, ".octomaton.yaml") + ": note: pipeline review: pipelineRun shared:review/pipelinerun.yaml is in another repository"
+	if !strings.Contains(stderr.String(), want) || !strings.Contains(stdout.String(), "ok (1 pipeline runs rendered)") {
+		t.Fatalf("stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+}

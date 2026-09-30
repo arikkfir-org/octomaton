@@ -40,6 +40,9 @@ func ContextOf(t ci.Trigger) TemplateContext {
 	if m := t.Comment; m != nil {
 		c.Comment = &Comment{ID: m.ID, Author: m.Author, Command: m.Command, Arguments: m.Arguments}
 	}
+	if r := t.ReviewRequest; r != nil {
+		c.ReviewRequest = &ReviewRequest{Reviewer: r.Reviewer}
+	}
 	if s := t.Schedule; s != nil {
 		c.Schedule = &Schedule{Cron: s.Cron, Slot: s.Slot}
 	}

@@ -73,6 +73,23 @@ func TestDecodeReasons(t *testing.T) {
 	}
 	forkComment := comment("created", "/deploy", true)
 	forkComment.Repo = forkRepo()
+	// reviewRequest asks for a review on open pull request #5 from a user or a team (or neither).
+	reviewRequest := func(reviewer, team, state string) *github.PullRequestEvent {
+		ev := prPayload(owner, ghRepo(owner))
+		ev.Action = new("review_requested")
+		ev.PullRequest.State = new(state)
+		if reviewer != "" {
+			ev.RequestedReviewer = &github.User{Login: new(reviewer)}
+		}
+		if team != "" {
+			ev.RequestedTeam = &github.Team{Slug: new(team)}
+		}
+		return ev
+	}
+	forkReviewRequest := reviewRequest("octo-reviewer", "", "open")
+	forkReviewRequest.PullRequest.Head.Repo = ghRepo("stranger")
+	noDefaultBranch := reviewRequest("octo-reviewer", "", "open")
+	noDefaultBranch.Repo.DefaultBranch = nil
 	mergeGroup := func(action string) *github.MergeGroupEvent {
 		return &github.MergeGroupEvent{Action: new(action), Reason: new("dequeued"), Repo: ghRepo(owner), Installation: installation,
 			MergeGroup: &github.MergeGroup{HeadSHA: new(sha1), HeadRef: new("refs/heads/gh-readonly-queue/main/x"), BaseRef: new("refs/heads/main")}}
@@ -97,6 +114,12 @@ func TestDecodeReasons(t *testing.T) {
 		{"comment in a fork", "issue_comment", forkComment, "repository is a fork", ""},
 		{"check run in a fork", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: appCheck, Repo: forkRepo(), Installation: installation, Sender: sender}, "repository is a fork", ""},
 		{"pull request without its pull request", "pull_request", &github.PullRequestEvent{Action: new("opened"), Repo: ghRepo(owner)}, "no pull request in payload", ""},
+		{"review requested", "pull_request", reviewRequest("octo-reviewer", "", "open"), "", "review_request octo-org/demo@1111111"},
+		{"review requested from a team", "pull_request", reviewRequest("", "reviewers", "open"), "review requested from a team", ""},
+		{"review requested without a reviewer", "pull_request", reviewRequest("", "", "open"), "no requested reviewer in payload", ""},
+		{"review requested on a closed pull request", "pull_request", reviewRequest("octo-reviewer", "", "closed"), "review requested on a pull request that is not open", ""},
+		{"review requested on a fork's pull request", "pull_request", forkReviewRequest, "pull request from a fork", ""},
+		{"review requested without a default branch", "pull_request", noDefaultBranch, "no default branch in payload", ""},
 		{"merge group checks requested", "merge_group", mergeGroup("checks_requested"), "", "merge_group octo-org/demo@1111111"},
 		{"merge group destroyed", "merge_group", mergeGroup("destroyed"), "", "merge_group destroyed octo-org/demo"},
 		{"merge group of another owner", "merge_group", &github.MergeGroupEvent{Action: new("destroyed"), MergeGroup: &github.MergeGroup{HeadSHA: new(sha1)}, Repo: ghRepo("stranger"), Installation: installation}, "repository owner is not allowed", ""},
@@ -145,6 +168,16 @@ func TestDecodeEvents(t *testing.T) {
 			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
 		},
 	}
+	review := &github.PullRequestEvent{
+		Action: new("review_requested"), Number: new(12), Repo: ghRepo(owner),
+		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
+		RequestedReviewer: &github.User{Login: new("Octo-Reviewer")},
+		PullRequest: &github.PullRequest{
+			State: new("open"), Draft: new(true), User: &github.User{Login: new("carol")}, HTMLURL: new("https://github.com/octo-org/demo/pull/12"),
+			Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new(owner + "/" + repoName)}},
+			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
+		},
+	}
 	trigger := sampleTrigger()
 	marker, _ := Marker(trigger)
 	checkRun := &github.CheckRunEvent{
@@ -181,6 +214,17 @@ func TestDecodeEvents(t *testing.T) {
 				Repository: repository, Revision: sha1, Ref: "refs/pull/12/head", Branch: "topic", Sender: "bob",
 				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: owner + "/" + repoName,
 					Author: "carol", HTMLURL: "https://github.com/octo-org/demo/pull/12"},
+			}},
+		},
+		{
+			name: "a review request runs the head commit with the default branch's configuration", event: "pull_request", payload: review,
+			want: &ci.TriggerEvent{Draft: true, Trigger: ci.Trigger{
+				Version: ci.TriggerVersion, Event: ci.EventReviewRequest, Action: "review_requested", DeliveryID: "d", InstallationID: installationID,
+				Repository: repository, Revision: sha1, Ref: "refs/pull/12/head", Branch: "topic", Sender: "bob",
+				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: owner + "/" + repoName,
+					Author: "carol", HTMLURL: "https://github.com/octo-org/demo/pull/12"},
+				ReviewRequest: &ci.ReviewRequest{Reviewer: "Octo-Reviewer"},
+				ConfigRef:     "main",
 			}},
 		},
 		{

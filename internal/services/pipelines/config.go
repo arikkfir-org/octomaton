@@ -47,9 +47,15 @@ var pullRequestActions = map[string]bool{
 }
 
 var (
-	nameRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	paramNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
+	nameRE       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	paramNameRE  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
+	loginRE      = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+	repoNameRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+	secretNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 )
+
+// maxSecretNameLength bounds a Kubernetes Secret name (a DNS subdomain).
+const maxSecretNameLength = 253
 
 // Config is a parsed and validated .octomaton.yaml.
 type Config struct {
@@ -61,27 +67,74 @@ type Config struct {
 type Pipeline struct {
 	Name        string            `yaml:"name"`
 	DisplayName string            `yaml:"displayName"`
-	PipelineRun string            `yaml:"pipelineRun"`
+	PipelineRun PipelineRunRef    `yaml:"pipelineRun"`
 	On          Triggers          `yaml:"on"`
 	Params      map[string]string `yaml:"params"`
 	GitHubToken *GitHubToken      `yaml:"githubToken"`
-	Timeout     string            `yaml:"timeout"`
-	Concurrency *Concurrency      `yaml:"concurrency"`
-	TaskChecks  bool              `yaml:"taskChecks"`
+	// Secrets name the Secrets in the run's namespace that its runs may mount besides their token.
+	Secrets     []string     `yaml:"secrets"`
+	Timeout     string       `yaml:"timeout"`
+	Concurrency *Concurrency `yaml:"concurrency"`
+	TaskChecks  bool         `yaml:"taskChecks"`
 
 	timeout time.Duration
 	params  map[string]*template.Template
 }
 
+// PipelineRunRef locates a pipeline definition: a file in the repository itself, read where its
+// .octomaton.yaml is, or a file in another repository of the same owner, read at that repository's
+// default branch.
+type PipelineRunRef struct {
+	// Repository names another repository of the same owner; empty means the repository itself.
+	Repository string
+	// Path is the file, relative to the repository's root.
+	Path string
+}
+
+// UnmarshalYAML accepts a repository-relative path, or a mapping with repository and path.
+func (r *PipelineRunRef) UnmarshalYAML(n *yaml.Node) error {
+	switch {
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!str":
+		*r = PipelineRunRef{Path: n.Value}
+		return nil
+	case n.Kind == yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if k := n.Content[i].Value; k != "repository" && k != "path" {
+				return fmt.Errorf("line %d: field %s not found in pipelineRun (only repository and path)", n.Content[i].Line, k)
+			}
+		}
+		var m struct {
+			Repository string `yaml:"repository"`
+			Path       string `yaml:"path"`
+		}
+		if err := n.Decode(&m); err != nil {
+			return fmt.Errorf("pipelineRun: %w", err)
+		}
+		*r = PipelineRunRef{Repository: m.Repository, Path: m.Path}
+		return nil
+	}
+	return fmt.Errorf("line %d: pipelineRun must be a file path, or a mapping with repository and path", n.Line)
+}
+
+// String names the definition in messages: its path, prefixed with "<repository>:" when it is in
+// another repository.
+func (r PipelineRunRef) String() string {
+	if r.Repository == "" {
+		return r.Path
+	}
+	return r.Repository + ":" + r.Path
+}
+
 // Triggers lists the events that trigger a pipeline. A pull_request,
-// merge_group or push trigger written with a null value (e.g. "merge_group:")
+// merge_group, push or comment trigger written with a null value (e.g. "merge_group:")
 // is enabled with default settings.
 type Triggers struct {
-	PullRequest *PullRequestTrigger `yaml:"pull_request"`
-	MergeGroup  *MergeGroupTrigger  `yaml:"merge_group"`
-	Push        *PushTrigger        `yaml:"push"`
-	Comment     *CommentTrigger     `yaml:"comment"`
-	Schedule    []ScheduleTrigger   `yaml:"schedule"`
+	PullRequest   *PullRequestTrigger   `yaml:"pull_request"`
+	MergeGroup    *MergeGroupTrigger    `yaml:"merge_group"`
+	Push          *PushTrigger          `yaml:"push"`
+	Comment       *CommentTrigger       `yaml:"comment"`
+	ReviewRequest *ReviewRequestTrigger `yaml:"review_request"`
+	Schedule      []ScheduleTrigger     `yaml:"schedule"`
 }
 
 // PullRequestTrigger configures pull_request events.
@@ -119,6 +172,16 @@ type CommentTrigger struct {
 	Branches []string `yaml:"branches"`
 
 	pattern *regexp.Regexp
+}
+
+// ReviewRequestTrigger runs a pipeline when a review is requested from one of its reviewers on an
+// open pull request. Like comment commands, it reads definitions from the default branch and runs
+// against the pull request's head commit.
+type ReviewRequestTrigger struct {
+	// Reviewers are the GitHub logins whose review requests start the pipeline (case-insensitive).
+	Reviewers []string `yaml:"reviewers"`
+	// Branches are globs the pull request's base branch must match (omitted = all).
+	Branches []string `yaml:"branches"`
 }
 
 // ScheduleTrigger runs a pipeline at the head of the default branch on a cron schedule.
@@ -195,6 +258,7 @@ var typeNames = strings.NewReplacer(
 	"in type pipelines.MergeGroupTrigger", "in on.merge_group",
 	"in type pipelines.PushTrigger", "in on.push",
 	"in type pipelines.CommentTrigger", "in on.comment",
+	"in type pipelines.ReviewRequestTrigger", "in on.review_request",
 	"in type pipelines.ScheduleTrigger", "in on.schedule",
 	"in type pipelines.Concurrency", "in concurrency",
 	"in type pipelines.GitHubToken", "in githubToken",
@@ -245,6 +309,8 @@ func enableNullTriggers(root *yaml.Node, cfg *Config) {
 				t.Push = &PushTrigger{}
 			case "comment":
 				t.Comment = &CommentTrigger{}
+			case "review_request":
+				t.ReviewRequest = &ReviewRequestTrigger{}
 			}
 		}
 	}
@@ -320,23 +386,28 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 		}
 	}
 
-	switch {
-	case p.PipelineRun == "":
+	switch ref := p.PipelineRun; {
+	case ref.Path == "":
 		add("pipelineRun is required")
-	case !isRepoRelativeFile(p.PipelineRun):
-		add("pipelineRun %q must be a clean repository-relative file path", p.PipelineRun)
+	case !isRepoRelativeFile(ref.Path):
+		add("pipelineRun %q must be a clean repository-relative file path", ref.Path)
+	case ref.Repository != "" && (!repoNameRE.MatchString(ref.Repository) || ref.Repository == "." || ref.Repository == ".."):
+		add("pipelineRun.repository %q is not a repository name", ref.Repository)
 	}
 
 	on := &p.On
-	if on.PullRequest == nil && on.MergeGroup == nil && on.Push == nil && on.Comment == nil && len(on.Schedule) == 0 {
-		add("on: at least one of pull_request, merge_group, push, comment or schedule is required")
+	if on.PullRequest == nil && on.MergeGroup == nil && on.Push == nil && on.Comment == nil && on.ReviewRequest == nil && len(on.Schedule) == 0 {
+		add("on: at least one of pull_request, merge_group, push, comment, review_request or schedule is required")
 	}
 	if t := on.PullRequest; t != nil {
 		problems = append(problems, validateGlobs("on.pull_request.branches", t.Branches)...)
 		problems = append(problems, validateGlobs("on.pull_request.paths", t.Paths)...)
 		problems = append(problems, validateGlobs("on.pull_request.pathsIgnore", t.PathsIgnore)...)
 		for i, typ := range t.Types {
-			if !pullRequestActions[typ] {
+			switch {
+			case typ == "review_requested":
+				add("on.pull_request.types[%d]: review requests trigger on.review_request, not on.pull_request", i)
+			case !pullRequestActions[typ]:
 				add("on.pull_request.types[%d]: unknown pull_request action %q", i, typ)
 			}
 		}
@@ -367,6 +438,17 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 			}
 		}
 		problems = append(problems, validateGlobs("on.comment.branches", t.Branches)...)
+	}
+	if t := on.ReviewRequest; t != nil {
+		if len(t.Reviewers) == 0 {
+			add("on.review_request.reviewers is required")
+		}
+		for i, r := range t.Reviewers {
+			if !loginRE.MatchString(r) {
+				add("on.review_request.reviewers[%d]: %q is not a GitHub login", i, r)
+			}
+		}
+		problems = append(problems, validateGlobs("on.review_request.branches", t.Branches)...)
 	}
 	for i := range on.Schedule {
 		s := &on.Schedule[i]
@@ -427,6 +509,20 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 				add("githubToken.permissions: %v", err)
 			}
 		}
+	}
+
+	if len(p.Secrets) > 0 && (on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil) {
+		add("secrets: only pipelines whose every trigger is comment, review_request or schedule may mount Secrets, because only they read their definitions from the default branch")
+	}
+	seenSecrets := map[string]bool{}
+	for i, name := range p.Secrets {
+		switch {
+		case len(name) > maxSecretNameLength || !secretNameRE.MatchString(name):
+			add("secrets[%d]: %q is not a Secret name", i, name)
+		case seenSecrets[name]:
+			add("secrets[%d]: duplicate Secret %q", i, name)
+		}
+		seenSecrets[name] = true
 	}
 
 	if p.Timeout != "" {
@@ -549,9 +645,9 @@ func (p *Pipeline) TokenWorkspace() string {
 }
 
 // ConcurrencyFor resolves the run's concurrency group for ctx. Without a
-// concurrency setting, pull_request runs of the same pipeline and pull request
-// share the group "pr-<number>" (scoped to the pipeline) with policy supersede,
-// and other runs are unconstrained.
+// concurrency setting, pull_request and review_request runs of the same pipeline
+// and pull request share the group "pr-<number>" (scoped to the pipeline) with
+// policy supersede, and other runs are unconstrained.
 func (p *Pipeline) ConcurrencyFor(ctx TemplateContext) (ci.Concurrency, error) {
 	if c := p.Concurrency; c != nil && c.group != nil {
 		group, err := ExecuteTemplate(c.group, ctx)
@@ -563,7 +659,7 @@ func (p *Pipeline) ConcurrencyFor(ctx TemplateContext) (ci.Concurrency, error) {
 		}
 		return ci.Concurrency{Group: group, Key: group, Policy: ci.Policy(c.Policy)}, nil
 	}
-	if ctx.Event == ci.EventPullRequest && ctx.PullRequest != nil {
+	if (ctx.Event == ci.EventPullRequest || ctx.Event == ci.EventReviewRequest) && ctx.PullRequest != nil {
 		group := fmt.Sprintf("pr-%d", ctx.PullRequest.Number)
 		return ci.Concurrency{Group: group, Key: p.Name + "/" + group, Policy: ci.Supersede}, nil
 	}

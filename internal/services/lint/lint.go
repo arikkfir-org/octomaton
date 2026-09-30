@@ -43,6 +43,8 @@ func (p Problem) String() string { return p.File + ": " + p.Message }
 type Result struct {
 	Config   string
 	Problems []Problem
+	// Notes are what could not be checked, such as definitions in other repositories.
+	Notes []string
 	// Rendered holds each pipeline's run rendered with placeholder values for each of its events,
 	// in order.
 	Rendered []Rendered
@@ -102,16 +104,25 @@ func (l *Linter) Lint(configPath string) Result {
 	root := filepath.Dir(configPath)
 	for i := range cfg.Pipelines {
 		p := &cfg.Pipelines[i]
-		file := filepath.Join(root, filepath.FromSlash(p.PipelineRun))
-		definition, err := os.ReadFile(file)
-		if err != nil {
-			add(configPath, "pipeline %s: pipelineRun: %v", p.Name, err)
-			continue
+		// A definition in another repository is read from there at run time; only its templates are
+		// checked here.
+		var definition []byte
+		file := configPath
+		if p.PipelineRun.Repository != "" {
+			res.Notes = append(res.Notes, fmt.Sprintf("pipeline %s: pipelineRun %s is in another repository, so its runs are not rendered", p.Name, p.PipelineRun))
+		} else {
+			file = filepath.Join(root, filepath.FromSlash(p.PipelineRun.Path))
+			if definition, err = os.ReadFile(file); err != nil {
+				add(configPath, "pipeline %s: pipelineRun: %v", p.Name, err)
+				continue
+			}
 		}
-		base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun, Timeout: p.TimeoutDuration(), Token: p.Token(), TaskReports: p.TaskChecks}
-		if err := l.Renderer.CheckDefinition(base); err != nil {
-			add(file, "%v", err)
-			continue
+		base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun.String(), Timeout: p.TimeoutDuration(), Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks}
+		if definition != nil {
+			if err := l.Renderer.CheckDefinition(base); err != nil {
+				add(file, "%v", err)
+				continue
+			}
 		}
 		for _, event := range p.Events() {
 			sample := pipelines.SampleFor(event)
@@ -127,6 +138,9 @@ func (l *Linter) Lint(configPath string) Result {
 			}
 			if _, err := p.ConcurrencyFor(sample); err != nil {
 				add(configPath, "pipeline %s, on %s: %v", p.Name, event, err)
+				continue
+			}
+			if definition == nil {
 				continue
 			}
 			obj, err := l.Renderer.Render(spec)
@@ -157,6 +171,9 @@ func (l *Linter) Run(paths []string, render bool, stdout, stderr io.Writer) int 
 		res := l.Lint(configPath)
 		for _, p := range res.Problems {
 			fmt.Fprintln(stderr, p.String())
+		}
+		for _, n := range res.Notes {
+			fmt.Fprintf(stderr, "%s: note: %s\n", configPath, n)
 		}
 		problems += len(res.Problems)
 		if render {

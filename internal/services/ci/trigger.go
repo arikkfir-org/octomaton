@@ -7,11 +7,12 @@ import (
 
 // Events Octomaton runs pipelines for.
 const (
-	EventPush        = "push"
-	EventPullRequest = "pull_request"
-	EventMergeGroup  = "merge_group"
-	EventComment     = "comment"
-	EventSchedule    = "schedule"
+	EventPush          = "push"
+	EventPullRequest   = "pull_request"
+	EventMergeGroup    = "merge_group"
+	EventComment       = "comment"
+	EventReviewRequest = "review_request"
+	EventSchedule      = "schedule"
 )
 
 // TriggerVersion is the version of the serialized Trigger. Runs and reports store their trigger
@@ -76,6 +77,12 @@ type Comment struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+// ReviewRequest is the review request that started a run.
+type ReviewRequest struct {
+	// Reviewer is the login of the user the review was requested from.
+	Reviewer string `json:"reviewer"`
+}
+
 // Schedule is the schedule slot that started a run.
 type Schedule struct {
 	Cron string `json:"cron"`
@@ -86,26 +93,27 @@ type Schedule struct {
 // Trigger is why pipelines are considered: everything needed to evaluate an event for a repository,
 // or to evaluate it again. Every run and report stores it.
 type Trigger struct {
-	Version        int          `json:"v"`
-	Event          string       `json:"event"`
-	Action         string       `json:"action,omitempty"`
-	DeliveryID     string       `json:"deliveryID,omitempty"`
-	InstallationID int64        `json:"installationID"`
-	Repository     Repository   `json:"repository"`
-	Revision       string       `json:"revision"`
-	Ref            string       `json:"ref,omitempty"`
-	Branch         string       `json:"branch,omitempty"`
-	Tag            string       `json:"tag,omitempty"`
-	Sender         string       `json:"sender,omitempty"`
-	Pipeline       string       `json:"pipeline,omitempty"`
-	DisplayName    string       `json:"displayName,omitempty"` // the pipeline's displayName, when set: its reports' name
-	Push           *Push        `json:"push,omitempty"`
-	PullRequest    *PullRequest `json:"pullRequest,omitempty"`
-	MergeGroup     *MergeGroup  `json:"mergeGroup,omitempty"`
-	Comment        *Comment     `json:"comment,omitempty"`
-	Schedule       *Schedule    `json:"schedule,omitempty"`
+	Version        int            `json:"v"`
+	Event          string         `json:"event"`
+	Action         string         `json:"action,omitempty"`
+	DeliveryID     string         `json:"deliveryID,omitempty"`
+	InstallationID int64          `json:"installationID"`
+	Repository     Repository     `json:"repository"`
+	Revision       string         `json:"revision"`
+	Ref            string         `json:"ref,omitempty"`
+	Branch         string         `json:"branch,omitempty"`
+	Tag            string         `json:"tag,omitempty"`
+	Sender         string         `json:"sender,omitempty"`
+	Pipeline       string         `json:"pipeline,omitempty"`
+	DisplayName    string         `json:"displayName,omitempty"` // the pipeline's displayName, when set: its reports' name
+	Push           *Push          `json:"push,omitempty"`
+	PullRequest    *PullRequest   `json:"pullRequest,omitempty"`
+	MergeGroup     *MergeGroup    `json:"mergeGroup,omitempty"`
+	Comment        *Comment       `json:"comment,omitempty"`
+	ReviewRequest  *ReviewRequest `json:"reviewRequest,omitempty"`
+	Schedule       *Schedule      `json:"schedule,omitempty"`
 	// ConfigRef is the ref .octomaton.yaml and pipeline definitions are read at: the default branch
-	// for comment commands, the revision otherwise.
+	// for comment commands and review requests, the revision otherwise.
 	ConfigRef string `json:"configRef,omitempty"`
 	RerunBy   string `json:"rerunBy,omitempty"`
 }
@@ -154,6 +162,8 @@ func (t Trigger) Describe() string {
 	switch {
 	case t.Comment != nil && t.PullRequest != nil:
 		fmt.Fprintf(&b, "`%s` on pull request #%d", t.Comment.Command, t.PullRequest.Number)
+	case t.ReviewRequest != nil && t.PullRequest != nil:
+		fmt.Fprintf(&b, "Review requested from @%s on pull request #%d", t.ReviewRequest.Reviewer, t.PullRequest.Number)
 	case t.Schedule != nil:
 		fmt.Fprintf(&b, "Schedule `%s` (slot %s) on `%s`", t.Schedule.Cron, t.Schedule.Slot, t.Branch)
 	case t.PullRequest != nil:

@@ -33,9 +33,10 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 	refusal := func(format string, args ...any) *ci.Refusal {
 		return &ci.Refusal{Title: "Could not start the pipeline", Reason: fmt.Sprintf(format, args...)}
 	}
-	data, err := gh.ReadFile(ctx, t.Repository, p.PipelineRun, t.ConfigAt())
+	repo, ref, where := definitionAt(t, p.PipelineRun)
+	data, err := gh.ReadFile(ctx, repo, p.PipelineRun.Path, ref)
 	if errors.Is(err, ci.ErrNotFound) {
-		return ci.RunSpec{}, refusal("The pipelineRun file `%s` does not exist at `%s`.", p.PipelineRun, ci.ShortSHA(t.ConfigAt()))
+		return ci.RunSpec{}, refusal("The pipelineRun file `%s` does not exist at %s.", p.PipelineRun, where)
 	}
 	if err != nil {
 		return ci.RunSpec{}, refusal("Could not read the pipelineRun file `%s`: %v", p.PipelineRun, err)
@@ -50,8 +51,8 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		return ci.RunSpec{}, refusal("Could not render the concurrency group of pipeline `%s`: %v", p.Name, err)
 	}
 	spec := ci.RunSpec{
-		Trigger: t, Definition: data, Path: p.PipelineRun, Params: params, Timeout: p.TimeoutDuration(),
-		Token: p.Token(), TaskReports: p.TaskChecks, Concurrency: conc,
+		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
+		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, Concurrency: conc,
 	}
 	if err := s.Runner.Check(ctx, spec); err != nil {
 		var r *ci.Refusal
@@ -145,17 +146,21 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 }
 
 // sameRun reports whether a run is the one a start for t would create: the run of the same comment
-// command or schedule slot, or else of the same head (at the same commit, as the query selects).
+// command, review request delivery or schedule slot, or else of the same head (at the same commit, as
+// the query selects).
 func sameRun(t ci.Trigger) func(ci.Run) bool {
 	return func(r ci.Run) bool {
 		o := r.Trigger
 		switch {
 		case t.Comment != nil:
 			return o.Comment != nil && o.Comment.ID == t.Comment.ID
+		case t.ReviewRequest != nil:
+			// Each request is its own run, even at the same commit; only its redeliveries find it.
+			return o.ReviewRequest != nil && o.DeliveryID == t.DeliveryID
 		case t.Schedule != nil:
 			return o.Schedule != nil && o.Schedule.Slot == t.Schedule.Slot
 		default:
-			return o.Comment == nil && o.Schedule == nil && o.Head() == t.Head()
+			return o.Comment == nil && o.ReviewRequest == nil && o.Schedule == nil && o.Head() == t.Head()
 		}
 	}
 }
@@ -284,4 +289,15 @@ func (s *Service) abort(ctx context.Context, gh ci.Installation, run ci.Run, rep
 	if err := s.Runner.Record(ctx, run.ID, ci.Record{Reported: new(ci.ReportedCompleted), Done: true}); err != nil {
 		log.ErrorContext(ctx, "Could not let the run go", "error", err)
 	}
+}
+
+// definitionAt locates a pipeline's definition for t: in the trigger's repository where its
+// configuration was read, or in another repository of the same owner at its default branch. where
+// describes the location for messages.
+func definitionAt(t ci.Trigger, ref pipelines.PipelineRunRef) (repo ci.Repository, at, where string) {
+	if ref.Repository == "" {
+		return t.Repository, t.ConfigAt(), "`" + ci.ShortSHA(t.ConfigAt()) + "`"
+	}
+	repo = ci.Repository{Owner: t.Repository.Owner, Name: ref.Repository, FullName: t.Repository.Owner + "/" + ref.Repository}
+	return repo, "", "the default branch of `" + repo.FullName + "`"
 }

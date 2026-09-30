@@ -7,8 +7,8 @@ type Event interface {
 	event()
 }
 
-// TriggerEvent is a push, a pull request event or a merge group ready for checks: it runs the
-// pipelines it matches.
+// TriggerEvent is a push, a pull request event, a review request or a merge group ready for checks:
+// it runs the pipelines it matches.
 type TriggerEvent struct {
 	Trigger Trigger
 	// Draft is set for events of draft pull requests.

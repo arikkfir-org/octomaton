@@ -257,15 +257,67 @@ spec:
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Secrets = %v, want %v", got, want)
 	}
-	if err := checkSecrets(pr, "run-github-token"); err == nil || !strings.Contains(err.Error(), "env-secret") {
-		t.Fatalf("CheckSecrets = %v, want a refusal", err)
+	all := []string{"env-secret", "envfrom-secret", "projected-secret", "registry-creds"}
+	tokenOnly, _ := parsePipelineRun([]byte("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec:\n  workspaces: [{name: t, secret: {secretName: run-github-token}}]\n"))
+	tests := []struct {
+		name     string
+		pr       *unstructured.Unstructured
+		token    string
+		declared []string
+		refused  string // a substring of the refusal; empty when allowed
+	}{
+		{"undeclared Secrets", pr, "run-github-token", nil, `Secret "env-secret"`},
+		{"all declared", pr, "run-github-token", all, ""},
+		{"one left undeclared", pr, "run-github-token", all[1:], `Secret "env-secret"`},
+		{"own token only", tokenOnly, "run-github-token", nil, ""},
+		{"no token, nothing declared", tokenOnly, "", nil, "may mount no Secrets"},
+		{"no token, another declared", tokenOnly, "", []string{"other"}, `may mount only "other"`},
+		{"token and declared listed", pr, "run-github-token", []string{"env-secret"}, `only "run-github-token", "env-secret"`},
 	}
-	clean, _ := parsePipelineRun([]byte("apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec:\n  workspaces: [{name: t, secret: {secretName: run-github-token}}]\n"))
-	if err := checkSecrets(clean, "run-github-token"); err != nil {
-		t.Fatalf("the run's own token Secret is allowed: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkSecrets(tt.pr, tt.token, tt.declared)
+			switch {
+			case tt.refused == "" && err != nil:
+				t.Fatalf("CheckSecrets = %v, want no refusal", err)
+			case tt.refused != "" && (err == nil || !strings.Contains(err.Error(), tt.refused)):
+				t.Fatalf("CheckSecrets = %v, want a refusal containing %q", err, tt.refused)
+			}
+		})
 	}
-	if err := checkSecrets(clean, ""); err == nil || !strings.Contains(err.Error(), "may not mount Secrets") {
-		t.Fatalf("without a token, no Secret is allowed: %v", err)
+}
+
+func TestRemoteRefs(t *testing.T) {
+	const head = "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata:\n  labels: {bundle: x, resolver: y}\nspec:\n"
+	tests := []struct {
+		name  string
+		spec  string
+		found string // the path in the refusal; empty when the run is self-contained
+	}{
+		{"inline pipeline", "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec: {steps: [{name: s, image: busybox}]}\n", ""},
+		{"pipelineRef by name", "  pipelineRef: {name: shared}\n", "spec.pipelineRef"},
+		{"pipelineRef resolver", "  pipelineRef: {resolver: git, params: [{name: url, value: u}]}\n", "spec.pipelineRef"},
+		{"taskRef", "  pipelineSpec:\n    tasks:\n      - name: t\n        taskRef: {name: shared}\n", "spec.pipelineSpec.tasks[0].taskRef"},
+		{"finally taskRef", "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, image: b}]}}]\n    finally:\n      - name: f\n        taskRef: {name: shared}\n", "spec.pipelineSpec.finally[0].taskRef"},
+		{"step ref", "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec:\n          steps:\n            - name: s\n              ref: {name: action}\n", "spec.pipelineSpec.tasks[0].taskSpec.steps[0].ref"},
+		{"bundle", "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec: {steps: [{name: s, image: b}]}\n        bundle: registry/b\n", "spec.pipelineSpec.tasks[0].bundle"},
+		{"param keys are data", "  params: [{name: p, value: {resolver: x, taskRef: y}}]\n  pipelineSpec:\n    tasks: [{name: t, params: [{name: q, value: {bundle: z}}], taskSpec: {steps: [{name: s, image: b}]}}]\n", ""},
+		{"a ref outside steps", "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, image: b}], results: [{name: ref}]}}]\n", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pr, err := parsePipelineRun([]byte(head + tt.spec))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = checkRemoteRefs(pr.Object)
+			switch {
+			case tt.found == "" && err != nil:
+				t.Fatalf("CheckRemoteRefs = %v, want none", err)
+			case tt.found != "" && (err == nil || !strings.Contains(err.Error(), "through "+tt.found+";")):
+				t.Fatalf("CheckRemoteRefs = %v, want a refusal naming %s", err, tt.found)
+			}
+		})
 	}
 }
 

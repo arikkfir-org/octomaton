@@ -25,6 +25,9 @@ spec:
       - name: source
     tasks:
       - name: release
+        # CI nodes are Spot VMs, and a preempted node kills the build. Argo CD runs the image of every commit on main,
+        # so try again: pushing the same tags twice is harmless.
+        retries: 2
         params:
           - name: repo-url
             value: $(params.repo-url)

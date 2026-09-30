@@ -10,6 +10,16 @@ metadata:
 spec:
   taskRunTemplate:
     serviceAccountName: pipeline
+  # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
+  # ko's build peaked at 2.5Gi and 3.7 cores.
+  taskRunSpecs:
+    - pipelineTaskName: release
+      computeResources:
+        requests:
+          cpu: "3"
+          memory: 3Gi
+        limits:
+          memory: 4Gi
   workspaces:
     - name: source
       emptyDir: {}

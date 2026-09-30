@@ -4,6 +4,7 @@ pipelines:
   # Lint, vet, test and build every pull request into main and every merge queue group, and validate the hub's
   # deployment (deploy/).
   - name: ci
+    displayName: Continuous Integration
     pipelineRun: .tekton/ci.yaml
     on:
       pull_request:

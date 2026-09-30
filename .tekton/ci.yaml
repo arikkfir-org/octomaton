@@ -8,6 +8,16 @@ metadata:
 spec:
   taskRunTemplate:
     serviceAccountName: pipeline
+  # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
+  # Lint, vet, race tests and build peaked at 2.1Gi and 3.6 cores: a run gets a 4-vCPU CI node to itself.
+  taskRunSpecs:
+    - pipelineTaskName: ci
+      computeResources:
+        requests:
+          cpu: "3"
+          memory: 3Gi
+        limits:
+          memory: 4Gi
   workspaces:
     - name: source
       emptyDir: {}

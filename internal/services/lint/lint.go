@@ -103,55 +103,70 @@ func (l *Linter) Lint(configPath string) Result {
 	}
 	root := filepath.Dir(configPath)
 	for i := range cfg.Pipelines {
-		p := &cfg.Pipelines[i]
-		// A definition in another repository is read from there at run time; only its templates are
-		// checked here.
-		var definition []byte
-		file := configPath
-		if p.PipelineRun.Repository != "" {
-			res.Notes = append(res.Notes, fmt.Sprintf("pipeline %s: pipelineRun %s is in another repository, so its runs are not rendered", p.Name, p.PipelineRun))
-		} else {
-			file = filepath.Join(root, filepath.FromSlash(p.PipelineRun.Path))
-			if definition, err = os.ReadFile(file); err != nil {
-				add(configPath, "pipeline %s: pipelineRun: %v", p.Name, err)
-				continue
-			}
-		}
-		base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun.String(), Timeout: p.TimeoutDuration(), Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks}
-		if definition != nil {
-			if err := l.Renderer.CheckDefinition(base); err != nil {
-				add(file, "%v", err)
-				continue
-			}
-		}
-		for _, event := range p.Events() {
-			sample := pipelines.SampleFor(event)
-			sample.Pipeline = p.Name
-			spec := base
-			spec.Trigger = ci.Trigger{
-				Event: event, Pipeline: p.Name, Revision: sample.Revision,
-				Repository: ci.Repository{Owner: sample.Repository.Owner, Name: sample.Repository.Name, FullName: sample.Repository.FullName},
-			}
-			if spec.Params, err = p.RenderParams(sample); err != nil {
-				add(configPath, "pipeline %s, on %s: %v", p.Name, event, err)
-				continue
-			}
-			if _, err := p.ConcurrencyFor(sample); err != nil {
-				add(configPath, "pipeline %s, on %s: %v", p.Name, event, err)
-				continue
-			}
-			if definition == nil {
-				continue
-			}
-			obj, err := l.Renderer.Render(spec)
-			if err != nil {
-				add(file, "%v", err)
-				continue
-			}
-			res.Rendered = append(res.Rendered, Rendered{Pipeline: p.Name, Event: event, Object: obj})
+		l.lintPipeline(&res, root, "pipeline", &cfg.Pipelines[i])
+	}
+	if cfg.Organization != nil {
+		// Only the owner's .github repository may declare them; Octomaton reports them anywhere else.
+		for i := range cfg.Organization.Pipelines {
+			l.lintPipeline(&res, root, "organization pipeline", &cfg.Organization.Pipelines[i])
 		}
 	}
 	return res
+}
+
+// lintPipeline checks one pipeline, named kind in messages, and renders its runs.
+func (l *Linter) lintPipeline(res *Result, root, kind string, p *pipelines.Pipeline) {
+	add := func(file, format string, args ...any) {
+		res.Problems = append(res.Problems, Problem{File: file, Message: fmt.Sprintf(format, args...)})
+	}
+	// A definition in another repository is read from there at run time; only its templates are
+	// checked here.
+	var definition []byte
+	file := res.Config
+	if p.PipelineRun.Repository != "" {
+		res.Notes = append(res.Notes, fmt.Sprintf("%s %s: pipelineRun %s is in another repository, so its runs are not rendered", kind, p.Name, p.PipelineRun))
+	} else {
+		file = filepath.Join(root, filepath.FromSlash(p.PipelineRun.Path))
+		var err error
+		if definition, err = os.ReadFile(file); err != nil {
+			add(res.Config, "%s %s: pipelineRun: %v", kind, p.Name, err)
+			return
+		}
+	}
+	base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun.String(), Timeout: p.TimeoutDuration(), Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks}
+	if definition != nil {
+		if err := l.Renderer.CheckDefinition(base); err != nil {
+			add(file, "%v", err)
+			return
+		}
+	}
+	for _, event := range p.Events() {
+		sample := pipelines.SampleFor(event)
+		sample.Pipeline = p.Name
+		spec := base
+		spec.Trigger = ci.Trigger{
+			Event: event, Pipeline: p.Name, Revision: sample.Revision,
+			Repository: ci.Repository{Owner: sample.Repository.Owner, Name: sample.Repository.Name, FullName: sample.Repository.FullName},
+		}
+		var err error
+		if spec.Params, err = p.RenderParams(sample); err != nil {
+			add(res.Config, "%s %s, on %s: %v", kind, p.Name, event, err)
+			continue
+		}
+		if _, err := p.ConcurrencyFor(sample); err != nil {
+			add(res.Config, "%s %s, on %s: %v", kind, p.Name, event, err)
+			continue
+		}
+		if definition == nil {
+			continue
+		}
+		obj, err := l.Renderer.Render(spec)
+		if err != nil {
+			add(file, "%v", err)
+			continue
+		}
+		res.Rendered = append(res.Rendered, Rendered{Pipeline: p.Name, Event: event, Object: obj})
+	}
 }
 
 // Run lints each path and prints the problems to stderr, or, with render, the rendered runs to

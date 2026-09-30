@@ -1,12 +1,14 @@
 # Octomaton
 
 Octomaton replaces GitHub Actions for the `arikkfir-org` organization. A GitHub App sends every webhook to
-Octomaton (running in GKE); Octomaton reads the repository's root `.octomaton.yaml`, creates the Tekton
-`PipelineRun`s it maps the event to, and reports each run back to GitHub as a check run.
+Octomaton (running in GKE); Octomaton reads the repository's root `.octomaton.yaml` and the organization pipelines its
+owner declares in `.github`, creates the Tekton `PipelineRun`s it maps the event to, and reports each run back to
+GitHub as a check run.
 
 Octomaton is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
-only repository files it reads are `.octomaton.yaml` and the PipelineRun files that file points to. PipelineRun files
-are plain Tekton YAML; Octomaton injects event context only through `params` and an optional GitHub token workspace.
+only repository files it reads are `.octomaton.yaml` (the repository's own, and the one in its owner's `.github`
+repository) and the PipelineRun files they point to. PipelineRun files are plain Tekton YAML; Octomaton injects event
+context only through `params` and an optional GitHub token workspace.
 
 ## How it works
 
@@ -18,7 +20,7 @@ sequenceDiagram
   participant K8s as Kubernetes / Tekton
   GH->>SB: webhook (push, pull_request, merge_group, issue_comment, check_run, check_suite)
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
-  SB->>GH: read .octomaton.yaml (and the PipelineRun file)
+  SB->>GH: read .octomaton.yaml and .github's organization pipelines (and the PipelineRun file)
   SB->>SB: match events, branches, tags and paths, then apply trust rules
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
@@ -45,7 +47,8 @@ sequenceDiagram
 ## Repository configuration (`.octomaton.yaml`)
 
 The only file Octomaton reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
-no quoting, and strictly: unknown fields, duplicate keys and type mismatches are errors.
+no quoting, and strictly: unknown fields, duplicate keys and type mismatches are errors. The owner's `.github`
+repository's copy may also declare organization pipelines, which every repository of the owner runs (below).
 
 ```yaml
 apiVersion: octomaton.dev/v1
@@ -92,6 +95,8 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+organization:                          # only in the owner's .github repository: pipelines for every repository
+  pipelines: []                        # same fields as pipelines; read at .github's default branch
 ```
 
 ### Triggers
@@ -117,12 +122,23 @@ at the commit under test. Comment commands, review requests and schedules read t
 commands and review requests still run against the pull request's head commit, so a pull request cannot change what
 they run). A `pipelineRun` in another repository is always read at that repository's default branch.
 
+**Organization pipelines:** the owner's `.github` repository may declare `organization.pipelines`, with the same fields
+as `pipelines`. Octomaton adds them to the pipelines of every repository of that owner, `.github` included, and always
+reads them at `.github`'s default branch, even for `.github`'s own pull requests. A plain `pipelineRun` path in them
+names a file of `.github`. Their runs belong to the repository: its namespace, checks, template context and token. A
+repository pipeline with the name or check name of an organization pipeline is a configuration error of that
+repository, so no repository can replace one. Organization pipelines can't use `schedule`, and `secrets` follows the
+same rule as for any pipeline. `organization` in any other repository is a configuration error. Without the file or the
+section in `.github`, there are no organization pipelines. A repository without its own `.octomaton.yaml` still runs
+them, and an unreadable or invalid `.github` configuration stops every pipeline of the repository, reported on the
+`octomaton` check.
+
 ### Pipeline settings
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifies the pipeline: in run names, labels, concurrency groups and `{{ .Pipeline }}`. Unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
-| `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names; `octomaton` is reserved. |
+| `name` | Identifies the pipeline: in run names, labels, concurrency groups and `{{ .Pipeline }}`. Unique, organization pipelines included; `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
+| `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun must be self-contained: remote references are refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
@@ -209,6 +225,23 @@ pipelines:
     secrets: [model-api-key]                 # every trigger reads the default branch, so it may mount a Secret
 ```
 
+In the owner's `.github` repository, a pipeline every repository runs:
+
+```yaml
+apiVersion: octomaton.dev/v1
+pipelines: []
+organization:
+  pipelines:
+    - name: review                           # a review requested from review-bot, in any repository
+      pipelineRun: {repository: shared-pipelines, path: review/pipelinerun.yaml}
+      on:
+        review_request: {reviewers: [review-bot]}
+      params:
+        repository: "{{ .Repository.FullName }}"
+        number: "{{ .PullRequest.Number }}"
+      secrets: [model-api-key]               # a Secret of the same name in each repository's namespace
+```
+
 Validate a configuration and the PipelineRun files it references with `octomaton-lint [-render] PATH...` (PATH is
 the file or its directory); it renders every param for every triggering event with placeholder values, so a template
 that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
@@ -247,6 +280,9 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   `taskSpec` per task.
 - A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
   must come from the repository's own branches.
+- Organization pipelines are read at `.github`'s default branch, so no pull request, not even one on `.github`, changes
+  what they run, and no repository can replace one with a pipeline of the same name or check name. Their runs get the
+  repository's namespace and token, like its own.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service account.
 

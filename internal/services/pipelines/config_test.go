@@ -56,6 +56,8 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+organization:                          # only in the owner's .github repository: pipelines for every repository
+  pipelines: []                        # same fields as pipelines; read at .github's default branch
 `
 
 // checkPermissions stands in for the code host's check of githubToken permissions.
@@ -105,6 +107,9 @@ func TestParseReferenceExample(t *testing.T) {
 	if got := p.Events(); strings.Join(got, ",") != "push,pull_request,merge_group,comment,review_request,schedule" {
 		t.Fatalf("Events() = %v", got)
 	}
+	if cfg.Organization == nil || len(cfg.Organization.Pipelines) != 0 {
+		t.Fatalf("organization = %+v", cfg.Organization)
+	}
 }
 
 // TestUnquotedOnKey proves .octomaton.yaml is parsed as YAML 1.2: with YAML 1.1
@@ -127,19 +132,30 @@ pipelines:
 }
 
 func TestNullTriggersAreEnabled(t *testing.T) {
-	cfg := mustParse(t, `
-apiVersion: octomaton.dev/v1
-pipelines:
+	const pipeline = `
   - name: ci
     pipelineRun: ci.yaml
     on:
       pull_request:
       merge_group:
       push: ~
-`)
-	on := cfg.Pipelines[0].On
-	if on.PullRequest == nil || on.MergeGroup == nil || on.Push == nil {
-		t.Fatalf("null triggers must be enabled: %+v", on)
+`
+	tests := []struct {
+		name string
+		yaml string
+		on   func(*Config) Triggers
+	}{
+		{name: "in pipelines", yaml: "pipelines:" + pipeline, on: func(c *Config) Triggers { return c.Pipelines[0].On }},
+		{name: "in organization pipelines", yaml: "organization:\n  pipelines:" + strings.ReplaceAll(pipeline, "\n  ", "\n    "),
+			on: func(c *Config) Triggers { return c.Organization.Pipelines[0].On }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			on := tt.on(mustParse(t, "apiVersion: octomaton.dev/v1\n"+tt.yaml))
+			if on.PullRequest == nil || on.MergeGroup == nil || on.Push == nil {
+				t.Fatalf("null triggers must be enabled: %+v", on)
+			}
+		})
 	}
 }
 
@@ -217,6 +233,13 @@ func TestParseProblems(t *testing.T) {
 		{name: "secret name with capitals", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [API_KEY]}\n", want: `secrets[0]: "API_KEY" is not a Secret name`},
 		{name: "secret name too long", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [" + strings.Repeat("a", 254) + "]}\n", want: "secrets[0]: " + `"` + strings.Repeat("a", 254) + `" is not a Secret name`},
 		{name: "duplicate secret", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [api-key, api-key]}\n", want: `secrets[1]: duplicate Secret "api-key"`},
+		{name: "unknown organization key", yaml: head + "organization: {pipeline: []}\n", want: "field pipeline not found in organization"},
+		{name: "invalid organization pipeline", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml}\n", want: "organization.pipelines[0] (lint): on: at least one of"},
+		{name: "unknown organization pipeline key", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {push: {}}, retries: 3}\n", want: "field retries not found in pipeline"},
+		{name: "organization pipeline on a schedule", yaml: head + "organization:\n  pipelines:\n    - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}}\n", want: "organization.pipelines[0] (nightly): organization pipelines can't use on.schedule"},
+		{name: "organization pipeline with secrets on pull requests", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {pull_request: {}}, secrets: [api-key]}\n", want: "organization.pipelines[0] (lint): secrets: only pipelines"},
+		{name: "organization pipeline named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (ci): duplicate pipeline name "ci"`},
+		{name: "organization check named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: lint, displayName: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (lint): check name "ci" is taken by pipeline "ci"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -408,5 +431,92 @@ pipelines:
 		if err != nil || got != tt.want {
 			t.Errorf("%s on %s: ConcurrencyFor = %+v, %v; want %+v", tt.pipeline, tt.event, got, err, tt.want)
 		}
+	}
+}
+
+func TestForRepository(t *testing.T) {
+	const own = "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: .tekton/ci.yaml, on: {push: {}}}\n"
+	// org is .github's configuration: its own pipeline publish, and two organization pipelines.
+	const org = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - {name: publish, pipelineRun: .tekton/publish.yaml, on: {push: {}}}
+organization:
+  pipelines:
+    - {name: review, displayName: AI Review, pipelineRun: {repository: tooling, path: reviewer/pipelinerun.yaml}, on: {review_request: {reviewers: [octo-reviewer]}}}
+    - {name: lint, pipelineRun: .tekton/lint.yaml, on: {pull_request: {}}}
+`
+	tests := []struct {
+		name       string
+		repository string
+		own, org   string // "" is no file
+		want       []string
+		wantNil    bool
+		wantErr    string
+	}{
+		{name: "neither file", repository: "demo", wantNil: true},
+		{name: "no organization section", repository: "demo", org: own, wantNil: true},
+		{name: "no organization pipelines", repository: "demo", org: "apiVersion: octomaton.dev/v1\norganization: {pipelines: []}\n", wantNil: true},
+		{name: "own pipelines only", repository: "demo", own: own, want: []string{"ci .tekton/ci.yaml"}},
+		{name: "an empty configuration", repository: "demo", own: "apiVersion: octomaton.dev/v1\npipelines: []\n", want: []string{}},
+		{name: "organization pipelines only", repository: "demo", org: org,
+			want: []string{"review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
+		{name: "own, then organization pipelines", repository: "demo", own: own, org: org,
+			want: []string{"ci .tekton/ci.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
+		{name: "the organization repository", repository: ".github", own: org, org: org,
+			want: []string{"publish .tekton/publish.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
+		{name: "the organization repository runs the organization pipelines of org, not its own", repository: ".github",
+			own: strings.Replace(org, "name: lint", "name: format", 1), org: org,
+			want: []string{"publish .tekton/publish.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
+		{name: "organization pipelines in another repository", repository: "demo", own: org, org: org,
+			wantErr: "organization: only the owner's .github repository declares organization pipelines"},
+		{name: "a pipeline named like an organization pipeline", repository: "demo", org: org,
+			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: lint, pipelineRun: lint.yaml, on: {push: {}}}\n",
+			wantErr: `pipelines[0] (lint): name "lint" is taken by an organization pipeline of .github`},
+		{name: "a check named like an organization pipeline's", repository: "demo", org: org,
+			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ai, displayName: AI Review, pipelineRun: ai.yaml, on: {push: {}}}\n",
+			wantErr: `pipelines[0] (ai): check name "AI Review" is taken by organization pipeline "review" of .github`},
+		{name: "a check named like an organization pipeline", repository: "demo", org: org,
+			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: style, displayName: lint, pipelineRun: style.yaml, on: {push: {}}}\n",
+			wantErr: `pipelines[0] (style): check name "lint" is taken by organization pipeline "lint" of .github`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse := func(doc string) *Config {
+				if doc == "" {
+					return nil
+				}
+				return mustParse(t, doc)
+			}
+			orgCfg := parse(tt.org)
+			cfg, err := ForRepository(tt.repository, parse(tt.own), orgCfg)
+			if tt.wantErr != "" {
+				var ce *Error
+				if !errors.As(err, &ce) || !strings.Contains(err.Error(), tt.wantErr) || cfg != nil {
+					t.Fatalf("ForRepository = %+v, %v; want an error containing %q", cfg, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || (cfg == nil) != tt.wantNil {
+				t.Fatalf("ForRepository = %+v, %v", cfg, err)
+			}
+			if cfg == nil {
+				return
+			}
+			got := []string{}
+			for _, p := range cfg.Pipelines {
+				got = append(got, p.Name+" "+p.PipelineRun.String())
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") || cfg.APIVersion != APIVersion || cfg.Organization != nil {
+				t.Fatalf("pipelines = %q (apiVersion %q, organization %+v), want %q", got, cfg.APIVersion, cfg.Organization, tt.want)
+			}
+			if orgCfg != nil && orgCfg.Organization != nil {
+				for _, p := range orgCfg.Organization.Pipelines {
+					if p.Name == "lint" && p.PipelineRun.Repository != "" {
+						t.Fatalf("ForRepository changed org's pipeline: %+v", p.PipelineRun)
+					}
+				}
+			}
+		})
 	}
 }

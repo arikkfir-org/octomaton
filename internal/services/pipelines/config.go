@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -61,7 +62,19 @@ const maxSecretNameLength = 253
 type Config struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Pipelines  []Pipeline `yaml:"pipelines"`
+	// Organization lists the pipelines every repository of the owner runs. Only the owner's
+	// OrganizationRepository may declare it.
+	Organization *Organization `yaml:"organization"`
 }
+
+// Organization holds an owner's organization pipelines.
+type Organization struct {
+	Pipelines []Pipeline `yaml:"pipelines"`
+}
+
+// OrganizationRepository is the repository whose .octomaton.yaml, at its default branch, declares
+// the organization pipelines of its owner.
+const OrganizationRepository = ".github"
 
 // Pipeline binds events to a PipelineRun file.
 type Pipeline struct {
@@ -252,6 +265,7 @@ func Parse(data []byte, check PermissionCheck) (*Config, error) {
 
 var typeNames = strings.NewReplacer(
 	"in type pipelines.Config", "at the top level",
+	"in type pipelines.Organization", "in organization",
 	"in type pipelines.Pipeline", "in pipeline",
 	"in type pipelines.Triggers", "in on",
 	"in type pipelines.PullRequestTrigger", "in on.pull_request",
@@ -283,19 +297,25 @@ func enableNullTriggers(root *yaml.Node, cfg *Config) {
 	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 {
 		doc = doc.Content[0]
 	}
-	pipelines := mappingValue(doc, "pipelines")
+	enableNull(mappingValue(doc, "pipelines"), cfg.Pipelines)
+	if cfg.Organization != nil {
+		enableNull(mappingValue(mappingValue(doc, "organization"), "pipelines"), cfg.Organization.Pipelines)
+	}
+}
+
+func enableNull(pipelines *yaml.Node, decoded []Pipeline) {
 	if pipelines == nil || pipelines.Kind != yaml.SequenceNode {
 		return
 	}
 	for i, item := range pipelines.Content {
-		if i >= len(cfg.Pipelines) {
+		if i >= len(decoded) {
 			return
 		}
 		on := mappingValue(item, "on")
 		if on == nil || on.Kind != yaml.MappingNode {
 			continue
 		}
-		t := &cfg.Pipelines[i].On
+		t := &decoded[i].On
 		for j := 0; j+1 < len(on.Content); j += 2 {
 			if on.Content[j+1].Tag != "!!null" {
 				continue
@@ -333,30 +353,112 @@ func (c *Config) validate(check PermissionCheck) []string {
 	if c.APIVersion != APIVersion {
 		problems = append(problems, fmt.Sprintf("apiVersion must be %q (got %q)", APIVersion, c.APIVersion))
 	}
-	seen, checks := map[string]bool{}, map[string]string{}
-	for i := range c.Pipelines {
-		p := &c.Pipelines[i]
-		prefix := fmt.Sprintf("pipelines[%d]", i)
-		if p.Name != "" {
-			prefix = fmt.Sprintf("pipelines[%d] (%s)", i, p.Name)
-		}
-		for _, problem := range p.validate(check) {
-			problems = append(problems, prefix+": "+problem)
-		}
-		if p.Name != "" {
-			if seen[p.Name] {
-				problems = append(problems, fmt.Sprintf("%s: duplicate pipeline name %q", prefix, p.Name))
+	// Names and check names are unique across both lists: the owner's .github repository runs both.
+	names := newNames()
+	problems = append(problems, names.validate("pipelines", c.Pipelines, check)...)
+	if c.Organization != nil {
+		problems = append(problems, names.validate("organization.pipelines", c.Organization.Pipelines, check)...)
+		for i, p := range c.Organization.Pipelines {
+			if len(p.On.Schedule) > 0 {
+				problems = append(problems, fmt.Sprintf("%s: organization pipelines can't use on.schedule", label("organization.pipelines", i, p.Name)))
 			}
-			seen[p.Name] = true
-		}
-		if check := p.CheckName(); check != "" {
-			if other, ok := checks[check]; ok && other != p.Name {
-				problems = append(problems, fmt.Sprintf("%s: check name %q is taken by pipeline %q", prefix, check, other))
-			}
-			checks[check] = p.Name
 		}
 	}
 	return problems
+}
+
+// names tracks the pipeline names and check names taken so far.
+type names struct {
+	pipelines map[string]bool
+	checks    map[string]string
+}
+
+func newNames() names { return names{pipelines: map[string]bool{}, checks: map[string]string{}} }
+
+func (n names) validate(list string, ps []Pipeline, check PermissionCheck) []string {
+	var problems []string
+	for i := range ps {
+		p := &ps[i]
+		prefix := label(list, i, p.Name)
+		for _, problem := range p.validate(check) {
+			problems = append(problems, prefix+": "+problem)
+		}
+		problems = append(problems, n.take(prefix, p)...)
+	}
+	return problems
+}
+
+// take claims p's name and check name, and reports those already taken.
+func (n names) take(prefix string, p *Pipeline) []string {
+	var problems []string
+	if p.Name != "" {
+		if n.pipelines[p.Name] {
+			problems = append(problems, fmt.Sprintf("%s: duplicate pipeline name %q", prefix, p.Name))
+		}
+		n.pipelines[p.Name] = true
+	}
+	if check := p.CheckName(); check != "" {
+		if other, ok := n.checks[check]; ok && other != p.Name {
+			problems = append(problems, fmt.Sprintf("%s: check name %q is taken by pipeline %q", prefix, check, other))
+		}
+		n.checks[check] = p.Name
+	}
+	return problems
+}
+
+func label(list string, i int, name string) string {
+	if name == "" {
+		return fmt.Sprintf("%s[%d]", list, i)
+	}
+	return fmt.Sprintf("%s[%d] (%s)", list, i, name)
+}
+
+// ForRepository returns the configuration a repository runs by: own, its .octomaton.yaml (nil
+// without one), with the organization pipelines of org added, the OrganizationRepository's
+// .octomaton.yaml at its default branch (nil without one). It returns nil when own is nil and org
+// declares no organization pipelines. A plain pipelineRun path of an organization pipeline names a
+// file of the OrganizationRepository. The problems it reports are own's: organization pipelines
+// outside the OrganizationRepository, and a pipeline with the name or check name of an
+// organization pipeline, so no repository can replace one.
+func ForRepository(repository string, own, org *Config) (*Config, error) {
+	var shared []Pipeline
+	if org != nil && org.Organization != nil {
+		shared = org.Organization.Pipelines
+	}
+	if own == nil {
+		if len(shared) == 0 {
+			return nil, nil
+		}
+		own = &Config{APIVersion: APIVersion}
+	}
+	if own.Organization != nil && !strings.EqualFold(repository, OrganizationRepository) {
+		return nil, &Error{Problems: []string{fmt.Sprintf("organization: only the owner's %s repository declares organization pipelines", OrganizationRepository)}}
+	}
+	taken := newNames()
+	for i := range shared {
+		taken.take("", &shared[i])
+	}
+	var problems []string
+	for i := range own.Pipelines {
+		p := &own.Pipelines[i]
+		switch {
+		case taken.pipelines[p.Name]:
+			problems = append(problems, fmt.Sprintf("%s: name %q is taken by an organization pipeline of %s", label("pipelines", i, p.Name), p.Name, OrganizationRepository))
+		case taken.checks[p.CheckName()] != "":
+			problems = append(problems, fmt.Sprintf("%s: check name %q is taken by organization pipeline %q of %s", label("pipelines", i, p.Name), p.CheckName(), taken.checks[p.CheckName()], OrganizationRepository))
+		}
+	}
+	if len(problems) > 0 {
+		return nil, &Error{Problems: problems}
+	}
+	merged := &Config{APIVersion: own.APIVersion, Pipelines: slices.Clone(own.Pipelines)}
+	for _, p := range shared {
+		if p.PipelineRun.Repository == "" {
+			p.PipelineRun.Repository = OrganizationRepository
+		}
+		merged.Pipelines = append(merged.Pipelines, p)
+	}
+	return merged, nil
 }
 
 func (p *Pipeline) validate(check PermissionCheck) []string {

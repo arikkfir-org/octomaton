@@ -298,6 +298,6 @@ func definitionAt(t ci.Trigger, ref pipelines.PipelineRunRef) (repo ci.Repositor
 	if ref.Repository == "" {
 		return t.Repository, t.ConfigAt(), "`" + ci.ShortSHA(t.ConfigAt()) + "`"
 	}
-	repo = ci.Repository{Owner: t.Repository.Owner, Name: ref.Repository, FullName: t.Repository.Owner + "/" + ref.Repository}
+	repo = sibling(t.Repository, ref.Repository)
 	return repo, "", "the default branch of `" + repo.FullName + "`"
 }

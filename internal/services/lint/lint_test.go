@@ -269,3 +269,72 @@ func TestRunPrintsNotes(t *testing.T) {
 		t.Fatalf("stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
 }
+
+// orgConfig is a .github configuration: its own pipeline, and organization pipelines defined in it and
+// in another repository.
+const orgConfig = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - {name: publish, pipelineRun: .tekton/publish.yaml, on: {push: {branches: [main]}}}
+organization:
+  pipelines:
+    - name: lint
+      pipelineRun: .tekton/lint.yaml
+      on:
+        pull_request: {branches: [main]}
+      params:
+        revision: "{{ .Revision }}"
+    - name: review
+      pipelineRun: {repository: tooling, path: reviewer/pipelinerun.yaml}
+      on:
+        review_request: {reviewers: [octo-reviewer]}
+      secrets: [api-key]
+`
+
+func TestLintOrganizationPipelines(t *testing.T) {
+	const note = "organization pipeline review: pipelineRun tooling:reviewer/pipelinerun.yaml is in another repository, so its runs are not rendered"
+	both := map[string]string{".tekton/publish.yaml": "kind: PipelineRun\n", ".tekton/lint.yaml": "kind: PipelineRun\n"}
+	tests := []struct {
+		name         string
+		cfg          string
+		files        map[string]string
+		want         []string
+		wantRendered []string
+	}{
+		{name: "rendered after the repository's own", cfg: orgConfig, files: both, wantRendered: []string{"publish on push", "lint on pull_request"}},
+		{name: "a missing definition", cfg: orgConfig, files: map[string]string{".tekton/publish.yaml": "kind: PipelineRun\n"},
+			want: []string{".octomaton.yaml: organization pipeline lint: pipelineRun: open "}, wantRendered: []string{"publish on push"}},
+		{name: "a template that fails for its event", files: both,
+			cfg:          strings.Replace(orgConfig, `revision: "{{ .Revision }}"`, `author: "{{ .Comment.Author }}"`, 1),
+			want:         []string{`.octomaton.yaml: organization pipeline lint, on pull_request: param "author": `},
+			wantRendered: []string{"publish on push"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := repoDir(t, tt.cfg, tt.files)
+			res := (&Linter{Renderer: &renderer{}}).Lint(filepath.Join(dir, ".octomaton.yaml"))
+			var problems []string
+			for _, p := range res.Problems {
+				problems = append(problems, strings.TrimPrefix(p.String(), dir+string(filepath.Separator)))
+			}
+			if len(problems) != len(tt.want) {
+				t.Fatalf("problems = %q, want %q", problems, tt.want)
+			}
+			for i, w := range tt.want {
+				if !strings.HasPrefix(problems[i], w) {
+					t.Fatalf("problem %d = %q, want it to start with %q", i, problems[i], w)
+				}
+			}
+			if !slices.Equal(res.Notes, []string{note}) {
+				t.Fatalf("notes = %q, want %q", res.Notes, note)
+			}
+			var rendered []string
+			for _, rr := range res.Rendered {
+				rendered = append(rendered, rr.Pipeline+" on "+rr.Event)
+			}
+			if !slices.Equal(rendered, tt.wantRendered) {
+				t.Fatalf("rendered = %q, want %q", rendered, tt.wantRendered)
+			}
+		})
+	}
+}

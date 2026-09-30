@@ -150,45 +150,101 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 	log.InfoContext(ctx, "Evaluated event", "action", t.Action, "pipelines", len(cfg.Pipelines), "matched", matched)
 }
 
-// LoadConfig reads .octomaton.yaml at t.ConfigAt(); ok is false when the repository has none or it
-// is unusable. Problems are logged, not reported.
+// LoadConfig reads the pipelines t's repository runs, like Evaluate; ok is false when it has none or
+// a configuration is unusable. Problems are logged, not reported.
 func (s *Service) LoadConfig(ctx context.Context, t ci.Trigger) (*pipelines.Config, bool) {
 	return s.loadConfig(ctx, s.Host.Installation(t.InstallationID), t, false)
 }
 
-// loadConfig reads .octomaton.yaml at t.ConfigAt(). It returns false when there is nothing to do (no
-// file) or the file is unusable, in which case the problem is reported, when report is set, on an
+// loadConfig reads the pipelines t's repository runs: those of its .octomaton.yaml at t.ConfigAt(),
+// and the organization pipelines its owner declares in the OrganizationRepository's .octomaton.yaml
+// at its default branch. It returns false when there is nothing to do (neither declares any) or a
+// configuration is unusable, in which case the problem is reported, when report is set, on an
 // "octomaton" report.
 func (s *Service) loadConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, report bool) (*pipelines.Config, bool) {
-	log := s.logFor(t)
-	data, err := gh.ReadFile(ctx, t.Repository, pipelines.FileName, t.ConfigAt())
-	if errors.Is(err, ci.ErrNotFound) {
-		log.DebugContext(ctx, "Repository has no "+pipelines.FileName)
+	own, org := ownConfig(t), organizationConfig(t)
+	ownCfg, ok := s.readConfig(ctx, gh, t, own, report)
+	if !ok {
 		return nil, false
 	}
-	if err != nil {
-		log.ErrorContext(ctx, "Could not read "+pipelines.FileName, "error", err)
-		if report {
-			s.reportConfigProblem(ctx, gh, t, "Could not read "+pipelines.FileName,
-				fmt.Sprintf("Octomaton could not read `%s` at `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.",
-					pipelines.FileName, ci.ShortSHA(t.ConfigAt()), err))
-		}
+	orgCfg, ok := s.readConfig(ctx, gh, t, org, report)
+	if !ok {
 		return nil, false
 	}
-	cfg, err := pipelines.Parse(data, s.Host.CheckPermissions)
+	cfg, err := pipelines.ForRepository(t.Repository.Name, ownCfg, orgCfg)
 	if err != nil {
-		log.WarnContext(ctx, "Invalid "+pipelines.FileName, "error", err)
-		if report {
-			s.reportConfigProblem(ctx, gh, t, "Invalid "+pipelines.FileName, describeConfigError(t, err))
-		}
+		s.configInvalid(ctx, gh, t, own, err, report)
+		return nil, false
+	}
+	if cfg == nil {
+		s.logFor(t).DebugContext(ctx, "Repository has no "+pipelines.FileName+" and its owner no organization pipelines")
 		return nil, false
 	}
 	return cfg, true
 }
 
-func describeConfigError(t ci.Trigger, err error) string {
+// configFile is a configuration read for a trigger: its repository's own, or its owner's
+// organization pipelines.
+type configFile struct {
+	repo ci.Repository
+	// ref is where the file is read; empty is the default branch.
+	ref string
+	// what names the configuration in titles and logs, and where locates it in summaries.
+	what, where string
+}
+
+func ownConfig(t ci.Trigger) configFile {
+	return configFile{
+		repo: t.Repository, ref: t.ConfigAt(), what: pipelines.FileName,
+		where: fmt.Sprintf("`%s` at `%s`", pipelines.FileName, ci.ShortSHA(t.ConfigAt())),
+	}
+}
+
+func organizationConfig(t ci.Trigger) configFile {
+	repo := sibling(t.Repository, pipelines.OrganizationRepository)
+	return configFile{
+		repo: repo, what: "organization pipelines",
+		where: fmt.Sprintf("`%s` at the default branch of `%s` (which declares the organization pipelines)", pipelines.FileName, repo.FullName),
+	}
+}
+
+// sibling is the repository called name of repo's owner.
+func sibling(repo ci.Repository, name string) ci.Repository {
+	return ci.Repository{Owner: repo.Owner, Name: name, FullName: repo.Owner + "/" + name}
+}
+
+// readConfig reads and parses f; a missing file is a nil configuration.
+func (s *Service) readConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, report bool) (*pipelines.Config, bool) {
+	data, err := gh.ReadFile(ctx, f.repo, pipelines.FileName, f.ref)
+	if errors.Is(err, ci.ErrNotFound) {
+		return nil, true
+	}
+	if err != nil {
+		s.logFor(t).ErrorContext(ctx, "Could not read "+f.what, "configRepository", f.repo.FullName, "error", err)
+		if report {
+			s.reportConfigProblem(ctx, gh, t, "Could not read "+f.what,
+				fmt.Sprintf("Octomaton could not read %s:\n\n```\n%v\n```\n\nRe-run this check to try again.", f.where, err))
+		}
+		return nil, false
+	}
+	cfg, err := pipelines.Parse(data, s.Host.CheckPermissions)
+	if err != nil {
+		s.configInvalid(ctx, gh, t, f, err, report)
+		return nil, false
+	}
+	return cfg, true
+}
+
+func (s *Service) configInvalid(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, err error, report bool) {
+	s.logFor(t).WarnContext(ctx, "Invalid "+f.what, "configRepository", f.repo.FullName, "error", err)
+	if report {
+		s.reportConfigProblem(ctx, gh, t, "Invalid "+f.what, describeConfigError(f.where, err))
+	}
+}
+
+func describeConfigError(where string, err error) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "`%s` at `%s` is invalid, so no pipeline was started:\n\n", pipelines.FileName, ci.ShortSHA(t.ConfigAt()))
+	fmt.Fprintf(&b, "%s is invalid, so no pipeline was started:\n\n", where)
 	var ce *pipelines.Error
 	if errors.As(err, &ce) {
 		for _, p := range ce.Problems {

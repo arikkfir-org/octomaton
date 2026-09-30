@@ -27,6 +27,9 @@ type ScheduleNotifier interface {
 type Service struct {
 	Host   ci.CodeHost
 	Runner ci.Runner
+	// OrganizationRepository names the repository, in each owner, whose .octomaton.yaml declares
+	// organization pipelines; empty disables them.
+	OrganizationRepository string
 	// Schedules, when set, is told about pushes to default branches.
 	Schedules ScheduleNotifier
 	Logger    *slog.Logger
@@ -157,21 +160,23 @@ func (s *Service) LoadConfig(ctx context.Context, t ci.Trigger) (*pipelines.Conf
 }
 
 // loadConfig reads the pipelines t's repository runs: those of its .octomaton.yaml at t.ConfigAt(),
-// and the organization pipelines its owner declares in the OrganizationRepository's .octomaton.yaml
-// at its default branch. It returns false when there is nothing to do (neither declares any) or a
-// configuration is unusable, in which case the problem is reported, when report is set, on an
-// "octomaton" report.
+// and, when an OrganizationRepository is set, the organization pipelines its owner declares in that
+// repository's .octomaton.yaml at its default branch. It returns false when there is nothing to do
+// (neither declares any) or a configuration is unusable, in which case the problem is reported, when
+// report is set, on an "octomaton" report.
 func (s *Service) loadConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, report bool) (*pipelines.Config, bool) {
-	own, org := ownConfig(t), organizationConfig(t)
+	own := ownConfig(t)
 	ownCfg, ok := s.readConfig(ctx, gh, t, own, report)
 	if !ok {
 		return nil, false
 	}
-	orgCfg, ok := s.readConfig(ctx, gh, t, org, report)
-	if !ok {
-		return nil, false
+	var orgCfg *pipelines.Config
+	if s.OrganizationRepository != "" {
+		if orgCfg, ok = s.readConfig(ctx, gh, t, organizationConfig(t, s.OrganizationRepository), report); !ok {
+			return nil, false
+		}
 	}
-	cfg, err := pipelines.ForRepository(t.Repository.Name, ownCfg, orgCfg)
+	cfg, err := pipelines.ForRepository(t.Repository.Name, s.OrganizationRepository, ownCfg, orgCfg)
 	if err != nil {
 		s.configInvalid(ctx, gh, t, own, err, report)
 		return nil, false
@@ -200,8 +205,8 @@ func ownConfig(t ci.Trigger) configFile {
 	}
 }
 
-func organizationConfig(t ci.Trigger) configFile {
-	repo := sibling(t.Repository, pipelines.OrganizationRepository)
+func organizationConfig(t ci.Trigger, name string) configFile {
+	repo := sibling(t.Repository, name)
 	return configFile{
 		repo: repo, what: "organization pipelines",
 		where: fmt.Sprintf("`%s` at the default branch of `%s` (which declares the organization pipelines)", pipelines.FileName, repo.FullName),

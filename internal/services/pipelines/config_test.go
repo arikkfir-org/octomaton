@@ -56,8 +56,8 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
-organization:                          # only in the owner's .github repository: pipelines for every repository
-  pipelines: []                        # same fields as pipelines; read at .github's default branch
+organization:                          # only in the organization repository: pipelines for every repository
+  pipelines: []                        # same fields as pipelines; read at its default branch
 `
 
 // checkPermissions stands in for the code host's check of githubToken permissions.
@@ -436,49 +436,57 @@ pipelines:
 
 func TestForRepository(t *testing.T) {
 	const own = "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: .tekton/ci.yaml, on: {push: {}}}\n"
-	// org is .github's configuration: its own pipeline publish, and two organization pipelines.
+	// org is the organization repository's configuration: its own pipeline publish, and two organization pipelines.
 	const org = `
 apiVersion: octomaton.dev/v1
 pipelines:
   - {name: publish, pipelineRun: .tekton/publish.yaml, on: {push: {}}}
 organization:
   pipelines:
-    - {name: review, displayName: AI Review, pipelineRun: {repository: tooling, path: reviewer/pipelinerun.yaml}, on: {review_request: {reviewers: [octo-reviewer]}}}
+    - {name: review, displayName: AI Review, pipelineRun: {repository: shared, path: review/pipelinerun.yaml}, on: {review_request: {reviewers: [octo-reviewer]}}}
     - {name: lint, pipelineRun: .tekton/lint.yaml, on: {pull_request: {}}}
 `
 	tests := []struct {
-		name       string
-		repository string
-		own, org   string // "" is no file
-		want       []string
-		wantNil    bool
-		wantErr    string
+		name         string
+		repository   string
+		organization string // the organization repository; "" is none
+		own, org     string // "" is no file
+		want         []string
+		wantNil      bool
+		wantErr      string
 	}{
-		{name: "neither file", repository: "demo", wantNil: true},
-		{name: "no organization section", repository: "demo", org: own, wantNil: true},
-		{name: "no organization pipelines", repository: "demo", org: "apiVersion: octomaton.dev/v1\norganization: {pipelines: []}\n", wantNil: true},
-		{name: "own pipelines only", repository: "demo", own: own, want: []string{"ci .tekton/ci.yaml"}},
-		{name: "an empty configuration", repository: "demo", own: "apiVersion: octomaton.dev/v1\npipelines: []\n", want: []string{}},
-		{name: "organization pipelines only", repository: "demo", org: org,
-			want: []string{"review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
-		{name: "own, then organization pipelines", repository: "demo", own: own, org: org,
-			want: []string{"ci .tekton/ci.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
-		{name: "the organization repository", repository: ".github", own: org, org: org,
-			want: []string{"publish .tekton/publish.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
-		{name: "the organization repository runs the organization pipelines of org, not its own", repository: ".github",
+		{name: "neither file", repository: "demo", organization: "tooling", wantNil: true},
+		{name: "no organization section", repository: "demo", organization: "tooling", org: own, wantNil: true},
+		{name: "no organization pipelines", repository: "demo", organization: "tooling", org: "apiVersion: octomaton.dev/v1\norganization: {pipelines: []}\n", wantNil: true},
+		{name: "own pipelines only", repository: "demo", organization: "tooling", own: own, want: []string{"ci .tekton/ci.yaml"}},
+		{name: "an empty configuration", repository: "demo", organization: "tooling", own: "apiVersion: octomaton.dev/v1\npipelines: []\n", want: []string{}},
+		{name: "organization pipelines only", repository: "demo", organization: "tooling", org: org,
+			want: []string{"review shared:review/pipelinerun.yaml", "lint tooling:.tekton/lint.yaml"}},
+		{name: "own, then organization pipelines", repository: "demo", organization: "tooling", own: own, org: org,
+			want: []string{"ci .tekton/ci.yaml", "review shared:review/pipelinerun.yaml", "lint tooling:.tekton/lint.yaml"}},
+		{name: "the organization repository", repository: "tooling", organization: "tooling", own: org, org: org,
+			want: []string{"publish .tekton/publish.yaml", "review shared:review/pipelinerun.yaml", "lint tooling:.tekton/lint.yaml"}},
+		{name: "the organization repository, named in another case", repository: "Tooling", organization: "tooling", own: org, org: org,
+			want: []string{"publish .tekton/publish.yaml", "review shared:review/pipelinerun.yaml", "lint tooling:.tekton/lint.yaml"}},
+		{name: "the organization repository runs the organization pipelines of org, not its own", repository: "tooling", organization: "tooling",
 			own: strings.Replace(org, "name: lint", "name: format", 1), org: org,
-			want: []string{"publish .tekton/publish.yaml", "review tooling:reviewer/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
-		{name: "organization pipelines in another repository", repository: "demo", own: org, org: org,
-			wantErr: "organization: only the owner's .github repository declares organization pipelines"},
-		{name: "a pipeline named like an organization pipeline", repository: "demo", org: org,
+			want: []string{"publish .tekton/publish.yaml", "review shared:review/pipelinerun.yaml", "lint tooling:.tekton/lint.yaml"}},
+		{name: "a repository with a dot in its name", repository: "demo", organization: ".github", org: org,
+			want: []string{"review shared:review/pipelinerun.yaml", "lint .github:.tekton/lint.yaml"}},
+		{name: "no organization repository", repository: "demo", own: own, want: []string{"ci .tekton/ci.yaml"}},
+		{name: "organization pipelines without an organization repository", repository: "tooling", own: org,
+			wantErr: "organization: this Octomaton has no organization repository, so it reads no organization pipelines"},
+		{name: "organization pipelines in another repository", repository: "demo", organization: "tooling", own: org, org: org,
+			wantErr: "organization: only the owner's tooling repository declares organization pipelines"},
+		{name: "a pipeline named like an organization pipeline", repository: "demo", organization: "tooling", org: org,
 			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: lint, pipelineRun: lint.yaml, on: {push: {}}}\n",
-			wantErr: `pipelines[0] (lint): name "lint" is taken by an organization pipeline of .github`},
-		{name: "a check named like an organization pipeline's", repository: "demo", org: org,
+			wantErr: `pipelines[0] (lint): name "lint" is taken by an organization pipeline of tooling`},
+		{name: "a check named like an organization pipeline's", repository: "demo", organization: "tooling", org: org,
 			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ai, displayName: AI Review, pipelineRun: ai.yaml, on: {push: {}}}\n",
-			wantErr: `pipelines[0] (ai): check name "AI Review" is taken by organization pipeline "review" of .github`},
-		{name: "a check named like an organization pipeline", repository: "demo", org: org,
+			wantErr: `pipelines[0] (ai): check name "AI Review" is taken by organization pipeline "review" of tooling`},
+		{name: "a check named like an organization pipeline", repository: "demo", organization: "tooling", org: org,
 			own:     "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: style, displayName: lint, pipelineRun: style.yaml, on: {push: {}}}\n",
-			wantErr: `pipelines[0] (style): check name "lint" is taken by organization pipeline "lint" of .github`},
+			wantErr: `pipelines[0] (style): check name "lint" is taken by organization pipeline "lint" of tooling`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -489,7 +497,7 @@ organization:
 				return mustParse(t, doc)
 			}
 			orgCfg := parse(tt.org)
-			cfg, err := ForRepository(tt.repository, parse(tt.own), orgCfg)
+			cfg, err := ForRepository(tt.repository, tt.organization, parse(tt.own), orgCfg)
 			if tt.wantErr != "" {
 				var ce *Error
 				if !errors.As(err, &ce) || !strings.Contains(err.Error(), tt.wantErr) || cfg != nil {

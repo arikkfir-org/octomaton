@@ -106,7 +106,8 @@ func (l *Linter) Lint(configPath string) Result {
 		l.lintPipeline(&res, root, "pipeline", &cfg.Pipelines[i])
 	}
 	if cfg.Organization != nil {
-		// Only the owner's .github repository may declare them; Octomaton reports them anywhere else.
+		// Only the organization repository, a server setting, may declare them; Octomaton reports them
+		// anywhere else.
 		for i := range cfg.Organization.Pipelines {
 			l.lintPipeline(&res, root, "organization pipeline", &cfg.Organization.Pipelines[i])
 		}

@@ -66,9 +66,7 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		}
 		p := cfg.Pipeline(t.Pipeline)
 		if p == nil {
-			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, "Pipeline not found",
-				fmt.Sprintf("Neither `%s` at `%s` nor the organization pipelines of `%s` define pipeline `%s` anymore.",
-					pipelines.FileName, ci.ShortSHA(t.ConfigAt()), sibling(t.Repository, pipelines.OrganizationRepository).FullName, t.Pipeline))
+			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, "Pipeline not found", s.pipelineGone(t))
 			continue
 		}
 		s.logFor(t).InfoContext(ctx, "Re-running the pipeline", "requester", e.Requester)
@@ -76,6 +74,15 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 			s.logFor(t).WarnContext(ctx, "The re-run did not start", "error", err)
 		}
 	}
+}
+
+// pipelineGone says that no configuration defines t's pipeline anymore.
+func (s *Service) pipelineGone(t ci.Trigger) string {
+	if s.OrganizationRepository == "" {
+		return fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", pipelines.FileName, ci.ShortSHA(t.ConfigAt()), t.Pipeline)
+	}
+	return fmt.Sprintf("Neither `%s` at `%s` nor the organization pipelines of `%s` define pipeline `%s` anymore.",
+		pipelines.FileName, ci.ShortSHA(t.ConfigAt()), sibling(t.Repository, s.OrganizationRepository).FullName, t.Pipeline)
 }
 
 // reportTrigger returns the trigger stored with a report, reading it from the code host when the

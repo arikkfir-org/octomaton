@@ -91,3 +91,22 @@ func TestAppRun(t *testing.T) {
 		})
 	}
 }
+
+func TestNewAppWiresTheOrganizationRepository(t *testing.T) {
+	tests := []struct{ name, value string }{
+		{name: "set", value: "tooling"},
+		{name: "unset", value: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OCTOMATON_ORGANIZATION_REPOSITORY", tt.value)
+			a, err := newApp(testConfig(t, "127.0.0.1:0"))
+			if err != nil {
+				t.Fatalf("newApp: %v", err)
+			}
+			if got := a.runs.OrganizationRepository; got != tt.value {
+				t.Fatalf("runs.OrganizationRepository = %q, want %q", got, tt.value)
+			}
+		})
+	}
+}

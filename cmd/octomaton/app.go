@@ -99,7 +99,10 @@ func (a *app) connect() error {
 // them onto the code host, schedules fires cron triggers, and upkeep keeps tokens fresh and frees
 // finished runs' resources.
 func (a *app) wireServices() {
-	a.runs = &runs.Service{Host: a.github, Runner: a.runner, Logger: component("runs"), Metrics: a.metrics}
+	a.runs = &runs.Service{
+		Host: a.github, Runner: a.runner, OrganizationRepository: a.cfg.Organization.Repository,
+		Logger: component("runs"), Metrics: a.metrics,
+	}
 	a.schedules = &schedules.Scheduler{Host: a.github, Runner: a.runner, Runs: a.runs, Logger: component("schedules")}
 	a.runs.Schedules = a.schedules
 	a.reports = &reports.Service{

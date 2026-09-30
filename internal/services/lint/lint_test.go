@@ -270,8 +270,8 @@ func TestRunPrintsNotes(t *testing.T) {
 	}
 }
 
-// orgConfig is a .github configuration: its own pipeline, and organization pipelines defined in it and
-// in another repository.
+// orgConfig is an organization repository's configuration: its own pipeline, and organization
+// pipelines defined in it and in another repository.
 const orgConfig = `
 apiVersion: octomaton.dev/v1
 pipelines:

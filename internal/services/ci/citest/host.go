@@ -67,6 +67,7 @@ type Host struct {
 	comments    []Comment
 	errs        map[string]error
 	fileErrs    map[string]error
+	reads       []string
 }
 
 var (
@@ -118,6 +119,13 @@ func (h *Host) FailFile(repo ci.Repository, ref, path string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.fileErrs[repo.FullName+"@"+ref+":"+path] = err
+}
+
+// Reads lists every file read so far, as "owner/name@ref:path", in order.
+func (h *Host) Reads() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.reads)
 }
 
 // SetPullRequest stores a pull request.
@@ -298,6 +306,7 @@ func (c *installation) ReadFile(_ context.Context, repo ci.Repository, path, ref
 	}
 	c.h.mu.Lock()
 	defer c.h.mu.Unlock()
+	c.h.reads = append(c.h.reads, repo.FullName+"@"+ref+":"+path)
 	if err := c.h.fileErrs[repo.FullName+"@"+ref+":"+path]; err != nil {
 		return nil, err
 	}

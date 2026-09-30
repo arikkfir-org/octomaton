@@ -129,7 +129,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	runner := &tekton.Runner{Dynamic: dyn, Kube: kube, Namespaces: namespaces, DashboardURL: "https://tekton.dev.kfirs.com", Logger: logger, Metrics: m}
-	svc := &runs.Service{Host: app, Runner: runner, Logger: logger, Metrics: m}
+	svc := &runs.Service{Host: app, Runner: runner, OrganizationRepository: "tooling", Logger: logger, Metrics: m}
 	pool := octohttp.NewPool(2, 16, time.Minute, logger, m)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 	handler := &octohttp.Handler{Secret: []byte(secret), Decoder: app, Events: svc, Pool: pool, Dedupe: octohttp.NewDedupe(100, time.Hour), Metrics: m, Logger: logger}
@@ -400,7 +400,7 @@ func TestReviewRequestEndToEnd(t *testing.T) {
 	}
 }
 
-// orgYAML is .github's configuration: organization pipeline lint, defined in .github.
+// orgYAML is the organization repository's configuration: organization pipeline lint, defined in it.
 const orgYAML = `
 apiVersion: octomaton.dev/v1
 organization:
@@ -417,9 +417,9 @@ organization:
 
 func TestOrganizationPipelinesEndToEnd(t *testing.T) {
 	e := setup(t)
-	// Organization pipelines, and their definitions, are read at .github's default branch.
-	e.gh.AddFile(owner+"/.github", "", ".octomaton.yaml", orgYAML)
-	e.gh.AddFile(owner+"/.github", "", ".tekton/lint.yaml", strings.Replace(ciYAML, "generateName: ci-", "generateName: lint-", 1))
+	// Organization pipelines, and their definitions, are read at the organization repository's default branch.
+	e.gh.AddFile(owner+"/tooling", "", ".octomaton.yaml", orgYAML)
+	e.gh.AddFile(owner+"/tooling", "", ".tekton/lint.yaml", strings.Replace(ciYAML, "generateName: ci-", "generateName: lint-", 1))
 
 	if rec := e.deliver("pull_request", "o-1", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
 		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())

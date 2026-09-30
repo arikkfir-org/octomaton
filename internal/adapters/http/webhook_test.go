@@ -206,13 +206,14 @@ func TestHandler(t *testing.T) {
 	}{
 		{name: "GET is rejected", method: http.MethodGet, event: "push", body: pushBody, sign: true, wantStatus: http.StatusMethodNotAllowed},
 		{name: "unsigned is rejected", event: "push", body: pushBody, wantStatus: http.StatusUnauthorized},
-		{name: "ping answers pong", event: "ping", body: `{"zen":"z"}`, sign: true, wantStatus: http.StatusOK},
+		{name: "ping answers pong and is relayed", event: "ping", body: `{"zen":"z"}`, sign: true, wantStatus: http.StatusOK, wantRelay: true},
 		{name: "missing event header", event: "", body: `{}`, sign: true, wantStatus: http.StatusBadRequest},
 		{name: "unhandled event is acknowledged", event: "star", body: `{}`, sign: true, wantStatus: http.StatusAccepted},
 		{name: "invalid payload", event: "push", body: `not json`, sign: true, wantStatus: http.StatusBadRequest, wantRelay: true},
 		{name: "ignored by the decoder", event: "push", body: pushBody, sign: true, reason: "not interesting", wantStatus: http.StatusAccepted, wantRelay: true},
 		{name: "accepted push is processed and relayed", event: "push", body: pushBody, sign: true, wantStatus: http.StatusAccepted, wantRun: true, wantRelay: true},
 		{name: "check_run is processed, not relayed", event: "check_run", body: `{"action":"rerequested"}`, sign: true, wantStatus: http.StatusAccepted, wantRun: true},
+		{name: "pull_request is processed, not relayed", event: "pull_request", body: `{"action":"opened"}`, sign: true, wantStatus: http.StatusAccepted, wantRun: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

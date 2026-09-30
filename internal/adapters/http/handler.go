@@ -29,10 +29,11 @@ type EventHandler interface {
 	Handle(ctx context.Context, ev ci.Event)
 }
 
-// relayedEvents are forwarded to the Forwarder after signature verification.
-var relayedEvents = map[string]bool{"push": true, "pull_request": true}
+// relayedEvents are forwarded to the Forwarder after signature verification. Push receivers such as Argo CD's
+// webhook endpoint accept pushes and pings and answer every other event with an error.
+var relayedEvents = map[string]bool{"push": true, "ping": true}
 
-// Forwarder receives verified push and pull_request deliveries (*relay.Relay implements it).
+// Forwarder receives verified push and ping deliveries (*relay.Relay implements it).
 type Forwarder interface {
 	Forward(header http.Header, body []byte)
 }
@@ -47,7 +48,7 @@ type Handler struct {
 	Dedupe  *Dedupe
 	Metrics *metrics.Metrics
 	Logger  *slog.Logger
-	// Relay, when set, receives verified push and pull_request deliveries.
+	// Relay, when set, receives verified push and ping deliveries.
 	Relay Forwarder
 }
 
@@ -95,16 +96,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(http.StatusUnauthorized, "signature", "invalid signature")
 		return
 	}
-	switch {
-	case event == "":
+	if event == "" {
 		reject(http.StatusBadRequest, "event", "missing X-GitHub-Event header")
-		return
-	case event == "ping":
-		respond(http.StatusOK, "pong")
 		return
 	}
 	if h.Relay != nil && relayedEvents[event] {
 		h.Relay.Forward(r.Header, body)
+	}
+	if event == "ping" {
+		respond(http.StatusOK, "pong")
+		return
 	}
 	if !h.Decoder.Handles(event) {
 		log.Debug("Ignoring unhandled event")

@@ -98,6 +98,7 @@ type Trigger struct {
 	Tag            string       `json:"tag,omitempty"`
 	Sender         string       `json:"sender,omitempty"`
 	Pipeline       string       `json:"pipeline,omitempty"`
+	DisplayName    string       `json:"displayName,omitempty"` // the pipeline's displayName, when set: its reports' name
 	Push           *Push        `json:"push,omitempty"`
 	PullRequest    *PullRequest `json:"pullRequest,omitempty"`
 	MergeGroup     *MergeGroup  `json:"mergeGroup,omitempty"`
@@ -107,6 +108,14 @@ type Trigger struct {
 	// for comment commands, the revision otherwise.
 	ConfigRef string `json:"configRef,omitempty"`
 	RerunBy   string `json:"rerunBy,omitempty"`
+}
+
+// ReportName is the name of the pipeline's report on the code host: its display name, or its name.
+func (t Trigger) ReportName() string {
+	if t.DisplayName != "" {
+		return t.DisplayName
+	}
+	return t.Pipeline
 }
 
 // FromFork reports whether the trigger is a pull request's from a fork, which Octomaton never acts on.

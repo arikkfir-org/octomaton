@@ -14,7 +14,8 @@ import (
 const referenceExample = `
 apiVersion: octomaton.dev/v1
 pipelines:
-  - name: ci                           # check-run name; unique; [a-z0-9][a-z0-9-]*
+  - name: ci                           # identifies the pipeline and its runs; unique; [a-z0-9][a-z0-9-]*
+    displayName: Continuous Integration  # optional: the check's name on GitHub (default: name); unique
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
     on:
       pull_request:
@@ -44,7 +45,7 @@ pipelines:
     concurrency:                       # optional; default for pull_request: group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
-    taskChecks: false                  # optional: also report each pipeline task as "<name> / <task>"
+    taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
 `
 
 // checkPermissions stands in for the code host's check of githubToken permissions.
@@ -84,6 +85,9 @@ func TestParseReferenceExample(t *testing.T) {
 	}
 	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks {
 		t.Fatalf("concurrency %+v, taskChecks %v", p.Concurrency, p.TaskChecks)
+	}
+	if p.Name != "ci" || p.CheckName() != "Continuous Integration" {
+		t.Fatalf("name %q, check name %q", p.Name, p.CheckName())
 	}
 	if got := p.Events(); strings.Join(got, ",") != "push,pull_request,merge_group,comment,schedule" {
 		t.Fatalf("Events() = %v", got)
@@ -148,6 +152,12 @@ func TestParseProblems(t *testing.T) {
 		{name: "missing name", yaml: head + "  - {pipelineRun: a.yaml, on: {push: {}}}\n", want: "name is required"},
 		{name: "bad name", yaml: head + "  - {name: CI_Pipeline, pipelineRun: a.yaml, on: {push: {}}}\n", want: "must match"},
 		{name: "reserved name", yaml: head + "  - {name: octomaton, pipelineRun: a.yaml, on: {push: {}}}\n", want: "is reserved"},
+		{name: "display name with spaces around it", yaml: head + "  - {name: ci, displayName: \" CI \", pipelineRun: a.yaml, on: {push: {}}}\n", want: "must not start or end with spaces"},
+		{name: "display name with a control character", yaml: head + "  - {name: ci, displayName: \"CI\\tbuild\", pipelineRun: a.yaml, on: {push: {}}}\n", want: "control characters"},
+		{name: "long display name", yaml: head + "  - {name: ci, displayName: " + strings.Repeat("x", 101) + ", pipelineRun: a.yaml, on: {push: {}}}\n", want: "longer than 100 characters"},
+		{name: "reserved display name", yaml: head + "  - {name: ci, displayName: Octomaton, pipelineRun: a.yaml, on: {push: {}}}\n", want: `displayName "Octomaton" is reserved`},
+		{name: "display name taken by a name", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\n  - {name: build, displayName: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `check name "ci" is taken by pipeline "ci"`},
+		{name: "duplicate display names", yaml: head + "  - {name: a, displayName: Checks, pipelineRun: a.yaml, on: {push: {}}}\n  - {name: b, displayName: Checks, pipelineRun: b.yaml, on: {push: {}}}\n", want: `check name "Checks" is taken by pipeline "a"`},
 		{name: "missing pipelineRun", yaml: head + "  - {name: ci, on: {push: {}}}\n", want: "pipelineRun is required"},
 		{name: "absolute pipelineRun", yaml: head + "  - {name: ci, pipelineRun: /etc/passwd, on: {push: {}}}\n", want: "clean repository-relative"},
 		{name: "escaping pipelineRun", yaml: head + "  - {name: ci, pipelineRun: ../x.yaml, on: {push: {}}}\n", want: "clean repository-relative"},
@@ -278,5 +288,24 @@ pipelines:
 		if got := tt.sched.Last(tt.from, tt.to); !got.Equal(tt.want) {
 			t.Errorf("case %d: Last = %v, want %v", i, got, tt.want)
 		}
+	}
+}
+
+func TestCheckName(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "the name by default", yaml: "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\n", want: "ci"},
+		{name: "the display name when set", yaml: "  - {name: ci, displayName: Continuous Integration, pipelineRun: a.yaml, on: {push: {}}}\n", want: "Continuous Integration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n"+tt.yaml)
+			if got := cfg.Pipelines[0].CheckName(); got != tt.want {
+				t.Fatalf("CheckName() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

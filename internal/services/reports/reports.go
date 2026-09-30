@@ -66,7 +66,7 @@ func Header(link ci.RunLink, t ci.Trigger) string {
 }
 
 // TaskName names the report of one task of a pipeline.
-func TaskName(pipeline, task string) string { return pipeline + " / " + task }
+func TaskName(check, task string) string { return check + " / " + task }
 
 // known reports whether a run stored its trigger, rather than just what its bookkeeping names.
 func known(t ci.Trigger) bool { return t.Version == ci.TriggerVersion }

@@ -123,7 +123,7 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 		}
 		matched++
 		pt := t
-		pt.Pipeline, pt.RerunBy = p.Name, opts.RerunBy
+		pt.Pipeline, pt.DisplayName, pt.RerunBy = p.Name, p.DisplayName, opts.RerunBy
 		if filter.Active() {
 			if files == nil {
 				f := s.changedFiles(ctx, gh, t)
@@ -201,7 +201,7 @@ func markdownLine(s string) string {
 }
 
 func (s *Service) reportConfigProblem(ctx context.Context, gh ci.Installation, t ci.Trigger, title, summary string) {
-	t.Pipeline = ""
+	t.Pipeline, t.DisplayName = "", ""
 	s.Metrics.RunCreated(ctx, metrics.RunFailed)
 	s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Failure, title, summary)
 }
@@ -218,7 +218,7 @@ func (s *Service) reportSkipped(ctx context.Context, gh ci.Installation, t ci.Tr
 	b.WriteString("\nRe-run this check to run the pipeline anyway.")
 	s.logFor(t).InfoContext(ctx, "Pipeline skipped: no relevant changes")
 	s.Metrics.RunCreated(ctx, metrics.RunSkipped)
-	s.openCompleted(ctx, gh, t, t.Pipeline, ci.Skipped, "Skipped: no relevant changes", b.String())
+	s.openCompleted(ctx, gh, t, t.ReportName(), ci.Skipped, "Skipped: no relevant changes", b.String())
 }
 
 // openCompleted opens a completed report that stores the trigger, so it can be re-run.

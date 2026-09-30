@@ -53,6 +53,9 @@
   `octomaton` image untagged: Argo CD sets the tag.
 - `release` must publish an image for every push to `main`, so it never gets a `paths` filter: Argo CD runs the image of
   whatever commit `main` is at.
+- `octomaton` and `go-import` run two replicas each, spread over nodes, with a PodDisruptionBudget
+  (`maxUnavailable: 1`). Octomaton needs no single-replica guard: every replica serves webhooks, and only the Lease
+  holder reports, schedules and cleans up.
 - CI renders `deploy/` and validates it with kubeconform; run `kubectl kustomize deploy` before pushing a change there.
 
 ## Tests

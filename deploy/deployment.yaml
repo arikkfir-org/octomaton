@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: octomaton
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+  annotations:
+    # Restart when the ConfigMap or the GitHub Secret changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: octomaton
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: octomaton
+    spec:
+      serviceAccountName: octomaton
+      # Octomaton reads OCTOMATON_* variables: no <SERVICE>_PORT variables from Services in the namespace.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: octomaton
+          # No tag here: Argo CD sets it to the short SHA of the commit it deploys (the Application octomaton in
+          # arikkfir-org/delivery), and release publishes an image for every commit on main.
+          image: me-west1-docker.pkg.dev/arikkfir/images/octomaton
+          # Configured by environment variables only; the server's README lists them.
+          envFrom:
+            - configMapRef:
+                name: octomaton
+          env:
+            # Leader election: the Lease's namespace and this replica's identity.
+            - name: OCTOMATON_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OCTOMATON_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # Names the pod in exported metrics and traces; Octomaton detects the cluster and its location.
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: k8s.pod.name=$(OCTOMATON_POD_NAME),k8s.namespace.name=$(OCTOMATON_POD_NAMESPACE),k8s.container.name=octomaton
+            - name: OCTOMATON_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: octomaton-github
+                  key: app-id
+            - name: OCTOMATON_GITHUB_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: octomaton-github
+                  key: private-key
+            - name: OCTOMATON_GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: octomaton-github
+                  key: webhook-secret
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

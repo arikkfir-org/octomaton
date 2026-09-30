@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: octomaton
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+spec:
+  selector:
+    app.kubernetes.io/name: octomaton
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

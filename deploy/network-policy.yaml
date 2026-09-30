@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: octomaton
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: octomaton
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: octomaton
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: go-import
+  namespace: octomaton
+  labels:
+    app.kubernetes.io/name: go-import
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: go-import
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080

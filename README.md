@@ -257,8 +257,9 @@ is exported.
 
 ## GitHub App
 
-`Octomaton`, installed on all `arikkfir-org` repositories, homepage `https://github.com/arikkfir-org/octomaton`,
-webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the App by its ID, never by its name.
+`octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, homepage
+`https://github.com/arikkfir-org/octomaton`, webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the
+App by its ID, never by its name.
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.

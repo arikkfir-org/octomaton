@@ -66,7 +66,7 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		}
 		p := cfg.Pipeline(t.Pipeline)
 		if p == nil {
-			s.openCompleted(ctx, gh, t, t.Pipeline, ci.Failure, "Pipeline not found",
+			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, "Pipeline not found",
 				fmt.Sprintf("`%s` at `%s` does not define pipeline `%s` anymore.", pipelines.FileName, ci.ShortSHA(t.ConfigAt()), t.Pipeline))
 			continue
 		}

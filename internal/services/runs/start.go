@@ -68,6 +68,7 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 // held, then its report, task reports and token are made, and it is let go per its concurrency
 // policy. Any failure after the run exists cancels it and fails its report.
 func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p *pipelines.Pipeline, rerun bool) (ci.Run, error) {
+	t.DisplayName = p.DisplayName
 	log := s.logFor(t)
 	if t.FromFork() {
 		// The callers ignore forks already; this keeps any other path from running a fork's code.
@@ -77,7 +78,7 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 		log.WarnContext(ctx, "Pipeline refused", "title", r.Title, "reason", r.Reason)
 		s.Metrics.RunCreated(ctx, metrics.RunFailed)
 		if t.Comment == nil {
-			s.openCompleted(ctx, gh, t, p.Name, ci.Failure, r.Title, r.Reason)
+			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, r.Title, r.Reason)
 		}
 		return ci.Run{}, &Refusal{Pipeline: p.Name, Reason: r.Reason}
 	}
@@ -203,7 +204,7 @@ func (s *Service) queuedSummary(run ci.Run) string {
 func (s *Service) openReport(ctx context.Context, gh ci.Installation, run ci.Run, id ci.ReportID) (ci.ReportID, error) {
 	t := run.Trigger
 	r := ci.Report{
-		Name: t.Pipeline, Revision: t.Revision, Status: ci.StatusQueued, ExternalID: run.ID.String(), URL: s.Runner.Link(run.ID).URL,
+		Name: t.ReportName(), Revision: t.Revision, Status: ci.StatusQueued, ExternalID: run.ID.String(), URL: s.Runner.Link(run.ID).URL,
 		Title: "Queued", Summary: s.queuedSummary(run), Trigger: &t,
 	}
 	if id == 0 {
@@ -218,7 +219,7 @@ func (s *Service) openReport(ctx context.Context, gh ci.Installation, run ci.Run
 }
 
 // openTaskReports opens a queued report for each task of the run's pipeline, named
-// "<pipeline> / <task>", and records them on the run. With find, reports the code host already has
+// "<check> / <task>", and records them on the run. With find, reports the code host already has
 // for the run are taken over instead of opened again.
 func (s *Service) openTaskReports(ctx context.Context, gh ci.Installation, run ci.Run, find bool) error {
 	t := run.Trigger
@@ -232,7 +233,7 @@ func (s *Service) openTaskReports(ctx context.Context, gh ci.Installation, run c
 		if ids[task] != 0 {
 			continue
 		}
-		name := reports.TaskName(t.Pipeline, task)
+		name := reports.TaskName(t.ReportName(), task)
 		var id ci.ReportID
 		if find {
 			if id, err = gh.FindReport(ctx, t.Repository, t.Revision, name, run.ID.String()); err != nil {

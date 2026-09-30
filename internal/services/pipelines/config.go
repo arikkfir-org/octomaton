@@ -13,6 +13,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
@@ -28,6 +30,8 @@ const (
 	// ReservedName names the configuration's own report, so it cannot name a pipeline.
 	ReservedName  = ci.ConfigReportName
 	maxNameLength = 63
+	// maxDisplayNameLength bounds a check name, which pages show in narrow lists.
+	maxDisplayNameLength = 100
 )
 
 // DefaultPullRequestTypes are the pull_request actions that trigger a pipeline when `types` is omitted.
@@ -56,6 +60,7 @@ type Config struct {
 // Pipeline binds events to a PipelineRun file.
 type Pipeline struct {
 	Name        string            `yaml:"name"`
+	DisplayName string            `yaml:"displayName"`
 	PipelineRun string            `yaml:"pipelineRun"`
 	On          Triggers          `yaml:"on"`
 	Params      map[string]string `yaml:"params"`
@@ -262,7 +267,7 @@ func (c *Config) validate(check PermissionCheck) []string {
 	if c.APIVersion != APIVersion {
 		problems = append(problems, fmt.Sprintf("apiVersion must be %q (got %q)", APIVersion, c.APIVersion))
 	}
-	seen := map[string]bool{}
+	seen, checks := map[string]bool{}, map[string]string{}
 	for i := range c.Pipelines {
 		p := &c.Pipelines[i]
 		prefix := fmt.Sprintf("pipelines[%d]", i)
@@ -277,6 +282,12 @@ func (c *Config) validate(check PermissionCheck) []string {
 				problems = append(problems, fmt.Sprintf("%s: duplicate pipeline name %q", prefix, p.Name))
 			}
 			seen[p.Name] = true
+		}
+		if check := p.CheckName(); check != "" {
+			if other, ok := checks[check]; ok && other != p.Name {
+				problems = append(problems, fmt.Sprintf("%s: check name %q is taken by pipeline %q", prefix, check, other))
+			}
+			checks[check] = p.Name
 		}
 	}
 	return problems
@@ -295,6 +306,18 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 		add("name %q is longer than %d characters", p.Name, maxNameLength)
 	case p.Name == ReservedName:
 		add("name %q is reserved", p.Name)
+	}
+	if p.DisplayName != "" {
+		switch {
+		case strings.TrimSpace(p.DisplayName) != p.DisplayName:
+			add("displayName %q must not start or end with spaces", p.DisplayName)
+		case strings.IndexFunc(p.DisplayName, unicode.IsControl) >= 0:
+			add("displayName %q must not contain control characters", p.DisplayName)
+		case utf8.RuneCountInString(p.DisplayName) > maxDisplayNameLength:
+			add("displayName %q is longer than %d characters", p.DisplayName, maxDisplayNameLength)
+		case strings.EqualFold(p.DisplayName, ReservedName):
+			add("displayName %q is reserved", p.DisplayName)
+		}
 	}
 
 	switch {
@@ -464,6 +487,14 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// CheckName is the name of the pipeline's report on the code host: its displayName, or its name.
+func (p *Pipeline) CheckName() string {
+	if p.DisplayName != "" {
+		return p.DisplayName
+	}
+	return p.Name
 }
 
 // Pipeline returns the pipeline with the given name, or nil.

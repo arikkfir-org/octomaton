@@ -254,7 +254,7 @@ func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 	if run.Reported == "" {
 		id := run.ReportID
 		if id == 0 {
-			found, err := gh.FindReport(ctx, t.Repository, t.Revision, t.Pipeline, run.ID.String())
+			found, err := gh.FindReport(ctx, t.Repository, t.Revision, t.ReportName(), run.ID.String())
 			if err != nil {
 				return fmt.Errorf("finding the report: %w", err)
 			}

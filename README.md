@@ -49,7 +49,8 @@ no quoting, and strictly: unknown fields, duplicate keys and type mismatches are
 ```yaml
 apiVersion: octomaton.dev/v1
 pipelines:
-  - name: ci                           # check-run name; unique; [a-z0-9][a-z0-9-]*
+  - name: ci                           # identifies the pipeline and its runs; unique; [a-z0-9][a-z0-9-]*
+    displayName: Continuous Integration  # optional: the check's name on GitHub (default: name); unique
     pipelineRun: .tekton/ci.yaml       # repository-relative file holding exactly one tekton.dev/v1 PipelineRun
     on:
       pull_request:
@@ -79,7 +80,7 @@ pipelines:
     concurrency:                       # optional; default for pull_request: group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
-    taskChecks: false                  # optional: also report each pipeline task as "<name> / <task>"
+    taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
 ```
 
 ### Triggers
@@ -107,13 +108,14 @@ against the pull request's head commit, so a pull request cannot change what its
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Check-run name, unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
+| `name` | Identifies the pipeline: in run names, labels, concurrency groups and `{{ .Pipeline }}`. Unique, `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
+| `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`. Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
-| `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<name> / <task>`. |
+| `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
 
 **Concurrency.** Groups are rendered from the `group` template and scoped to the repository, so two pipelines naming
 the same group share it (include `{{ .Pipeline }}` to keep them apart).
@@ -189,15 +191,16 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 
 ## Check runs
 
-- Each run reports on a check named after its pipeline (`queued` → `in_progress` → `completed`), linked to
-  `https://tekton.dev.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`, with `external_id` `<namespace>/<name>`.
+- Each run reports on a check named after its pipeline (its `displayName`, or else its `name`): `queued` →
+  `in_progress` → `completed`, linked to `https://tekton.dev.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`,
+  with `external_id` `<namespace>/<name>`.
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;
   `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log.
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
 - Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
-  refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's name otherwise.
+  refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's check otherwise.
 - Every check stores its trigger context in a hidden marker in its output, so **Re-run** works even after the
   PipelineRun was pruned. Re-running a pipeline's check always runs it (path filters are not re-applied; the requester
   needs write access); re-running `octomaton` re-evaluates the whole event.
@@ -254,8 +257,9 @@ is exported.
 
 ## GitHub App
 
-`Octomaton`, installed on all `arikkfir-org` repositories, homepage `https://github.com/arikkfir-org/octomaton`,
-webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the App by its ID, never by its name.
+`octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, homepage
+`https://github.com/arikkfir-org/octomaton`, webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the
+App by its ID, never by its name.
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.

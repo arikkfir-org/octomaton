@@ -19,7 +19,7 @@ sequenceDiagram
   GH->>SB: webhook (push, pull_request, merge_group, issue_comment, check_run, check_suite)
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
   SB->>GH: read .octomaton.yaml (and the PipelineRun file)
-  SB->>SB: match events, branches, tags and paths; apply trust rules
+  SB->>SB: match events, branches, tags and paths, then apply trust rules
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
   SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy

@@ -137,7 +137,7 @@ func TestRerunOfAPipelineThatIsGone(t *testing.T) {
 	if len(h.runner.Runs()) != 0 || len(reports) != 2 || reports[1].Title != "Pipeline not found" {
 		t.Fatalf("reports = %+v", reports)
 	}
-	mustContain(t, reports[1].Summary, "Neither `.octomaton.yaml` at `1111111` nor the organization pipelines of `octo-org/.github` define pipeline `release` anymore.")
+	mustContain(t, reports[1].Summary, "`.octomaton.yaml` at `1111111` does not define pipeline `release` anymore.")
 }
 
 func TestRerunAfterCommentUsesTheCommentsConfiguration(t *testing.T) {

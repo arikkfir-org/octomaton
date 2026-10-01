@@ -30,7 +30,7 @@ func setReferenceEnv(t *testing.T) {
 		"OCTOMATON_GITHUB_WEBHOOK_SECRET":     "s3cret\n",
 		"OCTOMATON_GITHUB_ALLOWED_OWNERS":     "arikkfir-org",
 		"OCTOMATON_TEKTON_DASHBOARD_URL":      "https://tekton.dev.kfirs.com/",
-		"OCTOMATON_NAMESPACE_OVERRIDES":       "arikkfir-org/.github:ci-github",
+		"OCTOMATON_ORGANIZATION_REPOSITORY":   "tooling",
 		"OCTOMATON_RELAY_URLS":                "http://argocd-server.argocd.svc.cluster.local/api/webhook",
 		"OCTOMATON_RETENTION_FREE_PVCS_AFTER": "90m",
 		"OCTOMATON_POD_NAME":                  "octomaton-abc",
@@ -61,11 +61,14 @@ func TestLoadReference(t *testing.T) {
 	if cfg.Pod != (Pod{Name: "octomaton-abc", Namespace: "octomaton"}) {
 		t.Errorf("Pod = %+v", cfg.Pod)
 	}
+	if cfg.Organization.Repository != "tooling" {
+		t.Errorf("Organization = %+v", cfg.Organization)
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {
 	setReferenceEnv(t)
-	for _, name := range []string{"OCTOMATON_GITHUB_ALLOWED_OWNERS", "OCTOMATON_RETENTION_FREE_PVCS_AFTER", "OCTOMATON_POD_NAME", "OCTOMATON_POD_NAMESPACE"} {
+	for _, name := range []string{"OCTOMATON_GITHUB_ALLOWED_OWNERS", "OCTOMATON_RETENTION_FREE_PVCS_AFTER", "OCTOMATON_POD_NAME", "OCTOMATON_POD_NAMESPACE", "OCTOMATON_ORGANIZATION_REPOSITORY"} {
 		t.Setenv(name, "") // restores the variable after the test
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
@@ -87,6 +90,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Pod.Name == "" || cfg.Pod.Namespace == "" {
 		t.Errorf("Pod defaults = %+v", cfg.Pod)
 	}
+	if cfg.Organization.Repository != "" {
+		t.Errorf("Organization = %+v, want none (no organization pipelines)", cfg.Organization)
+	}
 }
 
 func TestLoadProblems(t *testing.T) {
@@ -104,6 +110,8 @@ func TestLoadProblems(t *testing.T) {
 		{name: "zero retention", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "0s", want: "must be positive"},
 		{name: "no workers", variable: "OCTOMATON_WEBHOOK_WORKERS", value: "0", want: "must be positive"},
 		{name: "bad duration", variable: "OCTOMATON_RETENTION_FREE_PVCS_AFTER", value: "soon", want: "OCTOMATON_RETENTION_FREE_PVCS_AFTER"},
+		{name: "organization repository with its owner", variable: "OCTOMATON_ORGANIZATION_REPOSITORY", value: "arikkfir-org/tooling", want: `OCTOMATON_ORGANIZATION_REPOSITORY: "arikkfir-org/tooling" is not a repository name`},
+		{name: "organization repository ..", variable: "OCTOMATON_ORGANIZATION_REPOSITORY", value: "..", want: "is not a repository name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

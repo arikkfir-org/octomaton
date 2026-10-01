@@ -4,19 +4,20 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"octomaton.dev/internal/services/ci"
 )
 
-// orgRepo is the owner's .github repository, which declares the organization pipelines.
+// orgRepo is the owner's organization repository, which declares the organization pipelines.
 var orgRepo = ci.Repository{
-	ID: 1002, Owner: repo.Owner, Name: ".github", FullName: repo.Owner + "/.github",
-	CloneURL: "https://github.com/octo-org/.github.git", HTMLURL: "https://github.com/octo-org/.github", DefaultBranch: "main",
+	ID: 1002, Owner: repo.Owner, Name: "tooling", FullName: repo.Owner + "/tooling",
+	CloneURL: "https://github.com/octo-org/tooling.git", HTMLURL: "https://github.com/octo-org/tooling", DefaultBranch: "main",
 }
 
-// orgConfig is .github's configuration at its default branch: its own pipeline publish, and three
-// organization pipelines, two defined in .github and one in repository shared.
+// orgConfig is the organization repository's configuration at its default branch: its own pipeline
+// publish, and three organization pipelines, two defined in it and one in repository shared.
 const orgConfig = `
 apiVersion: octomaton.dev/v1
 pipelines:
@@ -50,9 +51,11 @@ const (
 	formatRun = "kind: PipelineRun\nmetadata: {name: format}\n"
 )
 
-// setupOrganization serves orgConfig and the definitions of its organization pipelines, each from the
-// default branch of its repository, and an open pull request #5 on demo.
+// setupOrganization makes orgRepo the organization repository, serves orgConfig and the definitions
+// of its organization pipelines, each from the default branch of its repository, and an open pull
+// request #5 on demo.
 func setupOrganization(h *harness) {
+	h.svc.OrganizationRepository = orgRepo.Name
 	h.host.SetFile(orgRepo, "", ".octomaton.yaml", orgConfig)
 	h.host.SetFile(orgRepo, "", ".tekton/lint.yaml", lintRun)
 	h.host.SetFile(orgRepo, "", ".tekton/format.yaml", formatRun)
@@ -82,7 +85,7 @@ func TestOrganizationPipelinesRun(t *testing.T) {
 			name:  "a pull request in a repository without .octomaton.yaml",
 			setup: func(*harness) {},
 			act:   func(h *harness) { h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: true}) },
-			want:  [][3]string{{"demo-lint-1111111-1", ".github:.tekton/lint.yaml", lintRun}},
+			want:  [][3]string{{"demo-lint-1111111-1", "tooling:.tekton/lint.yaml", lintRun}},
 		},
 		{
 			name:  "a pull request, with the repository's own pipelines first",
@@ -90,7 +93,7 @@ func TestOrganizationPipelinesRun(t *testing.T) {
 			act:   func(h *harness) { h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: true}) },
 			want: [][3]string{
 				{"demo-ci-1111111-1", ".tekton/ci.yaml", ciRun},
-				{"demo-lint-1111111-1", ".github:.tekton/lint.yaml", lintRun},
+				{"demo-lint-1111111-1", "tooling:.tekton/lint.yaml", lintRun},
 			},
 		},
 		{
@@ -103,7 +106,7 @@ func TestOrganizationPipelinesRun(t *testing.T) {
 			name:  "a comment command",
 			setup: func(*harness) {},
 			act:   func(h *harness) { h.svc.Handle(ctx, command(101, "maintainer", "/format")) },
-			want:  [][3]string{{"demo-format-1111111-1", ".github:.tekton/format.yaml", formatRun}},
+			want:  [][3]string{{"demo-format-1111111-1", "tooling:.tekton/format.yaml", formatRun}},
 		},
 		{
 			name:  "a push, which no organization pipeline runs on",
@@ -151,9 +154,9 @@ func TestOrganizationPipelineRunsBelongToTheRepository(t *testing.T) {
 	}
 }
 
-// TestTheOrganizationRepositoryRunsTheDefaultBranchsOrganizationPipelines: a pull request on .github
-// runs its own pipelines from its head, but the organization pipelines of its default branch, so it
-// cannot change what it runs.
+// TestTheOrganizationRepositoryRunsTheDefaultBranchsOrganizationPipelines: a pull request on the
+// organization repository runs its own pipelines from its head, but the organization pipelines of its
+// default branch, so it cannot change what it runs.
 func TestTheOrganizationRepositoryRunsTheDefaultBranchsOrganizationPipelines(t *testing.T) {
 	h := newHarness(t)
 	setupOrganization(h)
@@ -175,8 +178,8 @@ organization:
 	h.evaluate(t0, EvalOptions{ReportConfigErrors: true})
 
 	want := [][3]string{
-		{".github-ci-1111111-1", ".tekton/ci.yaml", ciRun},
-		{".github-lint-1111111-1", ".github:.tekton/lint.yaml", lintRun},
+		{"tooling-ci-1111111-1", ".tekton/ci.yaml", ciRun},
+		{"tooling-lint-1111111-1", "tooling:.tekton/lint.yaml", lintRun},
 	}
 	if got := runsOf(h); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runs = %q\nwant %q", got, want)
@@ -197,7 +200,7 @@ func TestOrganizationConfigProblems(t *testing.T) {
 			setup:     func(h *harness) { h.files(sha1, orgConfig, ciRun) },
 			wantTitle: "Invalid .octomaton.yaml",
 			wantText: []string{"`.octomaton.yaml` at `1111111` is invalid, so no pipeline was started",
-				"organization: only the owner's .github repository declares organization pipelines"},
+				"organization: only the owner's tooling repository declares organization pipelines"},
 		},
 		{
 			name: "a pipeline named like an organization pipeline", report: true,
@@ -205,13 +208,13 @@ func TestOrganizationConfigProblems(t *testing.T) {
 				h.files(sha1, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: lint, pipelineRun: .tekton/ci.yaml, on: {pull_request: {}}}\n", ciRun)
 			},
 			wantTitle: "Invalid .octomaton.yaml",
-			wantText:  []string{`pipelines[0] (lint): name "lint" is taken by an organization pipeline of .github`},
+			wantText:  []string{`pipelines[0] (lint): name "lint" is taken by an organization pipeline of tooling`},
 		},
 		{
 			name: "invalid organization pipelines", report: true,
 			setup:     func(h *harness) { h.host.SetFile(orgRepo, "", ".octomaton.yaml", invalidOrg) },
 			wantTitle: "Invalid organization pipelines",
-			wantText: []string{"`.octomaton.yaml` at the default branch of `octo-org/.github` (which declares the organization pipelines) is invalid, so no pipeline was started",
+			wantText: []string{"`.octomaton.yaml` at the default branch of `octo-org/tooling` (which declares the organization pipelines) is invalid, so no pipeline was started",
 				"field bogus not found in pipeline"},
 		},
 		{
@@ -220,7 +223,7 @@ func TestOrganizationConfigProblems(t *testing.T) {
 				h.host.FailFile(orgRepo, "", ".octomaton.yaml", errors.New("GitHub is down"))
 			},
 			wantTitle: "Could not read organization pipelines",
-			wantText: []string{"Octomaton could not read `.octomaton.yaml` at the default branch of `octo-org/.github` (which declares the organization pipelines):",
+			wantText: []string{"Octomaton could not read `.octomaton.yaml` at the default branch of `octo-org/tooling` (which declares the organization pipelines):",
 				"GitHub is down", "Re-run this check to try again."},
 		},
 		{
@@ -264,11 +267,11 @@ func TestRerunOfAnOrganizationPipeline(t *testing.T) {
 	h.finish("demo-lint-1111111-1", ci.Failure)
 
 	h.svc.Rerun(ctx, rerun("maintainer", h.onlyReport("lint")))
-	if spec := h.runner.Spec(h.run("demo-lint-1111111-2").ID); spec.Path != ".github:.tekton/lint.yaml" || string(spec.Definition) != lintRun {
+	if spec := h.runner.Spec(h.run("demo-lint-1111111-2").ID); spec.Path != "tooling:.tekton/lint.yaml" || string(spec.Definition) != lintRun {
 		t.Fatalf("re-run spec = %+v", spec)
 	}
 
-	// Once .github no longer declares it, its re-run fails.
+	// Once the organization repository no longer declares it, its re-run fails.
 	h.finish("demo-lint-1111111-2", ci.Failure)
 	h.host.SetFile(orgRepo, "", ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: []\n")
 	reports := h.host.ReportsNamed("lint")
@@ -278,5 +281,52 @@ func TestRerunOfAnOrganizationPipeline(t *testing.T) {
 	if len(h.runner.Runs()) != 3 || last.Title != "Pipeline not found" {
 		t.Fatalf("runs = %d, last report = %+v", len(h.runner.Runs()), last)
 	}
-	mustContain(t, last.Summary, "Neither `.octomaton.yaml` at `1111111` nor the organization pipelines of `octo-org/.github` define pipeline `lint` anymore.")
+	mustContain(t, last.Summary, "Neither `.octomaton.yaml` at `1111111` nor the organization pipelines of `octo-org/tooling` define pipeline `lint` anymore.")
+}
+
+// TestWithoutAnOrganizationRepository: without the setting, no configuration is read for organization
+// pipelines, and a configuration that declares some is invalid.
+func TestWithoutAnOrganizationRepository(t *testing.T) {
+	tests := []struct {
+		name      string
+		own       string
+		wantRuns  [][3]string
+		wantTitle string
+		wantText  string
+	}{
+		{name: "the repository's own pipelines run", own: ciConfig,
+			wantRuns: [][3]string{{"demo-ci-1111111-1", ".tekton/ci.yaml", ciRun}}},
+		{name: "organization pipelines are a configuration error", own: orgConfig,
+			wantTitle: "Invalid .octomaton.yaml", wantText: "organization: this Octomaton has no organization repository, so it reads no organization pipelines"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			setupOrganization(h)
+			h.svc.OrganizationRepository = ""
+			// Reading the organization repository would fail every pipeline.
+			h.host.FailFile(orgRepo, "", ".octomaton.yaml", errors.New("GitHub is down"))
+			h.files(sha1, tt.own, ciRun)
+			h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: true})
+			if got := runsOf(h); !reflect.DeepEqual(got, tt.wantRuns) {
+				t.Fatalf("runs = %q\nwant %q", got, tt.wantRuns)
+			}
+			for _, read := range h.host.Reads() {
+				if !strings.HasPrefix(read, repo.FullName+"@") {
+					t.Fatalf("read %s: only the repository's own files may be read", read)
+				}
+			}
+			if tt.wantTitle == "" {
+				if reports := h.host.ReportsNamed(ci.ConfigReportName); len(reports) != 0 {
+					t.Fatalf("configuration reports = %+v", reports)
+				}
+				return
+			}
+			r := h.onlyReport(ci.ConfigReportName)
+			if r.Title != tt.wantTitle {
+				t.Fatalf("report = %+v", r)
+			}
+			mustContain(t, r.Summary, tt.wantText)
+		})
+	}
 }

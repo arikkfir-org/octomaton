@@ -63,7 +63,7 @@ type Config struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Pipelines  []Pipeline `yaml:"pipelines"`
 	// Organization lists the pipelines every repository of the owner runs. Only the owner's
-	// OrganizationRepository may declare it.
+	// organization repository, a server setting, may declare it.
 	Organization *Organization `yaml:"organization"`
 }
 
@@ -71,10 +71,6 @@ type Config struct {
 type Organization struct {
 	Pipelines []Pipeline `yaml:"pipelines"`
 }
-
-// OrganizationRepository is the repository whose .octomaton.yaml, at its default branch, declares
-// the organization pipelines of its owner.
-const OrganizationRepository = ".github"
 
 // Pipeline binds events to a PipelineRun file.
 type Pipeline struct {
@@ -353,7 +349,7 @@ func (c *Config) validate(check PermissionCheck) []string {
 	if c.APIVersion != APIVersion {
 		problems = append(problems, fmt.Sprintf("apiVersion must be %q (got %q)", APIVersion, c.APIVersion))
 	}
-	// Names and check names are unique across both lists: the owner's .github repository runs both.
+	// Names and check names are unique across both lists: the organization repository runs both.
 	names := newNames()
 	problems = append(problems, names.validate("pipelines", c.Pipelines, check)...)
 	if c.Organization != nil {
@@ -414,13 +410,14 @@ func label(list string, i int, name string) string {
 }
 
 // ForRepository returns the configuration a repository runs by: own, its .octomaton.yaml (nil
-// without one), with the organization pipelines of org added, the OrganizationRepository's
-// .octomaton.yaml at its default branch (nil without one). It returns nil when own is nil and org
-// declares no organization pipelines. A plain pipelineRun path of an organization pipeline names a
-// file of the OrganizationRepository. The problems it reports are own's: organization pipelines
-// outside the OrganizationRepository, and a pipeline with the name or check name of an
-// organization pipeline, so no repository can replace one.
-func ForRepository(repository string, own, org *Config) (*Config, error) {
+// without one), with the organization pipelines of org added, the .octomaton.yaml of its owner's
+// organization repository at its default branch (nil without one). organization names that
+// repository; empty means there is none. It returns nil when own is nil and org declares no
+// organization pipelines. A plain pipelineRun path of an organization pipeline names a file of the
+// organization repository. The problems it reports are own's: organization pipelines outside the
+// organization repository, and a pipeline with the name or check name of an organization pipeline,
+// so no repository can replace one.
+func ForRepository(repository, organization string, own, org *Config) (*Config, error) {
 	var shared []Pipeline
 	if org != nil && org.Organization != nil {
 		shared = org.Organization.Pipelines
@@ -431,8 +428,12 @@ func ForRepository(repository string, own, org *Config) (*Config, error) {
 		}
 		own = &Config{APIVersion: APIVersion}
 	}
-	if own.Organization != nil && !strings.EqualFold(repository, OrganizationRepository) {
-		return nil, &Error{Problems: []string{fmt.Sprintf("organization: only the owner's %s repository declares organization pipelines", OrganizationRepository)}}
+	switch {
+	case own.Organization == nil:
+	case organization == "":
+		return nil, &Error{Problems: []string{"organization: this Octomaton has no organization repository, so it reads no organization pipelines"}}
+	case !strings.EqualFold(repository, organization):
+		return nil, &Error{Problems: []string{fmt.Sprintf("organization: only the owner's %s repository declares organization pipelines", organization)}}
 	}
 	taken := newNames()
 	for i := range shared {
@@ -443,9 +444,9 @@ func ForRepository(repository string, own, org *Config) (*Config, error) {
 		p := &own.Pipelines[i]
 		switch {
 		case taken.pipelines[p.Name]:
-			problems = append(problems, fmt.Sprintf("%s: name %q is taken by an organization pipeline of %s", label("pipelines", i, p.Name), p.Name, OrganizationRepository))
+			problems = append(problems, fmt.Sprintf("%s: name %q is taken by an organization pipeline of %s", label("pipelines", i, p.Name), p.Name, organization))
 		case taken.checks[p.CheckName()] != "":
-			problems = append(problems, fmt.Sprintf("%s: check name %q is taken by organization pipeline %q of %s", label("pipelines", i, p.Name), p.CheckName(), taken.checks[p.CheckName()], OrganizationRepository))
+			problems = append(problems, fmt.Sprintf("%s: check name %q is taken by organization pipeline %q of %s", label("pipelines", i, p.Name), p.CheckName(), taken.checks[p.CheckName()], organization))
 		}
 	}
 	if len(problems) > 0 {
@@ -454,7 +455,7 @@ func ForRepository(repository string, own, org *Config) (*Config, error) {
 	merged := &Config{APIVersion: own.APIVersion, Pipelines: slices.Clone(own.Pipelines)}
 	for _, p := range shared {
 		if p.PipelineRun.Repository == "" {
-			p.PipelineRun.Repository = OrganizationRepository
+			p.PipelineRun.Repository = organization
 		}
 		merged.Pipelines = append(merged.Pipelines, p)
 	}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,8 @@ type Config struct {
 	Relay      Relay      `envconfig:"RELAY"`
 	Retention  Retention  `envconfig:"RETENTION"`
 	Pod        Pod        `envconfig:"POD"`
+	// Organization locates the organization pipelines every repository of an owner runs.
+	Organization Organization `envconfig:"ORGANIZATION"`
 }
 
 // HTTP configures the server for the webhook, the probes and the metrics.
@@ -106,6 +109,14 @@ type Namespaces struct {
 	Overrides map[string]string `envconfig:"OVERRIDES"`
 }
 
+// Organization names the repository, in each owner, whose .octomaton.yaml may declare organization
+// pipelines; empty disables them.
+type Organization struct {
+	Repository string `envconfig:"REPOSITORY"`
+}
+
+var repositoryNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+
 // Pod identifies this replica in the leader election; set it from the downward API.
 type Pod struct {
 	// Name defaults to the host name.
@@ -151,6 +162,9 @@ func (c *Config) validate() []string {
 	}
 	if c.Retention.FreePVCsAfter <= 0 {
 		problems = append(problems, "OCTOMATON_RETENTION_FREE_PVCS_AFTER must be positive")
+	}
+	if r := c.Organization.Repository; r != "" && (!repositoryNameRE.MatchString(r) || r == "." || r == "..") {
+		problems = append(problems, fmt.Sprintf("OCTOMATON_ORGANIZATION_REPOSITORY: %q is not a repository name", r))
 	}
 	return problems
 }

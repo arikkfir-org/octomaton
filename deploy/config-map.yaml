@@ -11,7 +11,8 @@ data:
   OCTOMATON_GITHUB_ALLOWED_OWNERS: arikkfir-org  # installations on other owners are ignored
   OCTOMATON_TEKTON_DASHBOARD_URL: https://tekton.dev.kfirs.com
   OCTOMATON_NAMESPACE_TEMPLATE: "ci-{{ .Repository.Name }}"  # rendered, then sanitized to a DNS label
-  OCTOMATON_NAMESPACE_OVERRIDES: arikkfir-org/.github:ci-github
   # Octomaton forwards verified push/pull_request webhooks so Argo CD refreshes immediately
   OCTOMATON_RELAY_URLS: http://argocd-server.argocd.svc.cluster.local/api/webhook
   OCTOMATON_RETENTION_FREE_PVCS_AFTER: 1h
+  # The repository whose .octomaton.yaml declares the pipelines every repository runs
+  OCTOMATON_ORGANIZATION_REPOSITORY: tooling

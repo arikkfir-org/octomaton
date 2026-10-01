@@ -289,9 +289,10 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch matches one. The run's branch is the branch
   whose code runs: the pushed branch, a pull request's head branch (also for comment commands and review requests),
   the merge group's branch, or the default branch for schedules; a tag push has none and matches nothing. Without the
-  annotation, every branch may use the ServiceAccount; an empty or invalid one lets none. A run that names no
-  ServiceAccount runs as Tekton's default, which is never checked. This is the one setting outside `.octomaton.yaml`:
-  it sits on the identity, where the repository can't change it.
+  annotation, every branch may use the ServiceAccount; an empty or invalid one lets none. The check fails closed: a
+  named ServiceAccount Octomaton can't read (other than one that doesn't exist, which Tekton fails) refuses the run
+  too. A run that names no ServiceAccount runs as Tekton's default, which is never checked. This is the one setting
+  outside `.octomaton.yaml`: it sits on the identity, where the repository can't change it.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service accounts, except those restricted to other branches.
 

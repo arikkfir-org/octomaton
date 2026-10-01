@@ -68,6 +68,15 @@ func TestRedact(t *testing.T) {
 	}
 }
 
+func TestWithholdingRedactor(t *testing.T) {
+	red := &redactor{withhold: true}
+	for in, want := range map[string]string{"": "", "2 tests failed": withheld, fakeToken: withheld} {
+		if got := red.Redact(in); got != want {
+			t.Fatalf("Redact(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestRedactorForRun(t *testing.T) {
 	h := newRunnerHarness(t)
 	ctx := context.Background()
@@ -110,8 +119,17 @@ func TestRedactorForRun(t *testing.T) {
 	if _, err := h.r.StepLogs(ctx, id, ci.Step{Name: "b", Logs: "build-pod/step-b"}, 50, 1024); err == nil || !strings.Contains(err.Error(), "to redact") {
 		t.Fatalf("StepLogs with an unreadable Secret: %v", err)
 	}
-	if _, err := h.r.Details(ctx, id); err == nil {
-		t.Fatal("Details with an unreadable Secret succeeded")
+	details, err = h.r.Details(ctx, id)
+	if err != nil {
+		t.Fatalf("Details with an unreadable Secret: %v; the report must still conclude", err)
+	}
+	for _, task := range details.Tasks {
+		if task.Name != "build" {
+			continue
+		}
+		if task.State != ci.TaskFailed || task.Message != withheld || task.Results["check-summary"] != withheld {
+			t.Fatalf("build task = %+v; want its state kept and its message and result withheld", task)
+		}
 	}
 }
 

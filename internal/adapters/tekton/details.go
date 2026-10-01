@@ -17,7 +17,8 @@ import (
 // labelPipelineTask names the pipeline task a TaskRun runs; Tekton sets it.
 const labelPipelineTask = "tekton.dev/pipelineTask"
 
-// Details reads a run's TaskRuns.
+// Details reads a run's TaskRuns, without the run's secrets in their results and messages. When the
+// secrets can't be read, those texts are withheld.
 func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 	c := r.client()
 	pr, err := c.Get(ctx, id.Tenant, id.Name)
@@ -35,7 +36,10 @@ func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 	fromTasks(pr, results, taskRuns)
 	red, err := c.redactorFor(ctx, pr)
 	if err != nil {
-		return ci.Details{}, err
+		// The task table and the conclusion hold no output; only the texts that need redacting are withheld, so the
+		// run's report still concludes.
+		r.logger().WarnContext(ctx, "Withholding a run's results and task messages", "run", id.String(), "error", err)
+		red = &redactor{withhold: true}
 	}
 	tasks := tasksOf(pr, taskRuns)
 	for i := range tasks {

@@ -17,6 +17,9 @@ import (
 // failure messages) on its way to the code host, where a public repository shows it to anyone.
 const redacted = "[REDACTED]"
 
+// withheld replaces all of a text that can't be redacted because the run's Secrets can't be read.
+const withheld = "[withheld: Octomaton could not read the run's Secrets to redact it]"
+
 // minSecretLength is the shortest Secret value redacted by value: shorter ones would match
 // ordinary words and numbers. Values this short are left to the credential patterns.
 const minSecretLength = 8
@@ -56,6 +59,8 @@ type redactor struct {
 	// values are the Secret values to remove, longest first so a value inside another can't leave
 	// part of the longer one behind.
 	values []string
+	// withhold replaces every non-empty text whole: the values to redact are unknown.
+	withhold bool
 }
 
 // newRedactor returns a redactor for the given Secret values. A multi-line value (a private key)
@@ -80,6 +85,9 @@ func newRedactor(values [][]byte) *redactor {
 // Redact removes from s every Secret value, every base64 encoding that holds one or a known
 // credential, and every known credential.
 func (r *redactor) Redact(s string) string {
+	if r.withhold && s != "" {
+		return withheld
+	}
 	for _, v := range r.values {
 		s = strings.ReplaceAll(s, v, redacted)
 	}

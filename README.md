@@ -260,9 +260,9 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   failure messages lose every value of every Secret the PipelineRun references (its token Secret included), raw or
   base64-encoded, alone or inside a longer value, and anything shaped like a well-known credential (GitHub tokens,
   private keys, Google keys and tokens, `sk-` API keys, JWTs, AWS and Slack keys, `Authorization` headers, passwords
-  in URLs). Values shorter than 8 characters are left to those patterns. When a Secret can't be read, the logs are
-  withheld. A credential a step fetches itself in another format, or prints transformed (split, encrypted, partly), is
-  not caught: never print secrets.
+  in URLs). Values shorter than 8 characters are left to those patterns. When a Secret can't be read, the logs,
+  results and task messages are withheld, and the check still concludes. A credential a step fetches itself in another
+  format, or prints transformed (split, encrypted, partly), is not caught: never print secrets.
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
 - Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
   refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's check otherwise.

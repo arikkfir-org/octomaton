@@ -528,7 +528,7 @@ func TestDetails(t *testing.T) {
 
 func TestStepLogs(t *testing.T) {
 	h := newRunnerHarness(t)
-	id := ci.RunID{Tenant: demoNS, Name: "r"}
+	id := h.create(demoSpec(pushTrigger(shaA)), 1).ID
 	if logs, err := h.r.StepLogs(context.Background(), id, ci.Step{Name: "b", Logs: "build-pod/step-b"}, 50, 1024); err != nil || logs != "fake logs" {
 		t.Fatalf("StepLogs = %q, %v", logs, err)
 	}

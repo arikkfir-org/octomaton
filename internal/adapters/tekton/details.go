@@ -17,7 +17,8 @@ import (
 // labelPipelineTask names the pipeline task a TaskRun runs; Tekton sets it.
 const labelPipelineTask = "tekton.dev/pipelineTask"
 
-// Details reads a run's TaskRuns.
+// Details reads a run's TaskRuns, without the run's secrets in their results and messages. When the
+// secrets can't be read, those texts are withheld.
 func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 	c := r.client()
 	pr, err := c.Get(ctx, id.Tenant, id.Name)
@@ -33,7 +34,27 @@ func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 	}
 	results := resultsOf(pr)
 	fromTasks(pr, results, taskRuns)
-	return ci.Details{Tasks: tasksOf(pr, taskRuns), Results: results}, nil
+	red, err := c.redactorFor(ctx, pr)
+	if err != nil {
+		// The task table and the conclusion hold no output; only the texts that need redacting are withheld, so the
+		// run's report still concludes.
+		r.logger().WarnContext(ctx, "Withholding a run's results and task messages", "run", id.String(), "error", err)
+		red = &redactor{withhold: true}
+	}
+	tasks := tasksOf(pr, taskRuns)
+	for i := range tasks {
+		tasks[i].Message = red.Redact(tasks[i].Message)
+		redactValues(red, tasks[i].Results)
+	}
+	return ci.Details{Tasks: tasks, Results: redactValues(red, results)}, nil
+}
+
+// redactValues redacts every value of m in place, and returns it.
+func redactValues(red *redactor, m map[string]string) map[string]string {
+	for k, v := range m {
+		m[k] = red.Redact(v)
+	}
+	return m
 }
 
 // tasksOf lists a run's tasks in pipeline order, then any other task (finally tasks, and tasks of a
@@ -161,13 +182,30 @@ func fromTasks(pr *unstructured.Unstructured, results map[string]string, taskRun
 	}
 }
 
-// StepLogs reads the tail of a failed step's container log.
+// StepLogs reads the tail of a failed step's container log, without the run's secrets. When the
+// secrets can't be read, the logs are withheld.
 func (r *Runner) StepLogs(ctx context.Context, id ci.RunID, step ci.Step, tailLines, limitBytes int64) (string, error) {
 	pod, container, ok := strings.Cut(step.Logs, "/")
 	if !ok || pod == "" {
 		return "", errors.New("the TaskRun has no pod")
 	}
-	return r.client().PodLogs(ctx, id.Tenant, pod, container, tailLines, limitBytes)
+	c := r.client()
+	pr, err := c.Get(ctx, id.Tenant, id.Name)
+	if err != nil {
+		return "", err
+	}
+	if pr == nil {
+		return "", ci.ErrNotFound
+	}
+	red, err := c.redactorFor(ctx, pr)
+	if err != nil {
+		return "", err
+	}
+	logs, err := c.PodLogs(ctx, id.Tenant, pod, container, tailLines, limitBytes)
+	if err != nil {
+		return "", err
+	}
+	return red.Redact(logs), nil
 }
 
 // SetToken stores a run's token in its token Secret, which the run owns: it is created the first

@@ -1,15 +1,16 @@
 # Octomaton's release: build and push the image of a commit on main with ko,
 # tagged with the commit's short SHA (also the version the binary reports) and
 # main. The pod authenticates to Artifact Registry through Workload Identity
-# (ko's Google keychain uses Application Default Credentials). Octomaton sets
-# the params.
+# (ko's Google keychain uses Application Default Credentials) as
+# ci-octomaton-release, the one ServiceAccount allowed to push, which only main
+# may use (octomaton.dev/branches). Octomaton sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: octomaton-release-
 spec:
   taskRunTemplate:
-    serviceAccountName: pipeline
+    serviceAccountName: ci-octomaton-release
   # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
   # ko's build peaked at 2.5Gi and 3.7 cores.
   taskRunSpecs:

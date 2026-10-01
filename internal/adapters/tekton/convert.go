@@ -43,7 +43,8 @@ func runOf(pr *unstructured.Unstructured) ci.Run {
 	}
 	if run.Phase == ci.Finished {
 		if conclusion, message, done := conclusionOf(st.Conditions); done {
-			run.Outcome = ci.Outcome{Conclusion: conclusion, Message: message}
+			// Read on every status change, so without Secret lookups: only known credential formats.
+			run.Outcome = ci.Outcome{Conclusion: conclusion, Message: redactCredentials(message)}
 		}
 	}
 	return run

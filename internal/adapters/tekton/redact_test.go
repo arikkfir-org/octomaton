@@ -32,7 +32,7 @@ func jwtPart(s string) string { return base64.RawURLEncoding.EncodeToString([]by
 
 func TestRedact(t *testing.T) {
 	pem := fakePEM
-	red := newRedactor([][]byte{[]byte(fakeSecret + "\n"), []byte(pem), []byte("short"), []byte("tlsKey\n" + fakeKeyBody)})
+	red := newRedactor([][]byte{[]byte("8charval"), []byte("eleven_char"), []byte(fakeSecret + "\n"), []byte(pem), []byte("short"), []byte("tlsKey\n" + fakeKeyBody)})
 	for _, tc := range []struct {
 		name, in, want string
 	}{
@@ -42,6 +42,8 @@ func TestRedact(t *testing.T) {
 		{"one line of a multi-line Secret", "key line: " + fakeKeyBody, "key line: [REDACTED]"},
 		{"a whole private key", "before\n" + pem + "\nafter", "before\n[REDACTED]\nafter"},
 		{"a base64-encoded Secret value", "data: " + b64(fakeSecret), "data: [REDACTED]"},
+		{"a base64-encoded 8-character Secret value", "data: " + b64("8charval"), "data: [REDACTED]"},
+		{"a raw URL-safe base64 of an 11-character Secret value", "k=" + base64.RawURLEncoding.EncodeToString([]byte("eleven_char")), "k=[REDACTED]"},
 		{"a Secret value inside a base64 Basic credential", "extraHeader=x " + b64("x-access-token:"+fakeSecret), "extraHeader=x [REDACTED]"},
 		{"a URL-safe base64 Secret value", base64.RawURLEncoding.EncodeToString([]byte("k=" + fakeSecret + "??")), "[REDACTED]"},
 		{"a GitHub installation token, in no Secret", "token " + fakeToken + " end", "token [REDACTED] end"},

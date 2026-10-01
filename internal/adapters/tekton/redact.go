@@ -63,13 +63,20 @@ type redactor struct {
 	withhold bool
 }
 
-// newRedactor returns a redactor for the given Secret values. A multi-line value (a private key)
-// is also removed line by line, since a log tail may hold only some of its lines.
+// newRedactor returns a redactor for the given Secret values and their base64 encodings. A
+// multi-line value (a private key) is also removed line by line, since a log tail may hold only some
+// of its lines.
 func newRedactor(values [][]byte) *redactor {
 	r := &redactor{}
 	add := func(v string) {
-		if v = strings.TrimSpace(v); len(v) >= minSecretLength && !slices.Contains(r.values, v) {
-			r.values = append(r.values, v)
+		if v = strings.TrimSpace(v); len(v) < minSecretLength {
+			return
+		}
+		// The value's own encodings too: base64 of a short value is shorter than the runs Redact decodes.
+		for _, form := range append([]string{v}, encodings(v)...) {
+			if !slices.Contains(r.values, form) {
+				r.values = append(r.values, form)
+			}
 		}
 	}
 	for _, v := range values {
@@ -88,15 +95,16 @@ func (r *redactor) Redact(s string) string {
 	if r.withhold && s != "" {
 		return withheld
 	}
-	for _, v := range r.values {
-		s = strings.ReplaceAll(s, v, redacted)
-	}
+	// Whole base64 runs first, so a value encoded with other text goes in one piece.
 	s = encoded.ReplaceAllStringFunc(s, func(candidate string) string {
 		if decoded, ok := decodeBase64(candidate); ok && r.holdsSecret(decoded) {
 			return redacted
 		}
 		return candidate
 	})
+	for _, v := range r.values {
+		s = strings.ReplaceAll(s, v, redacted)
+	}
 	return redactCredentials(s)
 }
 
@@ -126,6 +134,15 @@ func redactCredentials(s string) string {
 		})
 	}
 	return s
+}
+
+// encodings are s in base64's four alphabets and paddings.
+func encodings(s string) []string {
+	var out []string
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		out = append(out, enc.EncodeToString([]byte(s)))
+	}
+	return out
 }
 
 // decodeBase64 decodes s in any of base64's four alphabets and paddings.

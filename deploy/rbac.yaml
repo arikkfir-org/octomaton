@@ -135,3 +135,10 @@ rules:
       - pods/log
     verbs:
       - get
+  # The octomaton.dev/branches annotation of each ServiceAccount a run names.
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get

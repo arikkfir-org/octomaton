@@ -284,8 +284,16 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
   name. Their runs get the repository's namespace and token, like its own.
+- A ServiceAccount in a tenant namespace may carry the annotation `octomaton.dev/branches`: comma-separated branch
+  globs, as in `on.push.branches`. A run that names it (`spec.taskRunTemplate.serviceAccountName` or
+  `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch matches one. The run's branch is the branch
+  whose code runs: the pushed branch, a pull request's head branch (also for comment commands and review requests),
+  the merge group's branch, or the default branch for schedules; a tag push has none and matches nothing. Without the
+  annotation, every branch may use the ServiceAccount; an empty or invalid one lets none. A run that names no
+  ServiceAccount runs as Tekton's default, which is never checked. This is the one setting outside `.octomaton.yaml`:
+  it sits on the identity, where the repository can't change it.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
-  use their namespace's service account.
+  use their namespace's service accounts, except those restricted to other branches.
 
 ## Server configuration
 
@@ -354,7 +362,7 @@ the leader, the PipelineRun informer synced).
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (`ClusterRole octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete |
+| Tenant namespaces (`ClusterRole octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
 | Cluster | PipelineRuns: get, list, watch (the leader's watch, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace | Leases: get, create, update |
 

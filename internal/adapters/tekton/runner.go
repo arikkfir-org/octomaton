@@ -130,6 +130,9 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 	if err := checkSecrets(pr, token, spec.Secrets); err != nil {
 		return ci.Run{}, &ci.Refusal{Title: "Refused", Reason: err.Error()}
 	}
+	if err := checkServiceAccounts(ctx, r.client(), ns, spec.Path, pr, t.Branch); err != nil {
+		return ci.Run{}, err
+	}
 	created, err := r.client().Create(ctx, pr)
 	if errors.Is(err, errAlreadyExists) {
 		existing, gerr := r.Get(ctx, ci.RunID{Tenant: ns, Name: name})

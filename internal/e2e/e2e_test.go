@@ -439,3 +439,41 @@ func TestOrganizationPipelinesEndToEnd(t *testing.T) {
 		t.Fatalf("check run = %+v", check)
 	}
 }
+
+func TestServiceAccountBranchesEndToEnd(t *testing.T) {
+	e := setup(t)
+	// The ServiceAccount the pull request's run names may only run main.
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "pipeline", Namespace: ns, Annotations: map[string]string{"octomaton.dev/branches": "main"}}}
+	if _, err := e.runner.Kube.CoreV1().ServiceAccounts(ns).Create(context.Background(), sa, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.deliver("pull_request", "sa-1", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var check *githubtest.CheckRun
+		for _, c := range e.gh.CheckRuns() {
+			if c.Name == "ci" && c.Status == "completed" {
+				check = &c
+			}
+		}
+		if check != nil {
+			if check.Conclusion != "failure" || !strings.Contains(check.Summary+check.Text, "may use (its `octomaton.dev/branches` annotation), and this run is on branch \"feature\"") {
+				t.Fatalf("check run = %+v, want a failure that names the annotation", *check)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no completed check run: %+v", e.gh.CheckRuns())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	runs, err := e.dyn.Resource(tekton.PipelineRuns).Namespace(ns).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs.Items) != 0 {
+		t.Fatalf("the refused run created %d PipelineRuns", len(runs.Items))
+	}
+}

@@ -51,6 +51,18 @@ func (c *kubeClient) NamespaceExists(ctx context.Context, namespace string) (boo
 	}
 }
 
+// ServiceAccount returns a ServiceAccount, or nil when it doesn't exist.
+func (c *kubeClient) ServiceAccount(ctx context.Context, namespace, name string) (*corev1.ServiceAccount, error) {
+	sa, err := c.Kube.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sa, nil
+}
+
 // Create creates a PipelineRun; errAlreadyExists when the name is taken.
 func (c *kubeClient) Create(ctx context.Context, pr *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	created, err := c.runs(pr.GetNamespace()).Create(ctx, pr, metav1.CreateOptions{})

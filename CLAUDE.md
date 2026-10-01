@@ -8,8 +8,10 @@
   every repository runs, is a server setting (`OCTOMATON_ORGANIZATION_REPOSITORY`), never a name in the code.
 - The only repository files Octomaton reads are the root `.octomaton.yaml` (the repository's own, and its owner's
   organization repository's) and the PipelineRun files they reference.
-- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. Labels and annotations under
-  `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping Octomaton writes on its own objects.
+- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the
+  `octomaton.dev/branches` annotation on a tenant ServiceAccount, which the cluster's owner sets to restrict it to
+  branches. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
+  Octomaton writes on its own objects.
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
   templates over the documented context) and the optional `githubToken` workspace.
 - The hub reference (`arikkfir-org/docs`, `hub/reference.md` → Octomaton) is the contract for the hub's deployment

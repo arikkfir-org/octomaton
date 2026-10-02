@@ -22,10 +22,12 @@ func TestRefreshTokensOnce(t *testing.T) {
 		name        string
 		expires     time.Duration // from now; 0 stores no token
 		token       bool
+		all         bool // a token for every repository of the installation
 		finished    bool
 		wantRefresh bool
 	}{
 		{name: "a token about to expire", expires: 5 * time.Minute, token: true, wantRefresh: true},
+		{name: "a token for every repository about to expire", expires: 5 * time.Minute, token: true, all: true, wantRefresh: true},
 		{name: "an expired token", expires: -time.Minute, token: true, wantRefresh: true},
 		{name: "a fresh token", expires: 50 * time.Minute, token: true},
 		{name: "a finished run's token", expires: time.Minute, token: true, finished: true},
@@ -37,7 +39,9 @@ func TestRefreshTokensOnce(t *testing.T) {
 			host, runner := citest.NewHost(clock), citest.NewRunner(clock)
 			spec := ci.RunSpec{Trigger: ci.Trigger{InstallationID: 7, Repository: repo, Revision: "abc", Pipeline: "ci"}}
 			if tt.token {
-				spec.Token = token
+				settings := *token
+				settings.AllRepositories = tt.all
+				spec.Token = &settings
 			}
 			run, err := runner.Create(context.Background(), spec, 1)
 			if err != nil {
@@ -61,6 +65,9 @@ func TestRefreshTokensOnce(t *testing.T) {
 				t.Fatalf("token = %+v, want a new one", tok)
 			}
 			want := []citest.TokenRequest{{InstallationID: 7, RepositoryID: 1001, Permissions: map[string]string{"contents": "read"}}}
+			if tt.all {
+				want[0].RepositoryID = 0
+			}
 			if got := host.TokenRequests(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("token requests = %+v, want %+v", got, want)
 			}

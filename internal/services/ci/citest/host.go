@@ -27,8 +27,9 @@ type Report struct {
 // TokenRequest is a token the Host minted.
 type TokenRequest struct {
 	InstallationID int64
-	RepositoryID   int64
-	Permissions    map[string]string
+	// RepositoryID is zero for a token for every repository of the installation.
+	RepositoryID int64
+	Permissions  map[string]string
 }
 
 // Reaction is a reaction added to a comment.
@@ -277,10 +278,22 @@ func (h *Host) RepositoryToken(_ context.Context, installationID, repositoryID i
 	if err := h.failure("RepositoryToken"); err != nil {
 		return ci.Token{}, err
 	}
+	return h.mint(installationID, repositoryID, permissions), nil
+}
+
+// InstallationToken mints a token for every repository and records the request (RepositoryID 0).
+func (h *Host) InstallationToken(_ context.Context, installationID int64, permissions map[string]string) (ci.Token, error) {
+	if err := h.failure("InstallationToken"); err != nil {
+		return ci.Token{}, err
+	}
+	return h.mint(installationID, 0, permissions), nil
+}
+
+func (h *Host) mint(installationID, repositoryID int64, permissions map[string]string) ci.Token {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.tokens = append(h.tokens, TokenRequest{InstallationID: installationID, RepositoryID: repositoryID, Permissions: permissions})
-	return ci.Token{Value: fmt.Sprintf("token-%d", len(h.tokens)), ExpiresAt: h.now().Add(time.Hour), Permissions: permissions}, nil
+	return ci.Token{Value: fmt.Sprintf("token-%d", len(h.tokens)), ExpiresAt: h.now().Add(time.Hour), Permissions: permissions}
 }
 
 // CheckPermissions returns PermissionsError.

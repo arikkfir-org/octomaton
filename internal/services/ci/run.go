@@ -1,6 +1,9 @@
 package ci
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // RunID identifies a run.
 type RunID struct {
@@ -46,14 +49,25 @@ type Concurrency struct {
 	Policy Policy
 }
 
-// TokenSettings asks for a short-lived code-host token for the run's repository.
+// TokenSettings asks for a short-lived code-host token for the run's repository, or for every
+// repository of its installation.
 type TokenSettings struct {
 	// Workspace is where the run reads the token.
 	Workspace   string            `json:"workspace"`
 	Permissions map[string]string `json:"permissions"`
+	// AllRepositories asks for every repository of the installation, not just the run's.
+	AllRepositories bool `json:"allRepositories,omitempty"`
 }
 
-// Token is a short-lived code-host token for one repository.
+// Mint mints the token s asks for, for a run of t.
+func (s *TokenSettings) Mint(ctx context.Context, host CodeHost, t Trigger) (Token, error) {
+	if s.AllRepositories {
+		return host.InstallationToken(ctx, t.InstallationID, s.Permissions)
+	}
+	return host.RepositoryToken(ctx, t.InstallationID, t.Repository.ID, s.Permissions)
+}
+
+// Token is a short-lived code-host token.
 type Token struct {
 	Value       string
 	ExpiresAt   time.Time

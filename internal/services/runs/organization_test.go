@@ -37,6 +37,7 @@ organization:
       pipelineRun: {repository: shared, path: review/pipelinerun.yaml}
       on:
         review_request: {reviewers: [octo-reviewer]}
+      githubToken: {workspace: github-token, permissions: {contents: read, pull_requests: read}, repositories: all}
       secrets: [api-key]
     - name: format
       pipelineRun: .tekton/format.yaml
@@ -151,6 +152,27 @@ func TestOrganizationPipelineRunsBelongToTheRepository(t *testing.T) {
 	}
 	if tokens := h.host.TokenRequests(); len(tokens) != 1 || tokens[0].RepositoryID != repo.ID {
 		t.Fatalf("token requests = %+v, want one for %s", tokens, repo.FullName)
+	}
+}
+
+// TestTokenForEveryRepository: a pipeline that asks for a token for every repository gets one token
+// for the whole installation, with the permissions it asks for, not one restricted to its repository.
+func TestTokenForEveryRepository(t *testing.T) {
+	h := newHarness(t)
+	setupOrganization(h)
+	h.requestReview("d-1", "octo-reviewer")
+
+	run := h.run("demo-review-1111111-1")
+	want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read", "pull_requests": "read"}, AllRepositories: true}
+	if got := h.runner.Spec(run.ID).Token; !reflect.DeepEqual(got, want) {
+		t.Fatalf("token settings = %+v, want %+v", got, want)
+	}
+	tokens := h.host.TokenRequests()
+	if len(tokens) != 1 || tokens[0].RepositoryID != 0 || tokens[0].InstallationID != installationID || !reflect.DeepEqual(tokens[0].Permissions, want.Permissions) {
+		t.Fatalf("token requests = %+v, want one for every repository of installation %d", tokens, installationID)
+	}
+	if tok, ok := h.runner.Token(run.ID); !ok || tok.Value != "token-1" {
+		t.Fatalf("the run's token = %+v, %v", tok, ok)
 	}
 }
 

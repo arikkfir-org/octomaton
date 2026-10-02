@@ -211,12 +211,17 @@ type Concurrency struct {
 	group *template.Template
 }
 
-// GitHubToken requests a short-lived, repository-scoped installation token bound
-// to the PipelineRun as a Secret workspace.
+// GitHubToken requests a short-lived installation token bound to the PipelineRun as a Secret
+// workspace: for the run's repository, or for every repository of the installation.
 type GitHubToken struct {
 	Workspace   string            `yaml:"workspace"`
 	Permissions map[string]string `yaml:"permissions"`
+	// Repositories is empty for the run's repository alone, or AllRepositories.
+	Repositories string `yaml:"repositories"`
 }
+
+// AllRepositories asks for a token for every repository of the installation.
+const AllRepositories = "all"
 
 // Error lists every problem found in a configuration file.
 type Error struct {
@@ -603,6 +608,8 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 		}
 	}
 
+	// Pull requests, merge groups and pushes read their definitions at the commit under test.
+	headDefinitions := on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil
 	if gt := p.GitHubToken; gt != nil {
 		if strings.TrimSpace(gt.Workspace) == "" {
 			add("githubToken.workspace is required")
@@ -612,9 +619,18 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 				add("githubToken.permissions: %v", err)
 			}
 		}
+		switch gt.Repositories {
+		case "":
+		case AllRepositories:
+			if headDefinitions {
+				add("githubToken.repositories: only pipelines whose every trigger is comment, review_request or schedule may have a token for every repository, because only they read their definitions from the default branch")
+			}
+		default:
+			add("githubToken.repositories %q must be %s (or omitted for the run's repository)", gt.Repositories, AllRepositories)
+		}
 	}
 
-	if len(p.Secrets) > 0 && (on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil) {
+	if len(p.Secrets) > 0 && headDefinitions {
 		add("secrets: only pipelines whose every trigger is comment, review_request or schedule may mount Secrets, because only they read their definitions from the default branch")
 	}
 	seenSecrets := map[string]bool{}
@@ -736,7 +752,11 @@ func (p *Pipeline) Token() *ci.TokenSettings {
 	if p.GitHubToken == nil {
 		return nil
 	}
-	return &ci.TokenSettings{Workspace: p.GitHubToken.Workspace, Permissions: p.TokenPermissions()}
+	return &ci.TokenSettings{
+		Workspace:       p.GitHubToken.Workspace,
+		Permissions:     p.TokenPermissions(),
+		AllRepositories: p.GitHubToken.Repositories == AllRepositories,
+	}
 }
 
 // TokenWorkspace returns the workspace the GitHub token is bound to, or "".

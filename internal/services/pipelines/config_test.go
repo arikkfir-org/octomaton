@@ -3,6 +3,7 @@ package pipelines
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,8 @@ pipelines:
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
+      # repositories: all              # optional: every repository the App is installed on in the owner, not just this
+                                       # one; only when every trigger reads definitions from the default branch
     secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
                                        # trigger reads definitions from the default branch (comment, review_request,
                                        # schedule)
@@ -92,8 +95,8 @@ func TestParseReferenceExample(t *testing.T) {
 	if on.PullRequest == nil || on.MergeGroup == nil || on.Push == nil || on.Comment == nil || on.ReviewRequest == nil || len(on.Schedule) != 1 {
 		t.Fatalf("triggers not all parsed: %+v", on)
 	}
-	if p.TimeoutDuration() != time.Hour || p.TokenWorkspace() != "github-token" || p.TokenPermissions()["contents"] != "read" {
-		t.Fatalf("pipeline settings: timeout %v, workspace %q, permissions %v", p.TimeoutDuration(), p.TokenWorkspace(), p.TokenPermissions())
+	if p.TimeoutDuration() != time.Hour || p.TokenWorkspace() != "github-token" || p.TokenPermissions()["contents"] != "read" || p.Token().AllRepositories {
+		t.Fatalf("pipeline settings: timeout %v, workspace %q, token %+v", p.TimeoutDuration(), p.TokenWorkspace(), p.Token())
 	}
 	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks {
 		t.Fatalf("concurrency %+v, taskChecks %v", p.Concurrency, p.TaskChecks)
@@ -201,6 +204,11 @@ func TestParseProblems(t *testing.T) {
 		{name: "token without workspace", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {}}\n", want: "githubToken.workspace is required"},
 		{name: "unknown token permission", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, permissions: {contnet: read}}}\n", want: "githubToken.permissions"},
 		{name: "bad token access", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, permissions: {contents: all}}}\n", want: "access level"},
+		{name: "token repositories other than all", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [r]}}, githubToken: {workspace: w, repositories: docs}}\n", want: `githubToken.repositories "docs" must be all`},
+		{name: "token repositories misspelt", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [r]}}, githubToken: {workspace: w, repositories: All}}\n", want: `githubToken.repositories "All" must be all (or omitted for the run's repository)`},
+		{name: "token for every repository with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines whose every trigger is comment, review_request or schedule may have a token for every repository"},
+		{name: "token for every repository with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines"},
+		{name: "token for every repository with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines"},
 		{name: "bad timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: forever}\n", want: "is not a duration"},
 		{name: "zero timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: 0s}\n", want: "must be positive"},
 		{name: "concurrency without group", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, concurrency: {policy: queue}}\n", want: "concurrency.group is required"},
@@ -238,6 +246,7 @@ func TestParseProblems(t *testing.T) {
 		{name: "unknown organization pipeline key", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {push: {}}, retries: 3}\n", want: "field retries not found in pipeline"},
 		{name: "organization pipeline on a schedule", yaml: head + "organization:\n  pipelines:\n    - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}}\n", want: "organization.pipelines[0] (nightly): organization pipelines can't use on.schedule"},
 		{name: "organization pipeline with secrets on pull requests", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {pull_request: {}}, secrets: [api-key]}\n", want: "organization.pipelines[0] (lint): secrets: only pipelines"},
+		{name: "organization pipeline with a token for every repository on pull requests", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {pull_request: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "organization.pipelines[0] (lint): githubToken.repositories: only pipelines"},
 		{name: "organization pipeline named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (ci): duplicate pipeline name "ci"`},
 		{name: "organization check named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: lint, displayName: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (lint): check name "ci" is taken by pipeline "ci"`},
 	}
@@ -389,9 +398,9 @@ func TestPipelineRunRef(t *testing.T) {
 	}
 }
 
-// TestSecretsOnDefaultBranchTriggers covers the pipelines that may list Secrets: those whose every trigger
-// reads its definitions from the default branch.
-func TestSecretsOnDefaultBranchTriggers(t *testing.T) {
+// TestDefaultBranchTriggers covers the pipelines that may list Secrets and ask for a token for every
+// repository: those whose every trigger reads its definitions from the default branch.
+func TestDefaultBranchTriggers(t *testing.T) {
 	tests := []struct {
 		name, on string
 	}{
@@ -402,9 +411,14 @@ func TestSecretsOnDefaultBranchTriggers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key, bot.token]}\n")
-			if got := cfg.Pipelines[0].Secrets; strings.Join(got, ",") != "api-key,bot.token" {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key, bot.token], githubToken: {workspace: github-token, permissions: {contents: read, pull_requests: read}, repositories: all}}\n")
+			p := cfg.Pipelines[0]
+			if got := p.Secrets; strings.Join(got, ",") != "api-key,bot.token" {
 				t.Fatalf("secrets = %v", got)
+			}
+			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read", "pull_requests": "read"}, AllRepositories: true}
+			if got := p.Token(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Token() = %+v, want %+v", got, want)
 			}
 		})
 	}

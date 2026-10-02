@@ -153,6 +153,18 @@ func (a *App) Accounts(ctx context.Context) ([]ci.Account, error) {
 // RepositoryToken mints a short-lived installation token restricted to one repository. With no
 // permissions it grants contents:read only.
 func (a *App) RepositoryToken(ctx context.Context, installationID, repositoryID int64, permissions map[string]string) (ci.Token, error) {
+	return a.installationToken(ctx, installationID, []int64{repositoryID}, permissions)
+}
+
+// InstallationToken mints a short-lived installation token for every repository the installation
+// can reach. With no permissions it grants contents:read only.
+func (a *App) InstallationToken(ctx context.Context, installationID int64, permissions map[string]string) (ci.Token, error) {
+	return a.installationToken(ctx, installationID, nil, permissions)
+}
+
+// installationToken mints a token restricted to repositoryIDs, or for every repository of the
+// installation when there are none.
+func (a *App) installationToken(ctx context.Context, installationID int64, repositoryIDs []int64, permissions map[string]string) (ci.Token, error) {
 	if len(permissions) == 0 {
 		permissions = map[string]string{"contents": "read"}
 	}
@@ -161,7 +173,7 @@ func (a *App) RepositoryToken(ctx context.Context, installationID, repositoryID 
 		return ci.Token{}, err
 	}
 	tok, _, err := a.client.Apps.CreateInstallationToken(ctx, installationID, &github.InstallationTokenOptions{
-		RepositoryIDs: []int64{repositoryID},
+		RepositoryIDs: repositoryIDs,
 		Permissions:   perms,
 	})
 	if err != nil {

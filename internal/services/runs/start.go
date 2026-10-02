@@ -262,12 +262,11 @@ func (s *Service) openTaskReports(ctx context.Context, gh ci.Installation, run c
 	return errors.Join(err, s.Runner.Record(ctx, run.ID, ci.Record{TaskReportIDs: ids}))
 }
 
-// mintToken mints the run's repository token and stores it where the run reads it.
+// mintToken mints the run's token and stores it where the run reads it.
 func (s *Service) mintToken(ctx context.Context, run ci.Run) error {
-	t := run.Trigger
-	tok, err := s.Host.RepositoryToken(ctx, t.InstallationID, t.Repository.ID, run.Token.Permissions)
+	tok, err := run.Token.Mint(ctx, s.Host, run.Trigger)
 	if err != nil {
-		return fmt.Errorf("minting the repository token: %w", err)
+		return fmt.Errorf("minting the run's token: %w", err)
 	}
 	return s.Runner.SetToken(ctx, run, tok)
 }

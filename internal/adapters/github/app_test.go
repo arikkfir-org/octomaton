@@ -129,31 +129,44 @@ func TestPermission(t *testing.T) {
 	}
 }
 
-func TestRepositoryToken(t *testing.T) {
+func TestTokens(t *testing.T) {
 	app, srv := newApp(t)
 	ctx := context.Background()
 	tests := []struct {
 		name        string
+		all         bool // InstallationToken rather than RepositoryToken
 		permissions map[string]string
 		want        map[string]string
+		wantRepos   []int64 // nil: no repository_ids, so every repository of the installation
 	}{
-		{"contents:read by default", nil, map[string]string{"contents": "read"}},
-		{"the permissions asked for", map[string]string{"checks": "write", "contents": "read"}, map[string]string{"checks": "write", "contents": "read"}},
+		{"contents:read by default", false, nil, map[string]string{"contents": "read"}, []int64{1234}},
+		{"the permissions asked for", false, map[string]string{"checks": "write", "contents": "read"}, map[string]string{"checks": "write", "contents": "read"}, []int64{1234}},
+		{"every repository, contents:read by default", true, nil, map[string]string{"contents": "read"}, nil},
+		{"every repository, the permissions asked for", true, map[string]string{"contents": "read", "pull_requests": "read"}, map[string]string{"contents": "read", "pull_requests": "read"}, nil},
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tok, err := app.RepositoryToken(ctx, installationID, 1234, tt.permissions)
+			var tok ci.Token
+			var err error
+			if tt.all {
+				tok, err = app.InstallationToken(ctx, installationID, tt.permissions)
+			} else {
+				tok, err = app.RepositoryToken(ctx, installationID, 1234, tt.permissions)
+			}
 			if err != nil || !strings.HasPrefix(tok.Value, "ghs_") || tok.ExpiresAt.Before(time.Now()) || fmt.Sprint(tok.Permissions) != fmt.Sprint(tt.want) {
-				t.Fatalf("RepositoryToken = %+v, %v", tok, err)
+				t.Fatalf("token = %+v, %v", tok, err)
 			}
 			r := srv.TokenRequests()[i]
-			if r.InstallationID != installationID || !slices.Equal(r.RepositoryIDs, []int64{1234}) || fmt.Sprint(r.Permissions) != fmt.Sprint(tt.want) {
-				t.Fatalf("token request = %+v, want repository 1234 with %v", r, tt.want)
+			if r.InstallationID != installationID || !slices.Equal(r.RepositoryIDs, tt.wantRepos) || fmt.Sprint(r.Permissions) != fmt.Sprint(tt.want) {
+				t.Fatalf("token request = %+v, want repositories %v with %v", r, tt.wantRepos, tt.want)
 			}
 		})
 	}
 	if _, err := app.RepositoryToken(ctx, installationID, 1234, map[string]string{"contents": "all"}); err == nil {
 		t.Fatalf("RepositoryToken must refuse invalid permissions")
+	}
+	if _, err := app.InstallationToken(ctx, installationID, map[string]string{"contents": "all"}); err == nil {
+		t.Fatalf("InstallationToken must refuse invalid permissions")
 	}
 }
 

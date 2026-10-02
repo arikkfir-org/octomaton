@@ -246,7 +246,7 @@ func TestStartAbortsWhenTheTokenCannotBeMinted(t *testing.T) {
 	if r.Conclusion != ci.Failure || r.Title != "The run could not be started" {
 		t.Fatalf("report = %+v", r)
 	}
-	mustContain(t, r.Summary, "Octomaton could not start PipelineRun `ci-demo/demo-ci-1111111-1`", "minting the repository token")
+	mustContain(t, r.Summary, "Octomaton could not start PipelineRun `ci-demo/demo-ci-1111111-1`", "minting the run's token")
 	if got := h.m.Count(t, "octomaton.runs.created", attribute.String("result", metrics.RunError)); got != 1 {
 		t.Fatalf("errors = %v", got)
 	}

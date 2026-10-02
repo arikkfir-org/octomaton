@@ -13,6 +13,9 @@ type CodeHost interface {
 	Installation(id int64) Installation
 	// RepositoryToken mints a short-lived token for one repository with the given permissions.
 	RepositoryToken(ctx context.Context, installationID, repositoryID int64, permissions map[string]string) (Token, error)
+	// InstallationToken mints a short-lived token for every repository of the installation with the
+	// given permissions.
+	InstallationToken(ctx context.Context, installationID int64, permissions map[string]string) (Token, error)
 	// CheckPermissions reports token permissions the code host cannot grant.
 	CheckPermissions(permissions map[string]string) error
 }

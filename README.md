@@ -86,6 +86,8 @@ pipelines:
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
+      # repositories: all              # optional: every repository the App is installed on in the owner, not just this
+                                       # one; only when every trigger reads definitions from the default branch
     secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
                                        # trigger reads definitions from the default branch (comment, review_request,
                                        # schedule)
@@ -142,7 +144,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun must be self-contained: remote references are refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
-| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. |
+| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
 | `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only a pipeline whose every trigger is `comment`, `review_request` or `schedule` may list any, because only those read definitions from the default branch. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
@@ -282,7 +284,8 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 - A run may mount no Secret other than the token Octomaton binds and those its pipeline lists in `secrets` (volumes,
   workspaces, projected sources, `env` and `envFrom` are checked). Only a pipeline whose every trigger reads its
   definitions from the default branch may list any, so definitions at a pull request's head never reach a listed
-  Secret. Tokens are scoped to the event's repository with least permissions.
+  Secret. Tokens are scoped to the event's repository with least permissions, unless the pipeline asks for every
+  repository (`githubToken.repositories: all`), which follows the same rule as `secrets`.
 - Remote Tekton references are refused (`pipelineRef`, `taskRef`, a step's `ref`, any `resolver` or `bundle`), because
   Octomaton can only check the definitions it can see: a PipelineRun holds its whole `spec.pipelineSpec`, with a
   `taskSpec` per task.
@@ -450,6 +453,12 @@ queue, and `release` on pushes to `main`. `release` publishes the image to
 `me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the commit's short SHA (for example `afa6953`) and
 `main`. The same short SHA is the version the binary reports and the `service.version` of its telemetry. Argo CD runs
 the image of the newest commit on `main` ([Deployment](#deployment)).
+
+This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
+model runs; `arikkfir-org/tooling` runs it). `reviewer-image-check` builds it on pull requests that change it, and
+`reviewer-image` publishes it from `main` when it changes, with rootless BuildKit, to
+`me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` pins it by
+digest. Octomaton itself never reads it.
 
 The first image has to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
 commit Argo CD deploys. `make image` builds and pushes the image of `HEAD` the way the release pipeline would, except

@@ -83,8 +83,7 @@ func (s *Service) RefreshTokensOnce(ctx context.Context, within time.Duration) (
 		if !ok || expires.Sub(s.now()) > within {
 			continue
 		}
-		t := run.Trigger
-		tok, err := s.Host.RepositoryToken(ctx, t.InstallationID, t.Repository.ID, run.Token.Permissions)
+		tok, err := run.Token.Mint(ctx, s.Host, run.Trigger)
 		if err == nil {
 			err = s.Runner.SetToken(ctx, run, tok)
 		}

@@ -31,3 +31,34 @@ pipelines:
     concurrency:
       group: "release-{{ .Ref }}"
       policy: latest
+
+  # Publish the pull request reviewer's image (images/reviewer, run by arikkfir-org/tooling's reviewer) from main,
+  # tagged with the commit's short SHA and "main", whenever it changes. Unlike release, it has a paths filter: tooling
+  # pins the image by digest, so nothing runs whatever main is at.
+  - name: reviewer-image
+    pipelineRun: .tekton/reviewer-image.yaml
+    on:
+      push:
+        branches: [main]
+        paths: [images/reviewer/**, .tekton/reviewer-image.yaml]
+    params:
+      repo-url: "{{ .Repository.CloneURL }}"
+      revision: "{{ .Revision }}"
+    timeout: 30m
+    # Pushes to main publish the "main" tag: only the newest waiting publication may run.
+    concurrency:
+      group: reviewer-image
+      policy: latest
+
+  # Build the reviewer's image for pull requests that change it, without pushing it.
+  - name: reviewer-image-check
+    displayName: Reviewer Image
+    pipelineRun: .tekton/reviewer-image-check.yaml
+    on:
+      pull_request:
+        branches: [main]
+        paths: [images/reviewer/**, .tekton/reviewer-image-check.yaml]
+    params:
+      repo-url: "{{ .Repository.CloneURL }}"
+      revision: "{{ .Revision }}"
+    timeout: 30m

@@ -61,6 +61,10 @@
   (`maxUnavailable: 1`). Octomaton needs no single-replica guard: every replica serves webhooks, and only the Lease
   holder reports, schedules and cleans up.
 - CI renders `deploy/` and validates it with kubeconform; run `kubectl kustomize deploy` before pushing a change there.
+- `images/reviewer/` is the hub's pull request reviewer image, run by `arikkfir-org/tooling`'s reviewer; the code never
+  reads it. `reviewer-image` publishes it from `main` as `ci-octomaton-release`, with a `paths` filter (tooling pins it
+  by digest); `reviewer-image-check` builds it on pull requests. Pin its base image by digest. After it publishes, bump
+  the digest in tooling's `reviewer/pipelinerun.yaml`.
 
 ## Tests
 

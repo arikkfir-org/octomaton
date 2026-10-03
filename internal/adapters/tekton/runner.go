@@ -78,7 +78,9 @@ func (r *Runner) Check(ctx context.Context, spec ci.RunSpec) error {
 	}
 	exists, err := r.client().NamespaceExists(ctx, ns)
 	if err != nil {
-		return refusal("Could not verify that namespace `%s` exists: %v", ns, err)
+		refused := refusal("Could not verify that namespace `%s` exists: %v", ns, err)
+		refused.Cause = err
+		return refused
 	}
 	if !exists {
 		return refusal("repository not onboarded: namespace %s not found", ns)
@@ -142,7 +144,7 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 		return existing, ci.ErrExists
 	}
 	if err != nil {
-		return ci.Run{}, &ci.Refusal{Title: "Could not create the PipelineRun", Reason: fmt.Sprintf("Kubernetes refused PipelineRun `%s/%s`:\n\n```\n%v\n```", ns, name, err)}
+		return ci.Run{}, &ci.Refusal{Title: "Could not create the PipelineRun", Reason: fmt.Sprintf("Kubernetes refused PipelineRun `%s/%s`:\n\n```\n%v\n```", ns, name, err), Cause: err}
 	}
 	return runOf(created), nil
 }

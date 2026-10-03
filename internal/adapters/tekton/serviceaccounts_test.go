@@ -82,6 +82,9 @@ func TestServiceAccountBranches(t *testing.T) {
 			if !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, tt.wantText) {
 				t.Fatalf("Create = %v, want a refusal mentioning %q", err, tt.wantText)
 			}
+			if (refusal.Cause != nil) != tt.failGet {
+				t.Fatalf("cause = %v: only a ServiceAccount that cannot be read is a failed call", refusal.Cause)
+			}
 			if len(runs.Items) != 0 {
 				t.Fatalf("a refused run created %d PipelineRuns", len(runs.Items))
 			}

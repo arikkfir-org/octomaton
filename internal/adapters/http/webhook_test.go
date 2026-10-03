@@ -150,12 +150,15 @@ func (d stubDecoder) Decode(event, delivery string, body []byte) (ci.Event, stri
 // handled receives the delivery of each event handled.
 type handled chan string
 
-func (h handled) Handle(ctx context.Context, ev ci.Event) { h <- ev.(*ci.CommandEvent).DeliveryID }
+func (h handled) Handle(ctx context.Context, ev ci.Event) error {
+	h <- ev.(*ci.CommandEvent).DeliveryID
+	return nil
+}
 
 // handlerFunc handles events with a function.
-type handlerFunc func(ctx context.Context, ev ci.Event)
+type handlerFunc func(ctx context.Context, ev ci.Event) error
 
-func (f handlerFunc) Handle(ctx context.Context, ev ci.Event) { f(ctx, ev) }
+func (f handlerFunc) Handle(ctx context.Context, ev ci.Event) error { return f(ctx, ev) }
 
 type stubRelay struct {
 	mu        sync.Mutex
@@ -275,10 +278,50 @@ func TestHandlerDedupesDeliveries(t *testing.T) {
 	}
 }
 
+func TestHandlerForgetsDeliveriesItFailed(t *testing.T) {
+	tests := []struct {
+		name        string
+		handle      func() error
+		wantHandled int
+	}{
+		{name: "a handled delivery's redelivery is a duplicate", handle: func() error { return nil }, wantHandled: 1},
+		{name: "a failed delivery's redelivery is handled", handle: func() error { return errors.New("GitHub is down") }, wantHandled: 2},
+		{name: "a panicking delivery's redelivery is handled", handle: func() error { panic("boom") }, wantHandled: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ran := make(chan struct{}, 2)
+			events := handlerFunc(func(context.Context, ci.Event) error {
+				ran <- struct{}{}
+				return tt.handle()
+			})
+			h, _, _ := newHandler(t, stubDecoder{}, events, 10)
+			post(h, "push", "d1", []byte(pushBody), true)
+			<-ran
+			// The job forgets the delivery after its handler returns: wait for the one worker to be free.
+			idle := make(chan struct{})
+			if !h.Pool.Submit(Job{Name: "idle", Run: func(context.Context) { close(idle) }}) {
+				t.Fatalf("the pool refused a job")
+			}
+			<-idle
+			post(h, "push", "d1", []byte(pushBody), true)
+			handled := 1
+			select {
+			case <-ran:
+				handled++
+			case <-time.After(200 * time.Millisecond):
+			}
+			if handled != tt.wantHandled {
+				t.Fatalf("handled %d times, want %d", handled, tt.wantHandled)
+			}
+		})
+	}
+}
+
 func TestHandlerQueueFullAnswers503AndForgetsDelivery(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := handlerFunc(func(context.Context, ci.Event) { started <- struct{}{}; <-block })
+	events := handlerFunc(func(context.Context, ci.Event) error { started <- struct{}{}; <-block; return nil })
 	h, _, m := newHandler(t, stubDecoder{}, events, 1)
 	defer close(block)
 	post(h, "push", "d1", []byte(pushBody), true) // taken by the worker

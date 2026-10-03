@@ -42,7 +42,8 @@
   dependency-injected.
 - Every GitHub call goes through the App's retrying transport (`adapters/github/retry.go`); never retry a call
   yourself. When an event's calls still fail, report it on a check (a completed report on `detached`'s context, which
-  outlives the job), and log only what can't be reported.
+  outlives the job), and log only what can't be reported. Return what a failed call left undone up to `Handle`: the
+  webhook handler then forgets the delivery, so its redelivery runs again.
 - Runs are created held, then their report, task reports and token, then released per concurrency policy; any failure
   in between cancels the run and fails its report. Keep every step idempotent (Resume replays them).
 - Logs: `log/slog`, set up by `internal/system/telemetry`: JSON with the fields Cloud Logging reads on GKE, text

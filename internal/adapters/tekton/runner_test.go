@@ -237,9 +237,10 @@ func TestRefusals(t *testing.T) {
 		create    bool
 		wantTitle string
 		wantText  string
+		wantCause bool // a failed call refused it, which a retry may get past
 	}{
 		{name: "a repository without its namespace", spec: demoSpec(other), wantTitle: "Could not start the pipeline", wantText: "repository not onboarded: namespace ci-other not found"},
-		{name: "namespaces that cannot be read", spec: demoSpec(pushTrigger(shaA)), wantTitle: "Could not start the pipeline", wantText: "Could not verify that namespace `ci-demo` exists",
+		{name: "namespaces that cannot be read", spec: demoSpec(pushTrigger(shaA)), wantTitle: "Could not start the pipeline", wantText: "Could not verify that namespace `ci-demo` exists", wantCause: true,
 			setup: func(h *runnerHarness) {
 				h.kube.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("boom") })
 			}},
@@ -251,7 +252,7 @@ func TestRefusals(t *testing.T) {
 			s := withDefinition(demoDef + "  workspaces:\n    - {name: creds, secret: {secretName: prod-db}}\n")
 			return s
 		}(), create: true, wantTitle: "Refused", wantText: `references Secret "prod-db"`},
-		{name: "an API server that refuses the run", spec: demoSpec(pushTrigger(shaA)), create: true, wantTitle: "Could not create the PipelineRun", wantText: "Kubernetes refused PipelineRun `ci-demo/demo-ci-1111111-1`",
+		{name: "an API server that refuses the run", spec: demoSpec(pushTrigger(shaA)), create: true, wantTitle: "Could not create the PipelineRun", wantText: "Kubernetes refused PipelineRun `ci-demo/demo-ci-1111111-1`", wantCause: true,
 			setup: func(h *runnerHarness) {
 				h.dyn.PrependReactor("create", "pipelineruns", func(k8stesting.Action) (bool, runtime.Object, error) {
 					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pipelineruns"}, "x", errors.New("quota"))
@@ -276,6 +277,9 @@ func TestRefusals(t *testing.T) {
 			var refusal *ci.Refusal
 			if !errors.As(err, &refusal) || refusal.Title != tt.wantTitle || !strings.Contains(refusal.Reason, tt.wantText) {
 				t.Fatalf("error = %v, want a refusal %q mentioning %q", err, tt.wantTitle, tt.wantText)
+			}
+			if (refusal.Cause != nil) != tt.wantCause {
+				t.Fatalf("cause = %v, want one: %v", refusal.Cause, tt.wantCause)
 			}
 		})
 	}

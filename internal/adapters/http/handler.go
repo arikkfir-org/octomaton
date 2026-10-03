@@ -24,9 +24,10 @@ type Decoder interface {
 	Decode(event, delivery string, body []byte) (ci.Event, string, error)
 }
 
-// EventHandler does what an event asks for; the runs service implements it.
+// EventHandler does what an event asks for; the runs service implements it. It returns an error when
+// it left part of the event undone, which a redelivery may do.
 type EventHandler interface {
-	Handle(ctx context.Context, ev ci.Event)
+	Handle(ctx context.Context, ev ci.Event) error
 }
 
 // relayedEvents are forwarded to the Forwarder after signature verification. Push receivers such as Argo CD's
@@ -39,7 +40,9 @@ type Forwarder interface {
 }
 
 // Handler serves POST /github/hooks: it verifies signatures, decodes deliveries, drops duplicates
-// and hands the events to a bounded worker pool.
+// and hands the events to a bounded worker pool. A delivery is a duplicate while an earlier copy is
+// being handled or was handled; one whose handling failed is forgotten, so its redelivery (GitHub
+// keeps the delivery's ID) is handled again.
 type Handler struct {
 	Secret  []byte
 	Decoder Decoder
@@ -128,7 +131,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(http.StatusAccepted, "ignored: duplicate delivery")
 		return
 	}
-	job := Job{Name: ev.String(), Run: func(ctx context.Context) { h.Events.Handle(ctx, ev) }}
+	job := Job{Name: ev.String(), Run: func(ctx context.Context) { h.handle(ctx, log, delivery, ev) }}
 	if !h.Pool.Submit(job) {
 		if delivery != "" {
 			h.Dedupe.Remove(delivery)
@@ -138,4 +141,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("Accepted webhook", "job", job.Name)
 	respond(http.StatusAccepted, "accepted")
+}
+
+// handle runs ev's handler, and forgets the delivery when the handler fails or panics.
+func (h *Handler) handle(ctx context.Context, log *slog.Logger, delivery string, ev ci.Event) {
+	done := false
+	defer func() {
+		if !done && delivery != "" {
+			h.Dedupe.Remove(delivery)
+			log.InfoContext(ctx, "Delivery not fully handled; a redelivery will be handled")
+		}
+	}()
+	done = h.Events.Handle(ctx, ev) == nil
 }

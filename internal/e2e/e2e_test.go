@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -418,6 +419,45 @@ func TestReviewRequestEndToEnd(t *testing.T) {
 	}
 	if first, _ := e.waitForRun("octomaton-review-abcdef0-1"); !first.CancelRequested {
 		t.Fatalf("the older commit's review must be superseded: %+v", first)
+	}
+}
+
+// TestARedeliveryAfterAnOutageEndToEnd is the review request lost to GitHub's outage of 2026-10-03:
+// once GitHub is back, redelivering it starts the review.
+func TestARedeliveryAfterAnOutageEndToEnd(t *testing.T) {
+	e := setup(t)
+	e.gh.AddFile(fullName, "main", ".octomaton.yaml", reviewYAML)
+	e.gh.AddFile(owner+"/shared", "", "review/pipelinerun.yaml", reviewRunYAML)
+
+	e.gh.SetFailFiles(true)
+	if rec := e.deliver("pull_request", "r-1", reviewRequestPayload("arikkfir-reviewer"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !slices.ContainsFunc(e.gh.CheckRuns(), func(c githubtest.CheckRun) bool { return c.Name == "octomaton" && c.Conclusion == "failure" }) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the unreadable configuration was not reported: %+v", e.gh.CheckRuns())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// GitHub is back. The failed delivery is forgotten once its job ends: redeliver it until it is handled.
+	e.gh.SetFailFiles(false)
+	for {
+		rec := e.deliver("pull_request", "r-1", reviewRequestPayload("arikkfir-reviewer"), true)
+		if !strings.Contains(rec.Body.String(), "duplicate") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the failed delivery's redelivery was dropped as a duplicate")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	e.waitForRun("octomaton-review-abcdef0-1")
+
+	// Its next redelivery is a duplicate, whether this copy is still being handled or was handled.
+	if rec := e.deliver("pull_request", "r-1", reviewRequestPayload("arikkfir-reviewer"), true); !strings.Contains(rec.Body.String(), "duplicate") {
+		t.Fatalf("a handled delivery's redelivery must be dropped: %s", rec.Body.String())
 	}
 }
 

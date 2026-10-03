@@ -39,7 +39,9 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		return ci.RunSpec{}, refusal("The pipelineRun file `%s` does not exist at %s.", p.PipelineRun, where)
 	}
 	if err != nil {
-		return ci.RunSpec{}, refusal("Could not read the pipelineRun file `%s`: %v", p.PipelineRun, err)
+		r := refusal("Could not read the pipelineRun file `%s`: %v", p.PipelineRun, err)
+		r.Cause = err
+		return ci.RunSpec{}, r
 	}
 	tc := pipelines.ContextOf(t)
 	params, err := p.RenderParams(tc)
@@ -59,7 +61,9 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		if errors.As(err, &r) {
 			return ci.RunSpec{}, r
 		}
-		return ci.RunSpec{}, refusal("%v", err)
+		r = refusal("%v", err)
+		r.Cause = err
+		return ci.RunSpec{}, r
 	}
 	return spec, nil
 }
@@ -78,10 +82,11 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 	refuse := func(r *ci.Refusal) (ci.Run, error) {
 		log.WarnContext(ctx, "Pipeline refused", "title", r.Title, "reason", r.Reason)
 		s.Metrics.RunCreated(ctx, metrics.RunFailed)
+		cause := r.Cause
 		if t.Comment == nil {
-			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, r.Title, r.Reason)
+			cause = errors.Join(cause, s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, r.Title, r.Reason))
 		}
-		return ci.Run{}, &Refusal{Pipeline: p.Name, Reason: r.Reason}
+		return ci.Run{}, &Refusal{Pipeline: p.Name, Reason: r.Reason, Cause: cause}
 	}
 	spec, refusal := s.prepare(ctx, gh, t, p)
 	if refusal != nil {
@@ -119,7 +124,7 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 	if err != nil {
 		var r *ci.Refusal
 		if !errors.As(err, &r) {
-			r = &ci.Refusal{Title: "Could not start the pipeline", Reason: err.Error()}
+			r = &ci.Refusal{Title: "Could not start the pipeline", Reason: err.Error(), Cause: err}
 		}
 		return refuse(r)
 	}

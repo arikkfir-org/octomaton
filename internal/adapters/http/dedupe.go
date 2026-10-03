@@ -7,7 +7,7 @@ import (
 )
 
 // Dedupe remembers recently seen delivery IDs (bounded LRU with a TTL) so that
-// redelivered webhooks are processed once per replica.
+// redelivered webhooks are processed once per replica, unless processing failed (Remove).
 type Dedupe struct {
 	mu      sync.Mutex
 	ttl     time.Duration
@@ -45,7 +45,8 @@ func (d *Dedupe) Add(id string) bool {
 	return true
 }
 
-// Remove forgets id, so that a redelivery is accepted (used when a delivery could not be queued).
+// Remove forgets id, so that a redelivery is accepted (used when a delivery could not be queued, or
+// its handling failed).
 func (d *Dedupe) Remove(id string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

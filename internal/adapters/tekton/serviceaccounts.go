@@ -77,7 +77,9 @@ func checkServiceAccounts(ctx context.Context, c *kubeClient, ns, path string, p
 	for _, name := range names {
 		sa, err := c.ServiceAccount(ctx, ns, name)
 		if err != nil {
-			return refusal("Could not read ServiceAccount `%s/%s`, which the PipelineRun names: %v", ns, name, err)
+			refused := refusal("Could not read ServiceAccount `%s/%s`, which the PipelineRun names: %v", ns, name, err)
+			refused.Cause = err
+			return refused
 		}
 		if sa == nil {
 			continue

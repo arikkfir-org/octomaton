@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,33 +13,35 @@ import (
 // Rerun replays the trigger stored with each report as a new attempt. Re-running a pipeline's report
 // (or one of its task reports) always runs the pipeline: path filters are not applied again.
 // Re-running the "octomaton" report evaluates the whole event again. Reports of pull requests from
-// forks are never re-run.
-func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
+// forks are never re-run. The error is as Handle's.
+func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) error {
 	log := s.Logger.With("repository", e.Repository.FullName, "requester", e.Requester, "delivery", e.DeliveryID)
 	gh := s.Host.Installation(e.InstallationID)
 
 	level, err := gh.Permission(ctx, e.Repository, e.Requester)
 	if err != nil {
 		log.ErrorContext(ctx, "Could not verify the requester's permission", "error", err)
-		return
+		return err
 	}
 	if !level.CanWrite() {
 		log.WarnContext(ctx, "Ignoring a re-run request from a user without write access", "permission", level)
-		return
+		return nil
 	}
 	refs := e.Reports
 	if e.SuiteID != 0 {
 		if refs, err = gh.SuiteReports(ctx, e.Repository, e.SuiteID); err != nil {
 			log.ErrorContext(ctx, "Could not list the suite's reports", "suite", e.SuiteID, "error", err)
-			return
+			return err
 		}
 	}
 
 	configs := map[string]*pipelines.Config{}
 	done := map[string]bool{}
+	var errs []error
 	for _, ref := range refs {
-		t, ok := s.reportTrigger(ctx, gh, e, ref)
+		t, ok, err := s.reportTrigger(ctx, gh, e, ref)
 		if !ok {
+			errs = append(errs, err)
 			continue
 		}
 		if t.FromFork() {
@@ -55,29 +58,35 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		if t.Pipeline == "" {
 			// The configuration's report: evaluate the whole event again, and clear the report when that
 			// worked, as after an outage.
-			if s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester}) {
-				s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Success, "Evaluated again",
-					"Octomaton read the configuration and evaluated the event again.")
+			read, err := s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester})
+			errs = append(errs, err)
+			if read {
+				errs = append(errs, s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Success, "Evaluated again",
+					"Octomaton read the configuration and evaluated the event again."))
 			}
 			continue
 		}
 		cfg, ok := configs[t.ConfigAt()]
 		if !ok {
-			if cfg, ok = s.loadConfig(ctx, gh, t, reporting{invalid: true, unreadable: s.unreadableOn(ctx, gh, t, ci.ConfigReportName)}); !ok {
+			cfg, err = s.loadConfig(ctx, gh, t, reporting{invalid: true, unreadable: s.unreadableOn(ctx, gh, t, ci.ConfigReportName)})
+			if cfg == nil {
+				errs = append(errs, err)
 				continue
 			}
 			configs[t.ConfigAt()] = cfg
 		}
 		p := cfg.Pipeline(t.Pipeline)
 		if p == nil {
-			s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, "Pipeline not found", s.pipelineGone(t))
+			errs = append(errs, s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, "Pipeline not found", s.pipelineGone(t)))
 			continue
 		}
 		s.logFor(t).InfoContext(ctx, "Re-running the pipeline", "requester", e.Requester)
 		if _, err := s.start(ctx, gh, t, p, true); err != nil {
 			s.logFor(t).WarnContext(ctx, "The re-run did not start", "error", err)
+			errs = append(errs, undone(err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // pipelineGone says that no configuration defines t's pipeline anymore.
@@ -90,24 +99,25 @@ func (s *Service) pipelineGone(t ci.Trigger) string {
 }
 
 // reportTrigger returns the trigger stored with a report, reading it from the code host when the
-// event did not carry it.
-func (s *Service) reportTrigger(ctx context.Context, gh ci.Installation, e *ci.RerunEvent, ref ci.ReportRef) (ci.Trigger, bool) {
+// event did not carry it. ok is false when there is none to re-run, and the error is the code host's
+// when it would not say.
+func (s *Service) reportTrigger(ctx context.Context, gh ci.Installation, e *ci.RerunEvent, ref ci.ReportRef) (ci.Trigger, bool, error) {
 	log := s.Logger.With("repository", e.Repository.FullName, "reportID", ref.ID, "report", ref.Name)
 	t := ref.Trigger
 	if t == nil {
 		var err error
 		if t, err = gh.ReportTrigger(ctx, e.Repository, ref.ID); err != nil {
 			log.WarnContext(ctx, "Could not read the report's trigger; cannot re-run it", "error", err)
-			return ci.Trigger{}, false
+			return ci.Trigger{}, false, err
 		}
 		if t == nil {
 			log.WarnContext(ctx, "The report has no trigger; cannot re-run it")
-			return ci.Trigger{}, false
+			return ci.Trigger{}, false, nil
 		}
 	}
 	if !strings.EqualFold(t.Repository.FullName, e.Repository.FullName) || t.Revision != ref.Revision {
 		log.WarnContext(ctx, "The report's trigger does not match the report; ignoring it", "triggerRepository", t.Repository.FullName, "triggerRevision", t.Revision)
-		return ci.Trigger{}, false
+		return ci.Trigger{}, false, nil
 	}
-	return *t, true
+	return *t, true, nil
 }

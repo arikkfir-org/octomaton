@@ -51,6 +51,8 @@ sequenceDiagram
    run whose check could not be opened fails its pipeline's check. Re-running a failed check tries again, and concludes
    `octomaton` successfully when the event evaluates. Only the periodic read of schedules just logs; a failure report
    that still fails is logged as an error ([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-github-retries.md)).
+   A replica drops a delivery it is handling or handled in the last hour, unless a failed call left part of its event
+   undone: then its redelivery is handled again, until one copy succeeds.
 
 ## Repository configuration (`.octomaton.yaml`)
 

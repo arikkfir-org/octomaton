@@ -283,26 +283,30 @@ func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 	return s.release(ctx, run)
 }
 
-// CancelMergeGroup cancels the unfinished runs of a merge group the queue dropped.
-func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger, reason string) {
+// CancelMergeGroup cancels the unfinished runs of a merge group the queue dropped. The error is as
+// Handle's.
+func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger, reason string) error {
 	log := s.logFor(t)
 	runs, err := s.Runner.List(ctx, ci.RunQuery{Repository: &t.Repository, Event: ci.EventMergeGroup, Revision: t.Revision})
 	if err != nil {
 		log.ErrorContext(ctx, "Could not list the merge group's runs", "error", err)
-		return
+		return err
 	}
 	why := "merge group destroyed"
 	if reason != "" {
 		why += " (" + reason + ")"
 	}
+	var errs []error
 	for _, r := range runs {
 		if r.Phase == ci.Finished || r.CancelRequested {
 			continue
 		}
 		if err := s.Runner.Cancel(ctx, r.ID, ci.Cancellation{Reason: why}); err != nil {
 			log.ErrorContext(ctx, "Could not cancel the merge group's run", "run", r.ID.String(), "error", err)
+			errs = append(errs, err)
 			continue
 		}
 		log.InfoContext(ctx, "Cancelled the merge group's run", "run", r.ID.String(), "reason", reason)
 	}
+	return errors.Join(errs...)
 }

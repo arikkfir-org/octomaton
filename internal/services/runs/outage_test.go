@@ -127,3 +127,69 @@ func TestFailuresAreReportedPastTheJobsDeadline(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
+	mergeGroup := ci.Trigger{
+		Version: ci.TriggerVersion, Event: ci.EventMergeGroup, Action: "destroyed", InstallationID: installationID, Repository: repo, Revision: sha1,
+		MergeGroup: &ci.MergeGroup{HeadSHA: sha1, BaseRef: "refs/heads/main", BaseSHA: baseSHA},
+	}
+	tests := []struct {
+		name       string
+		event      ci.Event
+		setup      func(h *harness)
+		wantUndone bool
+	}{
+		{name: "a started run", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}},
+		{name: "an unreadable configuration", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) { h.host.Fail("ReadFile", gitHubDown) }},
+		{name: "an invalid configuration", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")},
+			setup: func(h *harness) { h.files(sha1, "apiVersion: nope\n", "") }},
+		{name: "an invalid configuration whose report would not open", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) { h.files(sha1, "apiVersion: nope\n", ""); h.host.Fail("OpenReport", gitHubDown) }},
+		{name: "a refused run", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")},
+			setup: func(h *harness) { h.runner.Fail("Create", &ci.Refusal{Title: "Refused", Reason: "no"}) }},
+		{name: "a refused run whose report would not open", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) {
+				h.runner.Fail("Create", &ci.Refusal{Title: "Refused", Reason: "no"})
+				h.host.Fail("OpenReport", gitHubDown)
+			}},
+		{name: "an unreadable pipeline definition", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) { h.host.FailFile(repo, sha1, ".tekton/ci.yaml", gitHubDown) }},
+		{name: "a run the runner would not create", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) { h.runner.Fail("Create", errors.New("the API server is down")) }},
+		{name: "a run whose report would not open", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) { h.host.Fail("OpenReport", gitHubDown) }},
+		{name: "a declined command", event: command(1, "maintainer", "/deploy"),
+			setup: func(h *harness) {
+				setupComment(h)
+				h.host.SetPullRequest(repo, openPR(func(p *ci.PullRequestState) { p.Draft = true }))
+			}},
+		{name: "a declined command whose reply would not post", event: command(1, "maintainer", "/deploy"), wantUndone: true,
+			setup: func(h *harness) {
+				setupComment(h)
+				h.host.SetPullRequest(repo, openPR(func(p *ci.PullRequestState) { p.Draft = true }))
+				h.host.Fail("Comment", gitHubDown)
+			}},
+		{name: "a command whose pull request would not read", event: command(1, "maintainer", "/deploy"), wantUndone: true,
+			setup: func(h *harness) { setupComment(h); h.host.Fail("PullRequest", gitHubDown) }},
+		{name: "a re-run whose requester's permission would not read", wantUndone: true,
+			event: &ci.RerunEvent{InstallationID: installationID, Repository: repo, Requester: "maintainer", DeliveryID: "r"},
+			setup: func(h *harness) { h.host.Fail("Permission", gitHubDown) }},
+		{name: "a dropped merge group", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup}},
+		{name: "a dropped merge group whose runs would not list", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup}, wantUndone: true,
+			setup: func(h *harness) { h.runner.Fail("List", errors.New("the API server is down")) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.files(sha1, ciConfig, ciRun)
+			if tt.setup != nil {
+				tt.setup(h)
+			}
+			err := h.svc.Handle(context.Background(), tt.event)
+			if (err != nil) != tt.wantUndone {
+				t.Fatalf("Handle = %v, want undone %v", err, tt.wantUndone)
+			}
+		})
+	}
+}

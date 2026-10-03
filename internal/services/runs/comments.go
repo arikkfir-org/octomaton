@@ -37,6 +37,18 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		}
 	}
 
+	// A fork's commands get no answer, not even a failure's, so the pull request is read first.
+	pr, err := gh.PullRequest(ctx, e.Repository, e.Number)
+	switch {
+	case err != nil:
+		log.ErrorContext(ctx, "Could not read the pull request", "error", err)
+		decline("Octomaton could not read the pull request; see its logs")
+		return
+	case pr.FromFork(e.Repository.FullName):
+		log.InfoContext(ctx, "Ignoring a comment command on a pull request from a fork", "headRepository", pr.HeadRepo)
+		return
+	}
+
 	base := ci.Trigger{
 		Version: ci.TriggerVersion, Event: ci.EventComment, Action: "created", DeliveryID: e.DeliveryID,
 		InstallationID: e.InstallationID, Repository: e.Repository, Sender: e.Author, ConfigRef: e.Repository.DefaultBranch,
@@ -59,15 +71,7 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		return
 	}
 
-	pr, err := gh.PullRequest(ctx, e.Repository, e.Number)
 	switch {
-	case err != nil:
-		log.ErrorContext(ctx, "Could not read the pull request", "error", err)
-		decline("Octomaton could not read the pull request; see its logs")
-		return
-	case pr.FromFork(e.Repository.FullName):
-		log.InfoContext(ctx, "Ignoring a comment command on a pull request from a fork", "headRepository", pr.HeadRepo)
-		return
 	case pr.State != "open":
 		decline("the pull request is closed")
 		return

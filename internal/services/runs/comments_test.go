@@ -189,17 +189,23 @@ func TestHandle(t *testing.T) {
 
 func TestCommentCommandOnForkIsIgnored(t *testing.T) {
 	tests := []struct {
-		name     string
-		headRepo string
+		name       string
+		headRepo   string
+		unreadable bool
 	}{
 		{name: "pull request from a fork", headRepo: "stranger/demo"},
 		{name: "pull request from a deleted repository", headRepo: ""},
+		// The reply that says so is an answer too.
+		{name: "a configuration GitHub would not serve", headRepo: "stranger/demo", unreadable: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			setupComment(h)
 			h.host.SetPullRequest(repo, openPR(func(pr *ci.PullRequestState) { pr.HeadRepo = tt.headRepo }))
+			if tt.unreadable {
+				h.host.FailFile(repo, "main", ".octomaton.yaml", gitHubDown)
+			}
 			h.svc.Handle(context.Background(), command(101, "maintainer", "/deploy staging"))
 			if len(h.runner.Runs()) != 0 || len(h.host.Reactions()) != 0 || len(h.host.Comments()) != 0 {
 				t.Fatalf("runs = %d, reactions = %+v, comments = %+v, want none", len(h.runner.Runs()), h.host.Reactions(), h.host.Comments())

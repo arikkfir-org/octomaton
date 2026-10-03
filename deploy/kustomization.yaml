@@ -1,8 +1,11 @@
-# The hub's deployment of Octomaton. Argo CD applies it from main (the Application octomaton in
-# arikkfir-org/delivery); names and wiring follow the hub reference. Octomaton itself never reads this directory.
+# The hub's deployment of Octomaton, as written. The Application octomaton in arikkfir-org/delivery deploys it from main
+# with Argo CD and overrides what delivery decides through its kustomize options, the image's tag among them;
+# manifests.sh renders it both ways. Names and wiring follow the hub reference. Octomaton itself never reads this
+# directory.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - namespace.yaml
   - service-account.yaml
   - rbac.yaml
   - config-map.yaml

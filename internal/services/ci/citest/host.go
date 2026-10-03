@@ -67,6 +67,7 @@ type Host struct {
 	reactions   []Reaction
 	comments    []Comment
 	errs        map[string]error
+	errTimes    map[string]int
 	fileErrs    map[string]error
 	reads       []string
 }
@@ -81,7 +82,7 @@ func NewHost(now func() time.Time) *Host {
 	return &Host{
 		now: now, repos: map[int64][]ci.Repository{}, files: map[string]string{}, changed: map[string]ci.ChangedFiles{},
 		pulls: map[string]ci.PullRequestState{}, branches: map[string]string{}, permissions: map[string]ci.Permission{},
-		reports: map[ci.ReportID]*Report{}, suites: map[string]int64{}, errs: map[string]error{}, fileErrs: map[string]error{},
+		reports: map[ci.ReportID]*Report{}, suites: map[string]int64{}, errs: map[string]error{}, errTimes: map[string]int{}, fileErrs: map[string]error{},
 		nextID: 1000,
 	}
 }
@@ -92,11 +93,27 @@ func (h *Host) Fail(method string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.errs[method] = err
+	delete(h.errTimes, method)
+}
+
+// FailNext makes the next n calls of the named method fail with err, and the later ones succeed.
+func (h *Host) FailNext(method string, err error, n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.errs[method], h.errTimes[method] = err, n
 }
 
 func (h *Host) failure(method string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	n, counted := h.errTimes[method]
+	if !counted {
+		return h.errs[method]
+	}
+	if n == 0 {
+		return nil
+	}
+	h.errTimes[method] = n - 1
 	return h.errs[method]
 }
 
@@ -386,7 +403,11 @@ func (c *installation) Permission(_ context.Context, repo ci.Repository, user st
 	return "none", nil
 }
 
-func (c *installation) OpenReport(_ context.Context, repo ci.Repository, r ci.Report) (ci.ReportID, error) {
+func (c *installation) OpenReport(ctx context.Context, repo ci.Repository, r ci.Report) (ci.ReportID, error) {
+	// As GitHub's client does, a report fails with its context.
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if err := c.h.failure("OpenReport"); err != nil {
 		return 0, err
 	}
@@ -400,7 +421,10 @@ func (c *installation) OpenReport(_ context.Context, repo ci.Repository, r ci.Re
 
 // UpdateReport changes the report's non-zero fields, as GitHub does: its output (title, summary,
 // text and trigger) is replaced as a whole when any of it is set.
-func (c *installation) UpdateReport(_ context.Context, repo ci.Repository, id ci.ReportID, u ci.Report) error {
+func (c *installation) UpdateReport(ctx context.Context, repo ci.Repository, id ci.ReportID, u ci.Report) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := c.h.failure("UpdateReport"); err != nil {
 		return err
 	}

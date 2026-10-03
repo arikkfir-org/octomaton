@@ -27,7 +27,7 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		Version: ci.TriggerVersion, Event: ci.EventComment, Action: "created", DeliveryID: e.DeliveryID,
 		InstallationID: e.InstallationID, Repository: e.Repository, Sender: e.Author, ConfigRef: e.Repository.DefaultBranch,
 	}
-	cfg, ok := s.loadConfig(ctx, gh, base, false)
+	cfg, ok := s.loadConfig(ctx, gh, base, reporting{})
 	if !ok {
 		return
 	}

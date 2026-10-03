@@ -125,18 +125,20 @@ type EvalOptions struct {
 }
 
 // Evaluate reads .octomaton.yaml where the trigger says (the commit under test, or the default
-// branch for review requests) and starts every pipeline the trigger matches. A repository without
-// the file is ignored, and so is a pull request from a fork: it gets no report and no run.
-func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) {
+// branch for review requests) and starts every pipeline the trigger matches, and reports whether it
+// read a usable configuration. A repository without the file is ignored, and so is a pull request
+// from a fork: it gets no report and no run. A configuration the code host would not serve is always
+// reported, on the re-runnable configuration report: no event is lost to an outage without a trace.
+func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) bool {
 	log := s.logFor(t)
 	if t.FromFork() {
 		log.InfoContext(ctx, "Ignoring a pull request from a fork", "headRepository", t.PullRequest.HeadRepo)
-		return
+		return false
 	}
 	gh := s.Host.Installation(t.InstallationID)
-	cfg, ok := s.loadConfig(ctx, gh, t, opts.ReportConfigErrors)
+	cfg, ok := s.loadConfig(ctx, gh, t, reporting{invalid: opts.ReportConfigErrors, unreadable: true})
 	if !ok {
-		return
+		return false
 	}
 	ev := matchEvent(t, opts.Draft)
 	var files *ci.ChangedFiles
@@ -168,12 +170,21 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 		}
 	}
 	log.InfoContext(ctx, "Evaluated event", "action", t.Action, "pipelines", len(cfg.Pipelines), "matched", matched)
+	return true
 }
 
 // LoadConfig reads the pipelines t's repository runs, like Evaluate; ok is false when it has none or
 // a configuration is unusable. Problems are logged, not reported.
 func (s *Service) LoadConfig(ctx context.Context, t ci.Trigger) (*pipelines.Config, bool) {
-	return s.loadConfig(ctx, s.Host.Installation(t.InstallationID), t, false)
+	return s.loadConfig(ctx, s.Host.Installation(t.InstallationID), t, reporting{})
+}
+
+// reporting says which configuration problems loading a trigger's configuration reports.
+type reporting struct {
+	// invalid reports an invalid configuration: the repository's problem.
+	invalid bool
+	// unreadable reports a configuration the code host would not serve: Octomaton's.
+	unreadable bool
 }
 
 // loadConfig reads the pipelines t's repository runs: those of its .octomaton.yaml at t.ConfigAt(),
@@ -181,7 +192,7 @@ func (s *Service) LoadConfig(ctx context.Context, t ci.Trigger) (*pipelines.Conf
 // repository's .octomaton.yaml at its default branch. It returns false when there is nothing to do
 // (neither declares any) or a configuration is unusable, in which case the problem is reported, when
 // report is set, on an "octomaton" report.
-func (s *Service) loadConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, report bool) (*pipelines.Config, bool) {
+func (s *Service) loadConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, report reporting) (*pipelines.Config, bool) {
 	own := ownConfig(t)
 	ownCfg, ok := s.readConfig(ctx, gh, t, own, report)
 	if !ok {
@@ -236,14 +247,14 @@ func sibling(repo ci.Repository, name string) ci.Repository {
 }
 
 // readConfig reads and parses f; a missing file is a nil configuration.
-func (s *Service) readConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, report bool) (*pipelines.Config, bool) {
+func (s *Service) readConfig(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, report reporting) (*pipelines.Config, bool) {
 	data, err := gh.ReadFile(ctx, f.repo, pipelines.FileName, f.ref)
 	if errors.Is(err, ci.ErrNotFound) {
 		return nil, true
 	}
 	if err != nil {
 		s.logFor(t).ErrorContext(ctx, "Could not read "+f.what, "configRepository", f.repo.FullName, "error", err)
-		if report {
+		if report.unreadable {
 			s.reportConfigProblem(ctx, gh, t, "Could not read "+f.what,
 				fmt.Sprintf("Octomaton could not read %s:\n\n```\n%v\n```\n\nRe-run this check to try again.", f.where, err))
 		}
@@ -257,9 +268,9 @@ func (s *Service) readConfig(ctx context.Context, gh ci.Installation, t ci.Trigg
 	return cfg, true
 }
 
-func (s *Service) configInvalid(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, err error, report bool) {
+func (s *Service) configInvalid(ctx context.Context, gh ci.Installation, t ci.Trigger, f configFile, err error, report reporting) {
 	s.logFor(t).WarnContext(ctx, "Invalid "+f.what, "configRepository", f.repo.FullName, "error", err)
-	if report {
+	if report.invalid {
 		s.reportConfigProblem(ctx, gh, t, "Invalid "+f.what, describeConfigError(f.where, err))
 	}
 }
@@ -305,8 +316,20 @@ func (s *Service) reportSkipped(ctx context.Context, gh ci.Installation, t ci.Tr
 	s.openCompleted(ctx, gh, t, t.ReportName(), ci.Skipped, "Skipped: no relevant changes", b.String())
 }
 
-// openCompleted opens a completed report that stores the trigger, so it can be re-run.
+// reportTimeout bounds a completed report. It runs on a context of its own: the failure it reports
+// may be the job's deadline itself, and the code host retries the call for up to a few minutes.
+const reportTimeout = 5 * time.Minute
+
+// detached is ctx's values without its deadline or cancellation, bounded by reportTimeout.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), reportTimeout)
+}
+
+// openCompleted opens a completed report that stores the trigger, so it can be re-run. A report the
+// code host refuses even after its retries is logged: the one trace left.
 func (s *Service) openCompleted(ctx context.Context, gh ci.Installation, t ci.Trigger, name string, conclusion ci.Conclusion, title, summary string) {
+	ctx, cancel := detached(ctx)
+	defer cancel()
 	now := s.now()
 	r := ci.Report{
 		Name: name, Revision: t.Revision, Status: ci.StatusCompleted, Conclusion: conclusion, Started: now, Completed: now,
@@ -319,6 +342,8 @@ func (s *Service) openCompleted(ctx context.Context, gh ci.Installation, t ci.Tr
 
 // failReport completes an open report with a failure.
 func (s *Service) failReport(ctx context.Context, gh ci.Installation, t ci.Trigger, id ci.ReportID, title, summary string) {
+	ctx, cancel := detached(ctx)
+	defer cancel()
 	r := ci.Report{Status: ci.StatusCompleted, Conclusion: ci.Failure, Completed: s.now(), Title: title, Summary: summary, Trigger: &t}
 	if err := gh.UpdateReport(ctx, t.Repository, id, r); err != nil {
 		s.logFor(t).ErrorContext(ctx, "Could not update the report", "reportID", id, "error", err)

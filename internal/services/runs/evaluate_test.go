@@ -88,6 +88,9 @@ func TestEvaluateConfigProblems(t *testing.T) {
 			setup: func(h *harness) { h.files(sha1, "apiVersion: octomaton.dev/v1\npipelines:\n  - {bogus: 1}\n", "") }},
 		{name: "an unreadable one", report: true, wantTitle: "Could not read .octomaton.yaml", wantText: "Re-run this check to try again.",
 			setup: func(h *harness) { h.host.Fail("ReadFile", errors.New("GitHub is down")) }},
+		// An invalid configuration is the repository's to report or not; one GitHub would not serve is Octomaton's.
+		{name: "an unreadable one, where invalid ones go unreported", wantTitle: "Could not read .octomaton.yaml", wantText: "Re-run this check to try again.",
+			setup: func(h *harness) { h.host.Fail("ReadFile", errors.New("GitHub is down")) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

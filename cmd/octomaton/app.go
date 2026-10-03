@@ -80,7 +80,7 @@ func (a *app) connect() error {
 		return err
 	}
 	a.github, err = github.New(int64(a.cfg.GitHub.AppID), a.cfg.GitHub.Key(),
-		github.WithOwners(a.cfg.GitHub.AllowedOwners), github.WithMetrics(a.metrics))
+		github.WithOwners(a.cfg.GitHub.AllowedOwners), github.WithMetrics(a.metrics), github.WithLogger(component("github")))
 	if err != nil {
 		return fmt.Errorf("creating the GitHub App client: %w", err)
 	}

@@ -26,12 +26,15 @@ var repo = ci.Repository{ID: 1, Owner: "octo-org", Name: "octo-repo", FullName: 
 func newApp(t *testing.T, opts ...Option) (*App, *githubtest.Server) {
 	t.Helper()
 	srv := githubtest.NewServer(t, appID)
-	app, err := New(appID, githubtest.Key(), append([]Option{WithBaseURL(srv.URL)}, opts...)...)
+	app, err := New(appID, githubtest.Key(), append([]Option{WithBaseURL(srv.URL), WithRetries(fastRetries)}, opts...)...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return app, srv
 }
+
+// fastRetries retries as DefaultRetries does, without the waits.
+var fastRetries = Retries{Max: DefaultRetries.Max, WaitMin: time.Millisecond, WaitMax: time.Millisecond}
 
 func TestInstallationTokenIsCached(t *testing.T) {
 	app, srv := newApp(t)

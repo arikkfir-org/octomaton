@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -25,17 +26,21 @@ import (
 const (
 	// DefaultBaseURL is the GitHub REST API endpoint.
 	DefaultBaseURL = "https://api.github.com/"
+	// requestTimeout bounds each attempt of a request.
 	requestTimeout = 30 * time.Second
 )
 
 // App is the Octomaton GitHub App. Installation tokens are cached, and refreshed shortly before
-// they expire, by ghinstallation: one transport per installation.
+// they expire, by ghinstallation: one transport per installation. Every request, a token's included,
+// is retried per its Retries.
 type App struct {
 	id        int64
 	baseURL   string
 	transport http.RoundTripper
 	owners    []string
 	metrics   *metrics.Metrics
+	retries   Retries
+	logger    *slog.Logger
 	apps      *ghinstallation.AppsTransport
 	client    *github.Client
 
@@ -69,9 +74,22 @@ func WithMetrics(m *metrics.Metrics) Option {
 	return func(a *App) { a.metrics = m }
 }
 
+// WithRetries retries requests per r instead of DefaultRetries.
+func WithRetries(r Retries) Option {
+	return func(a *App) { a.retries = r }
+}
+
+// WithLogger logs requests' retries on l instead of slog's default logger.
+func WithLogger(l *slog.Logger) Option {
+	return func(a *App) { a.logger = l }
+}
+
 // New creates the App for an App ID and its private key.
 func New(appID int64, key *rsa.PrivateKey, opts ...Option) (*App, error) {
-	a := &App{id: appID, baseURL: DefaultBaseURL, transport: http.DefaultTransport, metrics: metrics.Discard(), installations: map[int64]*installation{}}
+	a := &App{
+		id: appID, baseURL: DefaultBaseURL, transport: http.DefaultTransport, metrics: metrics.Discard(),
+		retries: DefaultRetries, logger: slog.Default(), installations: map[int64]*installation{},
+	}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -80,7 +98,7 @@ func New(appID int64, key *rsa.PrivateKey, opts ...Option) (*App, error) {
 	}
 	a.apps = ghinstallation.NewAppsTransportFromPrivateKey(a.transport, appID, key)
 	a.apps.BaseURL = strings.TrimRight(a.baseURL, "/")
-	client, err := newClient(a.apps, a.baseURL)
+	client, err := a.newClient(a.apps)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +106,10 @@ func New(appID int64, key *rsa.PrivateKey, opts ...Option) (*App, error) {
 	return a, nil
 }
 
-func newClient(rt http.RoundTripper, baseURL string) (*github.Client, error) {
+func (a *App) newClient(rt http.RoundTripper) (*github.Client, error) {
 	return github.NewClient(
-		github.WithHTTPClient(&http.Client{Transport: rt, Timeout: requestTimeout}),
-		github.WithURLs(&baseURL, &baseURL),
+		github.WithHTTPClient(&http.Client{Transport: retrying(rt, a.retries, a.logger)}),
+		github.WithURLs(&a.baseURL, &a.baseURL),
 		github.WithUserAgent("octomaton"),
 	)
 }
@@ -119,7 +137,7 @@ func (a *App) Installation(id int64) ci.Installation {
 	if c, ok := a.installations[id]; ok {
 		return c
 	}
-	client, err := newClient(ghinstallation.NewFromAppsTransport(a.apps, id), a.baseURL)
+	client, err := a.newClient(ghinstallation.NewFromAppsTransport(a.apps, id))
 	if err != nil {
 		// New validated the base URL, so this cannot happen.
 		panic(fmt.Sprintf("creating GitHub client: %v", err))

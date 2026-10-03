@@ -40,6 +40,9 @@
 - Services reach GitHub and Tekton only through the ports. GitHub payloads, check-run shapes and markers stay in
   `adapters/github`; Tekton labels, annotations and status stay in `adapters/tekton`. Keep packages small and
   dependency-injected.
+- Every GitHub call goes through the App's retrying transport (`adapters/github/retry.go`); never retry a call
+  yourself. When an event's calls still fail, report it on a check (a completed report on `detached`'s context, which
+  outlives the job), and log only what can't be reported.
 - Runs are created held, then their report, task reports and token, then released per concurrency policy; any failure
   in between cancels the run and fails its report. Keep every step idempotent (Resume replays them).
 - Logs: `log/slog`, set up by `internal/system/telemetry`: JSON with the fields Cloud Logging reads on GKE, text

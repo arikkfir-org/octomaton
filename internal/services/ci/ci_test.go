@@ -134,6 +134,8 @@ func TestDescribe(t *testing.T) {
 	review := pullRequestTrigger()
 	review.Event, review.Action, review.ConfigRef = EventReviewRequest, "review_requested", "main"
 	review.ReviewRequest = &ReviewRequest{Reviewer: "octo-reviewer"}
+	pending := review
+	pending.ReviewRequest = &ReviewRequest{Reviewer: "octo-reviewer", Pending: true}
 	tests := []struct {
 		name    string
 		trigger Trigger
@@ -143,6 +145,7 @@ func TestDescribe(t *testing.T) {
 		{"re-run", rerun, "Pull request #5 (`feature` → `main`), synchronize at `0123456` by @alice; re-run by @carol"},
 		{"comment", comment, "`/deploy` on pull request #5 at `0123456` by @alice"},
 		{"review request", review, "Review requested from @octo-reviewer on pull request #5 at `0123456` by @alice"},
+		{"pending review request", pending, "Review still requested from @octo-reviewer on pull request #5, after new commits at `0123456` by @alice"},
 		{"schedule", Trigger{Event: EventSchedule, Branch: "main", Revision: "abcdef0123", Schedule: &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"}},
 			"Schedule `0 3 * * *` (slot 2026-01-01T03:00:00Z) on `main` at `abcdef0`"},
 		{"push", Trigger{Event: EventPush, Branch: "main", Revision: "abcdef0123"}, "Push to `main` at `abcdef0`"},

@@ -122,6 +122,73 @@ func TestEachReviewRequestIsItsOwnRun(t *testing.T) {
 	}
 }
 
+// newCommits moves pull request #5 to sha2 while a review is still requested from reviewers.
+func (h *harness) newCommits(delivery string, reviewers ...string) {
+	h.host.SetFile(repo, sha2, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: []\n")
+	h.host.SetPullRequest(repo, openPR(func(pr *ci.PullRequestState) { pr.HeadSHA = sha2 }))
+	t := branchPR(sha2)
+	t.DeliveryID = delivery
+	h.svc.Handle(context.Background(), &ci.TriggerEvent{Trigger: t, PendingReviewers: reviewers})
+}
+
+func TestNewCommitsRunPendingReviewRequests(t *testing.T) {
+	tests := []struct {
+		name       string
+		reviewers  []string
+		deliveries int
+		want       []string // the review runs of the new head
+	}{
+		{name: "the pending request runs again at the new head", reviewers: []string{"Octo-Reviewer"}, deliveries: 1, want: []string{"demo-review-2222222-1"}},
+		{name: "a redelivery finds its run", reviewers: []string{"Octo-Reviewer"}, deliveries: 2, want: []string{"demo-review-2222222-1"}},
+		{name: "a request pending from someone else runs nothing", reviewers: []string{"alice"}, deliveries: 1},
+		{name: "no pending request runs nothing", deliveries: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			setupReview(h, reviewConfig)
+			h.requestReview("d-1", "octo-reviewer")
+			for range tt.deliveries {
+				h.newCommits("d-2", tt.reviewers...)
+			}
+			var got []string
+			for _, r := range h.runner.Runs() {
+				if r.Trigger.Revision == sha2 {
+					got = append(got, r.ID.Name)
+				}
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("runs of the new head = %v, want %v", got, tt.want)
+			}
+			first := h.run("demo-review-1111111-1")
+			if len(tt.want) == 0 {
+				if first.CancelRequested {
+					t.Fatalf("nothing may stop the first review: %+v", first)
+				}
+				return
+			}
+			// The review of the older commit could no longer be posted: the new head's supersedes it.
+			if !first.CancelRequested {
+				t.Fatalf("the older commit's review must be superseded: %+v", first)
+			}
+			second := h.run(tt.want[0])
+			tr := second.Trigger
+			if second.Phase != ci.Released || tr.Event != ci.EventReviewRequest || tr.Action != "review_requested" || tr.ConfigRef != "main" ||
+				tr.ReviewRequest == nil || tr.ReviewRequest.Reviewer != "Octo-Reviewer" || !tr.ReviewRequest.Pending {
+				t.Fatalf("the new head's review = %+v", second)
+			}
+			if spec := h.runner.Spec(second.ID); spec.Path != "shared:review/pipelinerun.yaml" || spec.Params["revision"] != sha2 || spec.Params["reviewer"] != "Octo-Reviewer" {
+				t.Fatalf("the new head's spec = %+v", spec)
+			}
+			for _, r := range h.host.Reports() {
+				if r.Revision == sha2 {
+					mustContain(t, r.Summary, "**Trigger:** Review still requested from @Octo-Reviewer on pull request #5, after new commits")
+				}
+			}
+		})
+	}
+}
+
 func TestReviewRequestDefinitions(t *testing.T) {
 	tests := []struct {
 		name      string

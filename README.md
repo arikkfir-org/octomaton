@@ -36,8 +36,8 @@ sequenceDiagram
 2. The event is matched against each pipeline's triggers. A matching pipeline whose path filters do not match gets a
    check run concluded `skipped` (required checks do not block). Forks are ignored outright: see [Security](#security).
 3. Runs are named `<repo>-<pipeline>-<sha7>-<attempt>`. A redelivery, or a second event for the same commit, pipeline and
-   branch, finds the existing run. Each comment command and review request gets its own run, and re-runs create the
-   next attempt.
+   branch, finds the existing run. Each comment command and review request gets its own run, new commits on a pull
+   request run every review request still pending on it again, and re-runs create the next attempt.
 4. Runs are created held, then their check run and token Secret are created, then they are released per their
    concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
    five minutes is resumed by the leader (which also serves as the poll for queued runs).
@@ -109,7 +109,7 @@ organization:                          # only in the organization repository: pi
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
-| `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people. |
+| `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people. |
 | `schedule` | each `cron` slot (5 fields, UTC) | Runs at the head of the default branch, once per slot, up to 10 minutes late. |
 
 Globs use [doublestar](https://github.com/bmatcuk/doublestar) syntax: `*` stays within a path segment, `**` crosses
@@ -290,7 +290,8 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   Octomaton can only check the definitions it can see: a PipelineRun holds its whole `spec.pipelineSpec`, with a
   `taskSpec` per task.
 - A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
-  must come from the repository's own branches.
+  must come from the repository's own branches. Only new commits on such a branch, which take write access, run a
+  pending request again.
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
   name. Their runs get the repository's namespace and token, like its own.

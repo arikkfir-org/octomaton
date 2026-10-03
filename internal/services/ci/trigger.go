@@ -81,6 +81,9 @@ type Comment struct {
 type ReviewRequest struct {
 	// Reviewer is the login of the user the review was requested from.
 	Reviewer string `json:"reviewer"`
+	// Pending is set when new commits on the pull request run the request again: the review was still
+	// requested when the head moved.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // Schedule is the schedule slot that started a run.
@@ -162,6 +165,8 @@ func (t Trigger) Describe() string {
 	switch {
 	case t.Comment != nil && t.PullRequest != nil:
 		fmt.Fprintf(&b, "`%s` on pull request #%d", t.Comment.Command, t.PullRequest.Number)
+	case t.ReviewRequest != nil && t.PullRequest != nil && t.ReviewRequest.Pending:
+		fmt.Fprintf(&b, "Review still requested from @%s on pull request #%d, after new commits", t.ReviewRequest.Reviewer, t.PullRequest.Number)
 	case t.ReviewRequest != nil && t.PullRequest != nil:
 		fmt.Fprintf(&b, "Review requested from @%s on pull request #%d", t.ReviewRequest.Reviewer, t.PullRequest.Number)
 	case t.Schedule != nil:

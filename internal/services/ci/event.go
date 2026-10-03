@@ -13,6 +13,9 @@ type TriggerEvent struct {
 	Trigger Trigger
 	// Draft is set for events of draft pull requests.
 	Draft bool
+	// PendingReviewers, for new commits on a pull request (synchronize), are the users a review is still
+	// requested from: each of their requests runs again at the new head.
+	PendingReviewers []string
 }
 
 // MergeGroupDestroyed cancels the unfinished runs of a merge group the queue dropped.

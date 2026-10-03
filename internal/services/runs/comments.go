@@ -23,11 +23,25 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		log.WarnContext(ctx, "The repository has no default branch in the payload; ignoring the comment")
 		return
 	}
+	decline := func(reason string) {
+		log.InfoContext(ctx, "Comment command declined", "command", e.Line, "reason", reason)
+		if err := gh.React(ctx, e.Repository, e.CommentID, "-1"); err != nil {
+			log.WarnContext(ctx, "Could not react to the comment", "error", err)
+		}
+		body := fmt.Sprintf("@%s `%s` was not run: %s.", e.Author, strings.ReplaceAll(e.Line, "`", "'"), strings.TrimSuffix(reason, "."))
+		if err := gh.Comment(ctx, e.Repository, e.Number, body); err != nil {
+			log.WarnContext(ctx, "Could not reply to the comment", "error", err)
+		}
+	}
+
 	base := ci.Trigger{
 		Version: ci.TriggerVersion, Event: ci.EventComment, Action: "created", DeliveryID: e.DeliveryID,
 		InstallationID: e.InstallationID, Repository: e.Repository, Sender: e.Author, ConfigRef: e.Repository.DefaultBranch,
 	}
-	cfg, ok := s.loadConfig(ctx, gh, base, reporting{})
+	// A command has no check: a configuration the code host would not serve is said in a reply.
+	cfg, ok := s.loadConfig(ctx, gh, base, reporting{unreadable: func(what, _ string, _ error) {
+		decline("Octomaton could not read " + what + "; comment again to try again")
+	}})
 	if !ok {
 		return
 	}
@@ -40,17 +54,6 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 	if len(asked) == 0 {
 		log.DebugContext(ctx, "The comment matches no command")
 		return
-	}
-
-	decline := func(reason string) {
-		log.InfoContext(ctx, "Comment command declined", "command", e.Line, "reason", reason)
-		if err := gh.React(ctx, e.Repository, e.CommentID, "-1"); err != nil {
-			log.WarnContext(ctx, "Could not react to the comment", "error", err)
-		}
-		body := fmt.Sprintf("@%s `%s` was not run: %s.", e.Author, strings.ReplaceAll(e.Line, "`", "'"), strings.TrimSuffix(reason, "."))
-		if err := gh.Comment(ctx, e.Repository, e.Number, body); err != nil {
-			log.WarnContext(ctx, "Could not reply to the comment", "error", err)
-		}
 	}
 
 	pr, err := gh.PullRequest(ctx, e.Repository, e.Number)

@@ -136,7 +136,7 @@ func (s *Service) Evaluate(ctx context.Context, t ci.Trigger, opts EvalOptions) 
 		return false
 	}
 	gh := s.Host.Installation(t.InstallationID)
-	cfg, ok := s.loadConfig(ctx, gh, t, reporting{invalid: opts.ReportConfigErrors, unreadable: true})
+	cfg, ok := s.loadConfig(ctx, gh, t, reporting{invalid: opts.ReportConfigErrors, unreadable: s.unreadableOn(ctx, gh, t, ci.ConfigReportName)})
 	if !ok {
 		return false
 	}
@@ -179,12 +179,34 @@ func (s *Service) LoadConfig(ctx context.Context, t ci.Trigger) (*pipelines.Conf
 	return s.loadConfig(ctx, s.Host.Installation(t.InstallationID), t, reporting{})
 }
 
+// LoadConfigToStart reads the pipelines t's repository runs, like LoadConfig, to start t's pipeline (a
+// schedule's): a configuration the code host would not serve fails that pipeline's report, whose re-run
+// starts it again.
+func (s *Service) LoadConfigToStart(ctx context.Context, t ci.Trigger) (*pipelines.Config, bool) {
+	gh := s.Host.Installation(t.InstallationID)
+	return s.loadConfig(ctx, gh, t, reporting{unreadable: s.unreadableOn(ctx, gh, t, t.ReportName())})
+}
+
 // reporting says which configuration problems loading a trigger's configuration reports.
 type reporting struct {
 	// invalid reports an invalid configuration: the repository's problem.
 	invalid bool
-	// unreadable reports a configuration the code host would not serve: Octomaton's.
-	unreadable bool
+	// unreadable reports a configuration the code host would not serve even after its retries:
+	// Octomaton's. Nil only logs it.
+	unreadable func(what, where string, err error)
+}
+
+// unreadableOn reports an unreadable configuration on t's report called name: the configuration's,
+// or a pipeline's. It stores t, so re-running the report tries again.
+func (s *Service) unreadableOn(ctx context.Context, gh ci.Installation, t ci.Trigger, name string) func(what, where string, err error) {
+	return func(what, where string, err error) {
+		if name == ci.ConfigReportName {
+			t.Pipeline, t.DisplayName = "", ""
+		}
+		s.Metrics.RunCreated(ctx, metrics.RunFailed)
+		s.openCompleted(ctx, gh, t, name, ci.Failure, "Could not read "+what,
+			fmt.Sprintf("Octomaton could not read %s:\n\n```\n%v\n```\n\nRe-run this check to try again.", where, err))
+	}
 }
 
 // loadConfig reads the pipelines t's repository runs: those of its .octomaton.yaml at t.ConfigAt(),
@@ -254,9 +276,8 @@ func (s *Service) readConfig(ctx context.Context, gh ci.Installation, t ci.Trigg
 	}
 	if err != nil {
 		s.logFor(t).ErrorContext(ctx, "Could not read "+f.what, "configRepository", f.repo.FullName, "error", err)
-		if report.unreadable {
-			s.reportConfigProblem(ctx, gh, t, "Could not read "+f.what,
-				fmt.Sprintf("Octomaton could not read %s:\n\n```\n%v\n```\n\nRe-run this check to try again.", f.where, err))
+		if report.unreadable != nil {
+			report.unreadable(f.what, f.where, err)
 		}
 		return nil, false
 	}

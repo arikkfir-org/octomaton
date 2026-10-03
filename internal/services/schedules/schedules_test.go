@@ -2,6 +2,7 @@ package schedules
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -111,6 +112,29 @@ func TestSchedulerFiresOncePerSlot(t *testing.T) {
 	h.sc.FireDue(ctx)
 	if len(h.runner.Runs()) != 2 {
 		t.Fatalf("a schedule removed from the head's configuration does not fire")
+	}
+}
+
+func TestAFiringScheduleReportsAnUnreadableConfiguration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.sc.RefreshAll(ctx)
+	// GitHub goes down between reading the schedules and firing one.
+	h.host.FailFile(repo, sha1, ".octomaton.yaml", errors.New("GET .octomaton.yaml: 504 Gateway Timeout"))
+	h.setNow(time.Date(2026, 5, 1, 10, 2, 0, 0, time.UTC))
+	h.sc.FireDue(ctx)
+	if runs := h.runner.Runs(); len(runs) != 0 {
+		t.Fatalf("runs = %+v, want none", runs)
+	}
+	reports := h.host.ReportsNamed("nightly")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %+v, want the pipeline's failure", h.host.Reports())
+	}
+	r := reports[0]
+	// It stores the schedule's trigger, so re-running it fires the pipeline again.
+	if r.Conclusion != ci.Failure || r.Title != "Could not read .octomaton.yaml" || r.Revision != sha1 ||
+		r.Trigger == nil || r.Trigger.Pipeline != "nightly" || r.Trigger.Schedule == nil {
+		t.Fatalf("report = %+v", r)
 	}
 }
 

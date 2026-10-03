@@ -263,7 +263,7 @@ func (s *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline str
 		Pipeline:       pipeline,
 		Schedule:       &ci.Schedule{Cron: sched.Cron, Slot: slot.UTC().Format(time.RFC3339)},
 	}
-	cfg, ok := s.Runs.LoadConfig(ctx, t)
+	cfg, ok := s.Runs.LoadConfigToStart(ctx, t)
 	if !ok {
 		return nil
 	}

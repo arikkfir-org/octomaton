@@ -23,8 +23,8 @@ type Retries struct {
 // event's failure is reported, with retries of its own.
 var DefaultRetries = Retries{Max: 5, WaitMin: time.Second, WaitMax: 30 * time.Second}
 
-// maxRetryAfter caps the wait a secondary rate limit asks for, so one request can't hold a webhook
-// job for long.
+// maxRetryAfter caps the wait a Retry-After asks for (a primary rate limit's can be up to an hour), so
+// one request can't hold a webhook job or the leader's loops for long.
 const maxRetryAfter = time.Minute
 
 // retrying wraps rt so that GitHub requests are retried per r: connection errors and timeouts, 5xx
@@ -74,14 +74,14 @@ func (t *tracking) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // backoff is retryablehttp's exponential backoff, which honors Retry-After on 429 and 503, and also
-// honors it on a secondary rate limit, up to maxRetryAfter.
+// honors it on a secondary rate limit; a Retry-After is followed up to maxRetryAfter.
 func backoff(minWait, maxWait time.Duration, attempt int, resp *http.Response) time.Duration {
 	if secondaryRateLimited(resp) {
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
 			return min(time.Duration(s)*time.Second, maxRetryAfter)
 		}
 	}
-	return retryablehttp.DefaultBackoff(minWait, maxWait, attempt, resp)
+	return min(retryablehttp.DefaultBackoff(minWait, maxWait, attempt, resp), maxRetryAfter)
 }
 
 // secondaryRateLimited reports whether resp is GitHub's secondary rate limit: a 403 that says when to

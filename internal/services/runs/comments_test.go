@@ -95,6 +95,9 @@ func TestCommentCommandDeclines(t *testing.T) {
 		{name: "an unknown user", author: "stranger", want: "stranger does not have write access"},
 		{name: "another base branch", author: "maintainer", pr: func(p *ci.PullRequestState) { p.BaseRef = "release" },
 			want: "deploy runs only on pull requests into main, and this one is into release"},
+		// A command has no check: its reply says so.
+		{name: "a configuration GitHub would not serve", author: "maintainer", want: "Octomaton could not read .octomaton.yaml; comment again to try again",
+			setup: func(h *harness) { h.host.FailFile(repo, "main", ".octomaton.yaml", gitHubDown) }},
 		{name: "a refused run", author: "maintainer", want: "the PipelineRun references Secret",
 			setup: func(h *harness) {
 				h.runner.Fail("Create", &ci.Refusal{Title: "Refused", Reason: "the PipelineRun references Secret \"x\""})

@@ -45,10 +45,12 @@ sequenceDiagram
    cron schedules and deletes PVCs of finished runs.
 6. Every GitHub request is retried when it fails for a reason that may pass (a connection error or timeout, a 5xx but
    501, a 429, a secondary rate limit): up to 6 attempts, waits doubling from 1 s to 30 s or as `Retry-After` says, each
-   retry logged as a warning. An event whose requests still fail gets a failed check, `octomaton` (its configuration
-   could not be read) or the pipeline's (its run could not be started), retried the same way and past the webhook job's
-   deadline; re-running `octomaton` evaluates the event again and concludes it successfully when that works. A failure
-   report that still fails is logged as an error ([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-github-retries.md)).
+   retry logged as a warning (a `Retry-After` is followed up to a minute). An event whose requests still fail is
+   reported, retried the same way and past the webhook job's deadline: a configuration that could not be read fails
+   `octomaton` (the scheduled pipeline's check when a schedule fires; a reply when a comment command is declined), and a
+   run whose check could not be opened fails its pipeline's check. Re-running a failed check tries again, and concludes
+   `octomaton` successfully when the event evaluates. Only the periodic read of schedules just logs; a failure report
+   that still fails is logged as an error ([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-github-retries.md)).
 
 ## Repository configuration (`.octomaton.yaml`)
 

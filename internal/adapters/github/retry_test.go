@@ -158,6 +158,9 @@ func TestBackoff(t *testing.T) {
 		{name: "as a secondary rate limit says", attempt: 0, resp: respond(403, "7"), want: 7 * time.Second},
 		{name: "a secondary rate limit's wait is capped", attempt: 0, resp: respond(403, "3600"), want: maxRetryAfter},
 		{name: "as too many requests says", attempt: 0, resp: respond(429, "4"), want: 4 * time.Second},
+		// A primary rate limit's Retry-After is the seconds until its window resets: up to an hour.
+		{name: "too many requests' wait is capped", attempt: 0, resp: respond(429, "3600"), want: maxRetryAfter},
+		{name: "an unavailable service's wait is capped", attempt: 0, resp: respond(503, "600"), want: maxRetryAfter},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -63,7 +63,7 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		}
 		cfg, ok := configs[t.ConfigAt()]
 		if !ok {
-			if cfg, ok = s.loadConfig(ctx, gh, t, reporting{invalid: true, unreadable: true}); !ok {
+			if cfg, ok = s.loadConfig(ctx, gh, t, reporting{invalid: true, unreadable: s.unreadableOn(ctx, gh, t, ci.ConfigReportName)}); !ok {
 				continue
 			}
 			configs[t.ConfigAt()] = cfg

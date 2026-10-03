@@ -129,9 +129,16 @@ func TestFailuresAreReportedPastTheJobsDeadline(t *testing.T) {
 }
 
 func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
+	queue := "gh-readonly-queue/main/pr-5-" + baseSHA
 	mergeGroup := ci.Trigger{
-		Version: ci.TriggerVersion, Event: ci.EventMergeGroup, Action: "destroyed", InstallationID: installationID, Repository: repo, Revision: sha1,
-		MergeGroup: &ci.MergeGroup{HeadSHA: sha1, BaseRef: "refs/heads/main", BaseSHA: baseSHA},
+		Version: ci.TriggerVersion, Event: ci.EventMergeGroup, Action: "checks_requested", InstallationID: installationID,
+		Repository: repo, Revision: sha1, Ref: "refs/heads/" + queue, Branch: queue,
+		MergeGroup: &ci.MergeGroup{HeadRef: "refs/heads/" + queue, HeadSHA: sha1, BaseRef: "refs/heads/main", BaseSHA: baseSHA},
+	}
+	kubeDown := errors.New("the API server is down")
+	reRun := func(e *ci.RerunEvent) *ci.RerunEvent {
+		e.InstallationID, e.Repository, e.Requester, e.DeliveryID = installationID, repo, "maintainer", "r"
+		return e
 	}
 	tests := []struct {
 		name       string
@@ -156,7 +163,16 @@ func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
 		{name: "an unreadable pipeline definition", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
 			setup: func(h *harness) { h.host.FailFile(repo, sha1, ".tekton/ci.yaml", gitHubDown) }},
 		{name: "a run the runner would not create", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
-			setup: func(h *harness) { h.runner.Fail("Create", errors.New("the API server is down")) }},
+			setup: func(h *harness) { h.runner.Fail("Create", kubeDown) }},
+		// As the Tekton runner refuses a run when the cluster would not answer.
+		{name: "a run refused because the cluster would not create it", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) {
+				h.runner.Fail("Create", &ci.Refusal{Title: "Could not create the PipelineRun", Reason: "Kubernetes refused it", Cause: kubeDown})
+			}},
+		{name: "a run refused because the cluster would not check it", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) {
+				h.runner.Fail("Check", &ci.Refusal{Title: "Could not start the pipeline", Reason: "Could not verify the namespace", Cause: kubeDown})
+			}},
 		{name: "a run whose report would not open", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
 			setup: func(h *harness) { h.host.Fail("OpenReport", gitHubDown) }},
 		{name: "a declined command", event: command(1, "maintainer", "/deploy"),
@@ -172,12 +188,19 @@ func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
 			}},
 		{name: "a command whose pull request would not read", event: command(1, "maintainer", "/deploy"), wantUndone: true,
 			setup: func(h *harness) { setupComment(h); h.host.Fail("PullRequest", gitHubDown) }},
-		{name: "a re-run whose requester's permission would not read", wantUndone: true,
-			event: &ci.RerunEvent{InstallationID: installationID, Repository: repo, Requester: "maintainer", DeliveryID: "r"},
+		{name: "a re-run whose requester's permission would not read", wantUndone: true, event: reRun(&ci.RerunEvent{}),
 			setup: func(h *harness) { h.host.Fail("Permission", gitHubDown) }},
-		{name: "a dropped merge group", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup}},
+		{name: "a re-run whose suite would not list", wantUndone: true, event: reRun(&ci.RerunEvent{SuiteID: 1}),
+			setup: func(h *harness) { h.host.Fail("SuiteReports", gitHubDown) }},
+		{name: "a re-run whose report's trigger would not read", wantUndone: true,
+			event: reRun(&ci.RerunEvent{Reports: []ci.ReportRef{{ID: 1, Name: "ci", Revision: sha1}}}),
+			setup: func(h *harness) { h.host.Fail("ReportTrigger", gitHubDown) }},
+		{name: "a dropped merge group", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup},
+			setup: func(h *harness) { h.evaluate(mergeGroup, EvalOptions{}) }},
 		{name: "a dropped merge group whose runs would not list", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup}, wantUndone: true,
-			setup: func(h *harness) { h.runner.Fail("List", errors.New("the API server is down")) }},
+			setup: func(h *harness) { h.runner.Fail("List", kubeDown) }},
+		{name: "a dropped merge group whose run would not cancel", event: &ci.MergeGroupDestroyed{Trigger: mergeGroup}, wantUndone: true,
+			setup: func(h *harness) { h.evaluate(mergeGroup, EvalOptions{}); h.runner.Fail("Cancel", kubeDown) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -98,7 +98,7 @@ func TestResumeFindsTheReportByItsDisplayName(t *testing.T) {
 	tr := pushTrigger(sha1, "main")
 	tr.Pipeline, tr.DisplayName = "ci", checkName
 	cfg, _ := h.svc.LoadConfig(ctx, tr)
-	spec, refusal, _ := h.svc.prepare(ctx, h.host.Installation(installationID), tr, cfg.Pipeline("ci"))
+	spec, refusal := h.svc.prepare(ctx, h.host.Installation(installationID), tr, cfg.Pipeline("ci"))
 	if refusal != nil {
 		t.Fatal(refusal)
 	}

@@ -18,6 +18,9 @@ type Refusal struct {
 	// Title heads the report that shows the refusal.
 	Title  string
 	Reason string
+	// Cause is the failed call that refused the run (a file or the cluster that would not answer),
+	// which a retry may get past; nil when the run itself is refused.
+	Cause error
 }
 
 func (r *Refusal) Error() string { return r.Title + ": " + r.Reason }

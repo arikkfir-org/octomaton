@@ -28,28 +28,29 @@ func (s *Service) Start(ctx context.Context, t ci.Trigger, p *pipelines.Pipeline
 }
 
 // prepare reads the pipeline's definition and renders its params and concurrency group, and has the
-// runner check the run, before anything exists, so that problems produce a single failed report. A
-// refusal that a failed call caused comes with that call's error.
-func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger, p *pipelines.Pipeline) (ci.RunSpec, *ci.Refusal, error) {
+// runner check the run, before anything exists, so that problems produce a single failed report.
+func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger, p *pipelines.Pipeline) (ci.RunSpec, *ci.Refusal) {
 	refusal := func(format string, args ...any) *ci.Refusal {
 		return &ci.Refusal{Title: "Could not start the pipeline", Reason: fmt.Sprintf(format, args...)}
 	}
 	repo, ref, where := definitionAt(t, p.PipelineRun)
 	data, err := gh.ReadFile(ctx, repo, p.PipelineRun.Path, ref)
 	if errors.Is(err, ci.ErrNotFound) {
-		return ci.RunSpec{}, refusal("The pipelineRun file `%s` does not exist at %s.", p.PipelineRun, where), nil
+		return ci.RunSpec{}, refusal("The pipelineRun file `%s` does not exist at %s.", p.PipelineRun, where)
 	}
 	if err != nil {
-		return ci.RunSpec{}, refusal("Could not read the pipelineRun file `%s`: %v", p.PipelineRun, err), err
+		r := refusal("Could not read the pipelineRun file `%s`: %v", p.PipelineRun, err)
+		r.Cause = err
+		return ci.RunSpec{}, r
 	}
 	tc := pipelines.ContextOf(t)
 	params, err := p.RenderParams(tc)
 	if err != nil {
-		return ci.RunSpec{}, refusal("Could not render the params of pipeline `%s`: %v", p.Name, err), nil
+		return ci.RunSpec{}, refusal("Could not render the params of pipeline `%s`: %v", p.Name, err)
 	}
 	conc, err := p.ConcurrencyFor(tc)
 	if err != nil {
-		return ci.RunSpec{}, refusal("Could not render the concurrency group of pipeline `%s`: %v", p.Name, err), nil
+		return ci.RunSpec{}, refusal("Could not render the concurrency group of pipeline `%s`: %v", p.Name, err)
 	}
 	spec := ci.RunSpec{
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
@@ -58,11 +59,13 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 	if err := s.Runner.Check(ctx, spec); err != nil {
 		var r *ci.Refusal
 		if errors.As(err, &r) {
-			return ci.RunSpec{}, r, nil
+			return ci.RunSpec{}, r
 		}
-		return ci.RunSpec{}, refusal("%v", err), err
+		r = refusal("%v", err)
+		r.Cause = err
+		return ci.RunSpec{}, r
 	}
-	return spec, nil, nil
+	return spec, nil
 }
 
 // start creates the run of pipeline p for t, or finds the one there: a redelivery (or another event
@@ -76,17 +79,18 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 		// The callers ignore forks already; this keeps any other path from running a fork's code.
 		return ci.Run{}, errFromFork
 	}
-	refuse := func(r *ci.Refusal, cause error) (ci.Run, error) {
+	refuse := func(r *ci.Refusal) (ci.Run, error) {
 		log.WarnContext(ctx, "Pipeline refused", "title", r.Title, "reason", r.Reason)
 		s.Metrics.RunCreated(ctx, metrics.RunFailed)
+		cause := r.Cause
 		if t.Comment == nil {
 			cause = errors.Join(cause, s.openCompleted(ctx, gh, t, t.ReportName(), ci.Failure, r.Title, r.Reason))
 		}
 		return ci.Run{}, &Refusal{Pipeline: p.Name, Reason: r.Reason, Cause: cause}
 	}
-	spec, refusal, cause := s.prepare(ctx, gh, t, p)
+	spec, refusal := s.prepare(ctx, gh, t, p)
 	if refusal != nil {
-		return refuse(refusal, cause)
+		return refuse(refusal)
 	}
 	runs, err := s.Runner.List(ctx, ci.RunQuery{Repository: &t.Repository, Pipeline: p.Name, Revision: t.Revision})
 	if err != nil {
@@ -119,10 +123,10 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 	}
 	if err != nil {
 		var r *ci.Refusal
-		if errors.As(err, &r) {
-			return refuse(r, nil)
+		if !errors.As(err, &r) {
+			r = &ci.Refusal{Title: "Could not start the pipeline", Reason: err.Error(), Cause: err}
 		}
-		return refuse(&ci.Refusal{Title: "Could not start the pipeline", Reason: err.Error()}, err)
+		return refuse(r)
 	}
 
 	reportID, err := s.openReport(ctx, gh, run, 0)

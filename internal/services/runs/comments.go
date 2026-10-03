@@ -23,7 +23,10 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		log.WarnContext(ctx, "The repository has no default branch in the payload; ignoring the comment")
 		return
 	}
+	// A decline is the command's failure report: like a check's, it outlives the job.
 	decline := func(reason string) {
+		ctx, cancel := detached(ctx)
+		defer cancel()
 		log.InfoContext(ctx, "Comment command declined", "command", e.Line, "reason", reason)
 		if err := gh.React(ctx, e.Repository, e.CommentID, "-1"); err != nil {
 			log.WarnContext(ctx, "Could not react to the comment", "error", err)

@@ -518,7 +518,10 @@ func (c *installation) SuiteReports(_ context.Context, repo ci.Repository, suite
 	return refs, nil
 }
 
-func (c *installation) React(_ context.Context, repo ci.Repository, commentID int64, reaction string) error {
+func (c *installation) React(ctx context.Context, repo ci.Repository, commentID int64, reaction string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := c.h.failure("React"); err != nil {
 		return err
 	}
@@ -528,7 +531,10 @@ func (c *installation) React(_ context.Context, repo ci.Repository, commentID in
 	return nil
 }
 
-func (c *installation) Comment(_ context.Context, repo ci.Repository, number int, body string) error {
+func (c *installation) Comment(ctx context.Context, repo ci.Repository, number int, body string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := c.h.failure("Comment"); err != nil {
 		return err
 	}

@@ -81,6 +81,20 @@ func TestCommentCommandRuns(t *testing.T) {
 	}
 }
 
+func TestADeclineIsSaidPastTheJobsDeadline(t *testing.T) {
+	h := newHarness(t)
+	setupComment(h)
+	h.host.FailFile(repo, "main", ".octomaton.yaml", context.DeadlineExceeded)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.svc.HandleComment(ctx, command(203, "maintainer", "/deploy"))
+	reactions, comments := h.host.Reactions(), h.host.Comments()
+	if len(reactions) != 1 || reactions[0].Reaction != "-1" || len(comments) != 1 {
+		t.Fatalf("reactions = %+v, comments = %+v; want the decline even after the job's context ended", reactions, comments)
+	}
+	mustContain(t, comments[0].Body, "Octomaton could not read .octomaton.yaml")
+}
+
 func TestCommentCommandDeclines(t *testing.T) {
 	tests := []struct {
 		name   string

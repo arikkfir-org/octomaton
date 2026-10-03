@@ -398,6 +398,26 @@ func TestReviewRequestEndToEnd(t *testing.T) {
 	if got := len(e.gh.CheckRuns()); got != checks+1 {
 		t.Fatalf("check runs = %d, want %d: only the reviewer's request runs", got, checks+1)
 	}
+
+	// New commits while the review is still requested review the new head, and stop the older commit's review.
+	const newSHA = "fedcba9876543210fedcba9876543210fedcba98"
+	e.gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: newSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "arikkfir", AuthorAssociation: "OWNER"})
+	e.gh.AddFile(fullName, newSHA, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: []\n")
+	pushed := pullRequestPayload("synchronize")
+	pull := pushed["pull_request"].(map[string]any)
+	pull["state"] = "open"
+	pull["head"].(map[string]any)["sha"] = newSHA
+	pull["requested_reviewers"] = []any{map[string]any{"login": "arikkfir-reviewer"}, map[string]any{"login": "alice"}}
+	if rec := e.deliver("pull_request", "r-3", pushed, true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	again, _ := e.waitForRun("octomaton-review-fedcba9-1")
+	if tr := again.Trigger; tr.Event != ci.EventReviewRequest || tr.Revision != newSHA || tr.ReviewRequest == nil || !tr.ReviewRequest.Pending {
+		t.Fatalf("trigger = %+v", tr)
+	}
+	if first, _ := e.waitForRun("octomaton-review-abcdef0-1"); !first.CancelRequested {
+		t.Fatalf("the older commit's review must be superseded: %+v", first)
+	}
 }
 
 // orgYAML is the organization repository's configuration: organization pipeline lint, defined in it.

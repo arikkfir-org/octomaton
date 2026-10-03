@@ -155,8 +155,9 @@ func sameRun(t ci.Trigger) func(ci.Run) bool {
 		case t.Comment != nil:
 			return o.Comment != nil && o.Comment.ID == t.Comment.ID
 		case t.ReviewRequest != nil:
-			// Each request is its own run, even at the same commit; only its redeliveries find it.
-			return o.ReviewRequest != nil && o.DeliveryID == t.DeliveryID
+			// Each request is its own run, even at the same commit; only its redeliveries find it. New commits run
+			// every pending request from one delivery.
+			return o.ReviewRequest != nil && o.DeliveryID == t.DeliveryID && strings.EqualFold(o.ReviewRequest.Reviewer, t.ReviewRequest.Reviewer)
 		case t.Schedule != nil:
 			return o.Schedule != nil && o.Schedule.Slot == t.Schedule.Slot
 		default:

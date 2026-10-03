@@ -47,7 +47,7 @@ func (a *App) Decode(event, delivery string, body []byte) (ci.Event, string, err
 			draft bool
 		)
 		t, draft, reason = pullRequestTrigger(p, delivery)
-		ev, owner, fork = &ci.TriggerEvent{Trigger: t, Draft: draft}, t.Repository.Owner, p.GetRepo().GetFork()
+		ev, owner, fork = &ci.TriggerEvent{Trigger: t, Draft: draft, PendingReviewers: pendingReviewers(p)}, t.Repository.Owner, p.GetRepo().GetFork()
 	case *github.MergeGroupEvent:
 		ev, reason = mergeGroupEvent(p, delivery)
 		owner, fork = p.GetRepo().GetOwner().GetLogin(), p.GetRepo().GetFork()
@@ -219,6 +219,23 @@ func reviewRequestTrigger(t ci.Trigger, ev *github.PullRequestEvent) (ci.Trigger
 	t.ReviewRequest = &ci.ReviewRequest{Reviewer: reviewer}
 	t.ConfigRef = t.Repository.DefaultBranch
 	return t, incomplete(t)
+}
+
+// pendingReviewers lists, for new commits on an open pull request, the users a review is still requested
+// from. GitHub sends no new review request while one is pending, so the new head would otherwise never be
+// reviewed. Team requests are ignored, as for review requests.
+func pendingReviewers(ev *github.PullRequestEvent) []string {
+	pr := ev.GetPullRequest()
+	if ev.GetAction() != "synchronize" || pr.GetState() != "open" {
+		return nil
+	}
+	var logins []string
+	for _, u := range pr.RequestedReviewers {
+		if login := u.GetLogin(); login != "" {
+			logins = append(logins, login)
+		}
+	}
+	return logins
 }
 
 // mergeGroupEvent converts a merge group ready for checks, or one the queue destroyed.

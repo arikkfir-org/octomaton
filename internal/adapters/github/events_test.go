@@ -249,6 +249,48 @@ func TestDecodeEvents(t *testing.T) {
 	}
 }
 
+func TestDecodePendingReviewers(t *testing.T) {
+	app, _ := newApp(t)
+	// event is an action on pull request #12, which has reviews requested from Octo-Reviewer, alice and team
+	// reviewers.
+	event := func(action, state string) *github.PullRequestEvent {
+		return &github.PullRequestEvent{
+			Action: new(action), Number: new(12), Repo: ghRepo(owner),
+			Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
+			PullRequest: &github.PullRequest{
+				State: new(state), User: &github.User{Login: new("carol")},
+				Head:               &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new(owner + "/" + repoName)}},
+				Base:               &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
+				RequestedReviewers: []*github.User{{Login: new("Octo-Reviewer")}, {Login: new("alice")}},
+				RequestedTeams:     []*github.Team{{Slug: new("reviewers")}},
+			},
+		}
+	}
+	tests := []struct {
+		name    string
+		payload *github.PullRequestEvent
+		want    []string
+	}{
+		{name: "new commits carry the users a review is still requested from", payload: event("synchronize", "open"), want: []string{"Octo-Reviewer", "alice"}},
+		// A pull request opened with reviewers gets a review request delivery for each of them.
+		{name: "opening the pull request carries none", payload: event("opened", "open")},
+		{name: "reopening it carries none", payload: event("reopened", "open")},
+		{name: "new commits on a closed pull request carry none", payload: event("synchronize", "closed")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev, reason, err := app.Decode("pull_request", "d", body(t, tt.payload))
+			if err != nil || reason != "" {
+				t.Fatalf("Decode = %v, %q, %v", ev, reason, err)
+			}
+			got := ev.(*ci.TriggerEvent)
+			if got.Trigger.Event != ci.EventPullRequest || !reflect.DeepEqual(got.PendingReviewers, tt.want) {
+				t.Fatalf("event = %+v, want a pull request event with pending reviewers %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeInvalidPayload(t *testing.T) {
 	app, _ := newApp(t)
 	if _, _, err := app.Decode("push", "d", []byte("{")); err == nil {

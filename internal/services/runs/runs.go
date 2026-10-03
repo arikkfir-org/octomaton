@@ -74,6 +74,11 @@ func (s *Service) Handle(ctx context.Context, ev ci.Event) {
 			s.Schedules.Notify(t.InstallationID, t.Repository)
 		}
 		s.Evaluate(ctx, t, EvalOptions{Draft: e.Draft, ReportConfigErrors: reportsConfigErrors(t)})
+		for _, reviewer := range e.PendingReviewers {
+			if rt, ok := pendingReview(t, reviewer); ok {
+				s.Evaluate(ctx, rt, EvalOptions{Draft: e.Draft, ReportConfigErrors: reportsConfigErrors(rt)})
+			}
+		}
 	case *ci.MergeGroupDestroyed:
 		s.CancelMergeGroup(ctx, e.Trigger, e.Reason)
 	case *ci.CommandEvent:
@@ -81,6 +86,18 @@ func (s *Service) Handle(ctx context.Context, ev ci.Event) {
 	case *ci.RerunEvent:
 		s.Rerun(ctx, e)
 	}
+}
+
+// pendingReview is the review request still pending from reviewer when new commits arrive on a pull
+// request (t): it runs again at the new head, read at the default branch like the request itself, and
+// supersedes the run of the older commit.
+func pendingReview(t ci.Trigger, reviewer string) (ci.Trigger, bool) {
+	if t.Event != ci.EventPullRequest || t.Action != "synchronize" || t.PullRequest == nil || t.Repository.DefaultBranch == "" {
+		return ci.Trigger{}, false
+	}
+	t.Event, t.Action, t.ConfigRef = ci.EventReviewRequest, "review_requested", t.Repository.DefaultBranch
+	t.ReviewRequest = &ci.ReviewRequest{Reviewer: reviewer, Pending: true}
+	return t, true
 }
 
 // reportsConfigErrors reports whether a trigger's configuration problems are reported. For pull

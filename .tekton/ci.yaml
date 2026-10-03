@@ -1,6 +1,7 @@
-# Octomaton's CI: lint its own .octomaton.yaml, validate the hub's deployment
-# (deploy/), vet, test (with the race detector) and build. A plain Tekton
-# PipelineRun; Octomaton sets the params.
+# Octomaton's CI: lint its own .octomaton.yaml, render and validate the hub's
+# deployment (deploy/) as written and as delivery deploys it, vet, test (with
+# the race detector) and build. A plain Tekton PipelineRun; Octomaton sets the
+# params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -88,24 +89,16 @@ spec:
                 #!/bin/sh
                 set -eu
                 go run ./cmd/octomaton-lint .
-            - name: kustomize
+            - name: manifests
               image: docker.io/alpine/k8s:1.37.1
+              env:
+                - name: REVISION
+                  value: $(params.revision)
               script: |
                 #!/bin/sh
-                # Render the hub's deployment for kubeconform.
+                # deploy/ as written, and as delivery's main deploys it; the image's kustomize is Argo CD's.
                 set -eu
-                mkdir -p .ci
-                kubectl kustomize deploy > .ci/deploy.yaml
-            - name: kubeconform
-              image: ghcr.io/yannh/kubeconform:v0.8.0-alpine
-              script: |
-                #!/bin/sh
-                # Built-in kinds use the default schemas; ExternalSecret and HTTPRoute the datreeio CRDs-catalog.
-                set -eu
-                /kubeconform -strict -summary \
-                  -schema-location default \
-                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-                  .ci/deploy.yaml
+                deploy/manifests.sh .ci/manifests
             - name: vet
               image: golang:1.27.1
               script: |

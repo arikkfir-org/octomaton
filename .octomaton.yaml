@@ -1,14 +1,14 @@
 # Octomaton's own CI and release, run by Octomaton. Schema: README.md.
 apiVersion: octomaton.dev/v1
 pipelines:
-  # Lint, vet, test and build every pull request into main and every merge queue group, and validate the hub's
-  # deployment (deploy/).
+  # Lint, vet, test and build every pull request and every merge queue group, and validate the hub's deployment
+  # (deploy/).
   - name: ci
     displayName: Continuous Integration
     pipelineRun: .tekton/ci.yaml
     on:
-      pull_request:
-        branches: [main]
+      # Every pull request, whatever its base, so a stacked one is checked before it reaches main.
+      pull_request: {}
       merge_group: {}
     params:
       repo-url: "{{ .Repository.CloneURL }}"
@@ -56,7 +56,6 @@ pipelines:
     pipelineRun: .tekton/reviewer-image-check.yaml
     on:
       pull_request:
-        branches: [main]
         paths: [images/reviewer/**, .tekton/reviewer-image-check.yaml]
     params:
       repo-url: "{{ .Repository.CloneURL }}"

@@ -23,11 +23,40 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		log.WarnContext(ctx, "The repository has no default branch in the payload; ignoring the comment")
 		return
 	}
+	// A decline is the command's failure report: like a check's, it outlives the job.
+	decline := func(reason string) {
+		ctx, cancel := detached(ctx)
+		defer cancel()
+		log.InfoContext(ctx, "Comment command declined", "command", e.Line, "reason", reason)
+		if err := gh.React(ctx, e.Repository, e.CommentID, "-1"); err != nil {
+			log.WarnContext(ctx, "Could not react to the comment", "error", err)
+		}
+		body := fmt.Sprintf("@%s `%s` was not run: %s.", e.Author, strings.ReplaceAll(e.Line, "`", "'"), strings.TrimSuffix(reason, "."))
+		if err := gh.Comment(ctx, e.Repository, e.Number, body); err != nil {
+			log.WarnContext(ctx, "Could not reply to the comment", "error", err)
+		}
+	}
+
+	// A fork's commands get no answer, not even a failure's, so the pull request is read first.
+	pr, err := gh.PullRequest(ctx, e.Repository, e.Number)
+	switch {
+	case err != nil:
+		log.ErrorContext(ctx, "Could not read the pull request", "error", err)
+		decline("Octomaton could not read the pull request; see its logs")
+		return
+	case pr.FromFork(e.Repository.FullName):
+		log.InfoContext(ctx, "Ignoring a comment command on a pull request from a fork", "headRepository", pr.HeadRepo)
+		return
+	}
+
 	base := ci.Trigger{
 		Version: ci.TriggerVersion, Event: ci.EventComment, Action: "created", DeliveryID: e.DeliveryID,
 		InstallationID: e.InstallationID, Repository: e.Repository, Sender: e.Author, ConfigRef: e.Repository.DefaultBranch,
 	}
-	cfg, ok := s.loadConfig(ctx, gh, base, false)
+	// A command has no check: a configuration the code host would not serve is said in a reply.
+	cfg, ok := s.loadConfig(ctx, gh, base, reporting{unreadable: func(what, _ string, _ error) {
+		decline("Octomaton could not read " + what + "; comment again to try again")
+	}})
 	if !ok {
 		return
 	}
@@ -42,26 +71,7 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) {
 		return
 	}
 
-	decline := func(reason string) {
-		log.InfoContext(ctx, "Comment command declined", "command", e.Line, "reason", reason)
-		if err := gh.React(ctx, e.Repository, e.CommentID, "-1"); err != nil {
-			log.WarnContext(ctx, "Could not react to the comment", "error", err)
-		}
-		body := fmt.Sprintf("@%s `%s` was not run: %s.", e.Author, strings.ReplaceAll(e.Line, "`", "'"), strings.TrimSuffix(reason, "."))
-		if err := gh.Comment(ctx, e.Repository, e.Number, body); err != nil {
-			log.WarnContext(ctx, "Could not reply to the comment", "error", err)
-		}
-	}
-
-	pr, err := gh.PullRequest(ctx, e.Repository, e.Number)
 	switch {
-	case err != nil:
-		log.ErrorContext(ctx, "Could not read the pull request", "error", err)
-		decline("Octomaton could not read the pull request; see its logs")
-		return
-	case pr.FromFork(e.Repository.FullName):
-		log.InfoContext(ctx, "Ignoring a comment command on a pull request from a fork", "headRepository", pr.HeadRepo)
-		return
 	case pr.State != "open":
 		decline("the pull request is closed")
 		return

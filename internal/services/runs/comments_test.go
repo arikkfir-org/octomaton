@@ -81,6 +81,20 @@ func TestCommentCommandRuns(t *testing.T) {
 	}
 }
 
+func TestADeclineIsSaidPastTheJobsDeadline(t *testing.T) {
+	h := newHarness(t)
+	setupComment(h)
+	h.host.FailFile(repo, "main", ".octomaton.yaml", context.DeadlineExceeded)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.svc.HandleComment(ctx, command(203, "maintainer", "/deploy"))
+	reactions, comments := h.host.Reactions(), h.host.Comments()
+	if len(reactions) != 1 || reactions[0].Reaction != "-1" || len(comments) != 1 {
+		t.Fatalf("reactions = %+v, comments = %+v; want the decline even after the job's context ended", reactions, comments)
+	}
+	mustContain(t, comments[0].Body, "Octomaton could not read .octomaton.yaml")
+}
+
 func TestCommentCommandDeclines(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -95,6 +109,9 @@ func TestCommentCommandDeclines(t *testing.T) {
 		{name: "an unknown user", author: "stranger", want: "stranger does not have write access"},
 		{name: "another base branch", author: "maintainer", pr: func(p *ci.PullRequestState) { p.BaseRef = "release" },
 			want: "deploy runs only on pull requests into main, and this one is into release"},
+		// A command has no check: its reply says so.
+		{name: "a configuration GitHub would not serve", author: "maintainer", want: "Octomaton could not read .octomaton.yaml; comment again to try again",
+			setup: func(h *harness) { h.host.FailFile(repo, "main", ".octomaton.yaml", gitHubDown) }},
 		{name: "a refused run", author: "maintainer", want: "the PipelineRun references Secret",
 			setup: func(h *harness) {
 				h.runner.Fail("Create", &ci.Refusal{Title: "Refused", Reason: "the PipelineRun references Secret \"x\""})
@@ -172,17 +189,23 @@ func TestHandle(t *testing.T) {
 
 func TestCommentCommandOnForkIsIgnored(t *testing.T) {
 	tests := []struct {
-		name     string
-		headRepo string
+		name       string
+		headRepo   string
+		unreadable bool
 	}{
 		{name: "pull request from a fork", headRepo: "stranger/demo"},
 		{name: "pull request from a deleted repository", headRepo: ""},
+		// The reply that says so is an answer too.
+		{name: "a configuration GitHub would not serve", headRepo: "stranger/demo", unreadable: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			setupComment(h)
 			h.host.SetPullRequest(repo, openPR(func(pr *ci.PullRequestState) { pr.HeadRepo = tt.headRepo }))
+			if tt.unreadable {
+				h.host.FailFile(repo, "main", ".octomaton.yaml", gitHubDown)
+			}
 			h.svc.Handle(context.Background(), command(101, "maintainer", "/deploy staging"))
 			if len(h.runner.Runs()) != 0 || len(h.host.Reactions()) != 0 || len(h.host.Comments()) != 0 {
 				t.Fatalf("runs = %d, reactions = %+v, comments = %+v, want none", len(h.runner.Runs()), h.host.Reactions(), h.host.Comments())

@@ -53,13 +53,17 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) {
 		done[key] = true
 
 		if t.Pipeline == "" {
-			// The configuration's report: evaluate the whole event again.
-			s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester})
+			// The configuration's report: evaluate the whole event again, and clear the report when that
+			// worked, as after an outage.
+			if s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester}) {
+				s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Success, "Evaluated again",
+					"Octomaton read the configuration and evaluated the event again.")
+			}
 			continue
 		}
 		cfg, ok := configs[t.ConfigAt()]
 		if !ok {
-			if cfg, ok = s.loadConfig(ctx, gh, t, true); !ok {
+			if cfg, ok = s.loadConfig(ctx, gh, t, reporting{invalid: true, unreadable: s.unreadableOn(ctx, gh, t, ci.ConfigReportName)}); !ok {
 				continue
 			}
 			configs[t.ConfigAt()] = cfg

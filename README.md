@@ -43,6 +43,14 @@ sequenceDiagram
    five minutes is resumed by the leader (which also serves as the poll for queued runs).
 5. The elected leader watches the runs and keeps their checks up to date, refreshes GitHub tokens of long runs, fires
    cron schedules and deletes PVCs of finished runs.
+6. Every GitHub request is retried when it fails for a reason that may pass (a connection error or timeout, a 5xx but
+   501, a 429, a secondary rate limit): up to 6 attempts, waits doubling from 1 s to 30 s or as `Retry-After` says, each
+   retry logged as a warning (a `Retry-After` is followed up to a minute). An event whose requests still fail is
+   reported, retried the same way and past the webhook job's deadline: a configuration that could not be read fails
+   `octomaton` (the scheduled pipeline's check when a schedule fires; a reply when a comment command is declined), and a
+   run whose check could not be opened fails its pipeline's check. Re-running a failed check tries again, and concludes
+   `octomaton` successfully when the event evaluates. Only the periodic read of schedules just logs; a failure report
+   that still fails is logged as an error ([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-github-retries.md)).
 
 ## Repository configuration (`.octomaton.yaml`)
 
@@ -109,7 +117,7 @@ organization:                          # only in the organization repository: pi
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
-| `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people. |
+| `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people; one GitHub would not serve is. |
 | `schedule` | each `cron` slot (5 fields, UTC) | Runs at the head of the default branch, once per slot, up to 10 minutes late. |
 
 Globs use [doublestar](https://github.com/bmatcuk/doublestar) syntax: `*` stays within a path segment, `**` crosses

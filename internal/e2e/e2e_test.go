@@ -115,7 +115,8 @@ func setup(t *testing.T) *env {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	m := metricstest.New(t).Metrics
-	app, err := github.New(appID, githubtest.Key(), github.WithBaseURL(gh.URL), github.WithOwners([]string{owner}), github.WithMetrics(m))
+	app, err := github.New(appID, githubtest.Key(), github.WithBaseURL(gh.URL), github.WithOwners([]string{owner}), github.WithMetrics(m),
+		github.WithRetries(github.Retries{Max: 2, WaitMin: time.Millisecond, WaitMax: time.Millisecond}))
 	if err != nil {
 		t.Fatal(err)
 	}

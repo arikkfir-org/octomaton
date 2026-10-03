@@ -281,9 +281,12 @@ func (s *Service) abort(ctx context.Context, gh ci.Installation, run ci.Run, rep
 	if err := s.Runner.Cancel(ctx, run.ID, ci.Cancellation{Reason: "could not be started"}); err != nil {
 		log.ErrorContext(ctx, "Could not cancel the run", "error", err)
 	}
+	summary := fmt.Sprintf("Octomaton could not start %s `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.", s.Runner.Link(run.ID).Kind, run.ID, cause)
 	if reportID != 0 {
-		s.failReport(ctx, gh, run.Trigger, reportID, "The run could not be started",
-			fmt.Sprintf("Octomaton could not start %s `%s`:\n\n```\n%v\n```\n\nRe-run this check to try again.", s.Runner.Link(run.ID).Kind, run.ID, cause))
+		s.failReport(ctx, gh, run.Trigger, reportID, "The run could not be started", summary)
+	} else {
+		// Its report could not be opened: open the failure instead, with retries of its own.
+		s.openCompleted(ctx, gh, run.Trigger, run.Trigger.ReportName(), ci.Failure, "The run could not be started", summary)
 	}
 	// The failure is reported: the run is let go, so its cancellation is not reported over it.
 	if err := s.Runner.Record(ctx, run.ID, ci.Record{Reported: new(ci.ReportedCompleted), Done: true}); err != nil {

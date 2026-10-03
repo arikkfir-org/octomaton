@@ -64,8 +64,9 @@ type scheduledRepo struct {
 }
 
 type scheduledPipeline struct {
-	name      string
-	schedules []pipelines.ScheduleTrigger
+	// name is the pipeline's, displayName its check's when set: a failure to fire it is reported there.
+	name, displayName string
+	schedules         []pipelines.ScheduleTrigger
 }
 
 func orDefault(d, fallback time.Duration) time.Duration {
@@ -188,7 +189,7 @@ func (s *Scheduler) load(ctx context.Context, installationID int64, repo ci.Repo
 	entry := &scheduledRepo{installationID: installationID, repo: repo}
 	for i := range cfg.Pipelines {
 		if p := &cfg.Pipelines[i]; len(p.Schedules()) > 0 {
-			entry.pipelines = append(entry.pipelines, scheduledPipeline{name: p.Name, schedules: p.Schedules()})
+			entry.pipelines = append(entry.pipelines, scheduledPipeline{name: p.Name, displayName: p.DisplayName, schedules: p.Schedules()})
 		}
 	}
 	if len(entry.pipelines) == 0 {
@@ -228,7 +229,7 @@ func (s *Scheduler) FireDue(ctx context.Context) {
 				if last, ok := s.fired[key]; ok && !slot.After(last) {
 					continue
 				}
-				if err := s.fire(ctx, entry, p.name, sched, slot); err != nil {
+				if err := s.fire(ctx, entry, p, sched, slot); err != nil {
 					s.Logger.ErrorContext(ctx, "Schedule not fired; the next tick retries", "repository", entry.repo.FullName, "pipeline", p.name,
 						"cron", sched.Cron, "slot", slot.Format(time.RFC3339), "error", err)
 					continue
@@ -241,8 +242,8 @@ func (s *Scheduler) FireDue(ctx context.Context) {
 
 // fire starts one run of a pipeline for a schedule slot, at the head of the repository's default
 // branch, unless a run for the slot exists already.
-func (s *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline string, sched pipelines.ScheduleTrigger, slot time.Time) error {
-	repo := entry.repo
+func (s *Scheduler) fire(ctx context.Context, entry *scheduledRepo, sp scheduledPipeline, sched pipelines.ScheduleTrigger, slot time.Time) error {
+	repo, pipeline := entry.repo, sp.name
 	existing, err := s.Runner.List(ctx, ci.RunQuery{Repository: &repo, Pipeline: pipeline, Slot: slot})
 	if err == nil && len(existing) > 0 {
 		return nil
@@ -261,6 +262,7 @@ func (s *Scheduler) fire(ctx context.Context, entry *scheduledRepo, pipeline str
 		Ref:            "refs/heads/" + repo.DefaultBranch,
 		Branch:         repo.DefaultBranch,
 		Pipeline:       pipeline,
+		DisplayName:    sp.displayName,
 		Schedule:       &ci.Schedule{Cron: sched.Cron, Slot: slot.UTC().Format(time.RFC3339)},
 	}
 	cfg, ok := s.Runs.LoadConfigToStart(ctx, t)

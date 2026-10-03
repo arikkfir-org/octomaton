@@ -2,7 +2,8 @@
 # Renders deploy/ into OUT the way Argo CD deploys it, and validates every resource with kubeconform: once as written,
 # and once for each Application in delivery's main that deploys octomaton's deploy/, with its kustomize options applied
 # as Argo CD 3.5 applies them (util/kustomize/kustomize.go): images (environment variables substituted), then its
-# patches appended to kustomization.yaml. Runs in docker.io/alpine/k8s, whose kustomize is Argo CD's (v5.8.1).
+# patches appended to kustomization.yaml, each of which must match something. Runs in docker.io/alpine/k8s, whose
+# kustomize is Argo CD's (v5.8.1).
 #
 #   REVISION=<commit> deploy/manifests.sh OUT
 #
@@ -43,11 +44,12 @@ while read -r file; do
       continue
       ;;
   esac
-  if ! yq ea -o=json -I=0 '
-    select(.kind == "Application") | . as $app
-    | ($app.spec.sources // [$app.spec.source])[]
-    | select(.repoURL == "'"${octomaton}"'" and .path == "deploy")
-    | {"name": $app.metadata.name, "kustomize": (.kustomize // {})}
+  # Per document, and only through the context: yq evaluates a variable even where a select left nothing.
+  if ! yq e -o=json -I=0 '
+    select(.kind == "Application")
+    | {"name": .metadata.name, "source": (.spec.sources // [.spec.source])[]}
+    | select(.source.repoURL == "'"${octomaton}"'" and .source.path == "deploy")
+    | {"name": .name, "kustomize": (.source.kustomize // {})}
   ' "${file}" >> "${work}/sources.json"; then
     echo "could not read ${file}" >&2
     failures=$((failures + 1))
@@ -75,17 +77,29 @@ render() {
   patches="$(yq '.patches // [] | length' "${options}")" || return 1
 
   # kustomize skips a patch whose target matches nothing, and Argo CD would deploy without it: a rename on either side.
+  # So each target is probed where Argo CD applies its patch, after the patches before it: a marker patch with the same
+  # target, which kustomize matches as it would the patch (group, version, kind, name, namespace, selectors), must mark
+  # something. An untargeted patch that matches nothing fails the build by itself.
   i=0
   while [ "${i}" -lt "${patches}" ]; do
-    kind="$(yq ".patches[${i}].target.kind // \"\"" "${options}")" || return 1
-    target="$(yq ".patches[${i}].target.name // \"\"" "${options}")" || return 1
-    if [ -n "${kind}${target}" ]; then
-      matches="$(KIND="${kind}" TARGET="${target}" yq '
-        select((strenv(KIND) == "" or .kind == strenv(KIND)) and (strenv(TARGET) == "" or .metadata.name == strenv(TARGET)))
-        | .kind
-      ' "${out}/deploy.yaml" | grep -c .)" || true
-      if [ "${matches}" -eq 0 ]; then
-        echo "${name}: patch ${i}'s target (kind ${kind:-any}, name ${target:-any}) matches nothing in deploy/" >&2
+    targeted="$(I="${i}" yq '.patches[env(I)] | has("target")' "${options}")" || return 1
+    if [ "${targeted}" = "true" ]; then
+      probe="${work}/${name}.probe-${i}"
+      cp -R deploy "${probe}" || return 1
+      I="${i}" OPTIONS="${options}" yq -i '
+        load(env(OPTIONS)).patches as $patches
+        | .patches += ($patches | to_entries | map(select(.key < env(I)) | .value))
+        | .patches += [{
+            "target": $patches[env(I)].target,
+            "patch": "[{\"op\": \"add\", \"path\": \"/metadata/annotations\", \"value\": {\"manifests.sh/probe\": \"matched\"}}]"
+          }]
+      ' "${probe}/kustomization.yaml" || return 1
+      kustomize build "${probe}" > "${probe}.yaml" || return 1
+      yq -N 'select(.metadata.annotations["manifests.sh/probe"] == "matched") | .kind' "${probe}.yaml" \
+        > "${probe}.matched" || return 1
+      if [ ! -s "${probe}.matched" ]; then
+        target="$(I="${i}" yq -o=json -I=0 '.patches[env(I)].target' "${options}")" || return 1
+        echo "${name}: patch ${i}'s target ${target} matches nothing in deploy/" >&2
         return 1
       fi
     fi

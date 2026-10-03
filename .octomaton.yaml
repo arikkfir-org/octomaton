@@ -33,8 +33,8 @@ pipelines:
       policy: latest
 
   # Publish the pull request reviewer's image (images/reviewer, run by arikkfir-org/tooling's reviewer) from main,
-  # tagged with the commit's short SHA and "main", whenever it changes. Unlike release, it has a paths filter: tooling
-  # pins the image by digest, so nothing runs whatever main is at.
+  # tagged with the commit's short SHA and "main", whenever it changes. Unlike release, it has a paths filter: the image
+  # changes only with images/reviewer, and tooling runs its "main" tag, which each publication moves.
   - name: reviewer-image
     pipelineRun: .tekton/reviewer-image.yaml
     on:

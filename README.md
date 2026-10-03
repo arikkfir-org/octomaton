@@ -458,8 +458,8 @@ the image of the newest commit on `main` ([Deployment](#deployment)).
 This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
 model runs; `arikkfir-org/tooling` runs it). `reviewer-image-check` builds it on pull requests that change it, and
 `reviewer-image` publishes it from `main` when it changes, with rootless BuildKit, to
-`me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` pins it by
-digest. Octomaton itself never reads it.
+`me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` runs its
+`main` tag, so a merge that changes it reaches the next review. Octomaton itself never reads it.
 
 The first image has to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
 commit Argo CD deploys. `make image` builds and pushes the image of `HEAD` the way the release pipeline would, except

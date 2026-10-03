@@ -364,10 +364,13 @@ App by its ID, never by its name.
 
 ## Deployment
 
-The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize): the Argo CD Application `octomaton` in
-[`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main` and tags the image with the
-synced commit's short SHA, so every merge to `main` rolls out once `release` has published that image. Namespace
-`octomaton`, Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
+The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize), the hub's deployment as written: the Argo CD Application
+`octomaton` in [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main`, in its
+AppProject `octomaton`, and overrides what `delivery` decides: it tags the image with the synced commit's short SHA, so
+every merge to `main` rolls out once `release` has published that image, and labels the namespace
+`kfirs.com/public-ingress`, which admits the webhook's route to the public gateway. `make manifests` (and CI) renders
+`deploy/` both ways and validates it. Namespace `octomaton` (the restricted Pod Security Standard enforced),
+Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
 Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
@@ -412,6 +415,7 @@ Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through 
 ```bash
 make test      # go vet ./... && go test -race ./...
 make lint      # octomaton-lint . (this repository's own .octomaton.yaml)
+make manifests # deploy/ as written and as delivery's main deploys it, validated (Docker)
 make build     # bin/octomaton and bin/octomaton-lint
 ```
 
@@ -457,8 +461,8 @@ itself is tested by `internal/architecture`, which fails on any import that poin
 ## Releases
 
 Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
-`.octomaton.yaml` runs `ci` (lint, `deploy/` validation, vet, race tests, build) on pull requests and in the merge
-queue, and `release` on pushes to `main`. `release` publishes the image to
+`.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated, vet, race tests, build) on pull requests and in
+the merge queue, and `release` on pushes to `main`. `release` publishes the image to
 `me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the commit's short SHA (for example `afa6953`) and
 `main`. The same short SHA is the version the binary reports and the `service.version` of its telemetry. Argo CD runs
 the image of the newest commit on `main` ([Deployment](#deployment)).

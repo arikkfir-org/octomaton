@@ -1,0 +1,12 @@
+# Octomaton's namespace, where pods meet the restricted Pod Security Standard. delivery adds kfirs.com/public-ingress,
+# which admits its route to the public gateway. Argo CD never deletes or prunes it: Octomaton runs every repository's
+# CI, the fix for its own included.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: octomaton
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false,Prune=false

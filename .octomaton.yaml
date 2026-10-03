@@ -2,7 +2,7 @@
 apiVersion: octomaton.dev/v1
 pipelines:
   # Lint, vet, test and build every pull request and every merge queue group, and validate the hub's deployment
-  # (deploy/).
+  # (deploy/), as written and as delivery deploys it.
   - name: ci
     displayName: Continuous Integration
     pipelineRun: .tekton/ci.yaml

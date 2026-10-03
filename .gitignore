@@ -1,6 +1,7 @@
 # Build output
 /bin/
 /dist/
+/.ci/
 
 # Test and coverage output
 *.test

@@ -3,8 +3,9 @@ VERSION        ?= $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-7),dev)
 KO_DOCKER_REPO ?= me-west1-docker.pkg.dev/arikkfir/images/octomaton
 GO             ?= go
 KO             ?= $(GO) run github.com/google/ko@v0.19.1
+K8S_IMAGE      ?= docker.io/alpine/k8s:1.37.1
 
-.PHONY: all test vet lint build image tidy fmt clean
+.PHONY: all test vet lint manifests build image tidy fmt clean
 
 all: test build
 
@@ -18,6 +19,12 @@ vet:
 ## lint: validate this repository's own .octomaton.yaml and PipelineRuns
 lint:
 	$(GO) run ./cmd/octomaton-lint .
+
+## manifests: render deploy/ as Argo CD deploys it, as written and as delivery's main overrides it, and validate it
+manifests:
+	rm -rf .ci/manifests
+	docker run --rm -v "$(CURDIR):/src" -w /src -u "$$(id -u):$$(id -g)" -e HOME=/tmp -e REVISION=$(VERSION) \
+		--entrypoint sh $(K8S_IMAGE) deploy/manifests.sh .ci/manifests
 
 ## build: static binaries in bin/: octomaton (the server) and octomaton-lint
 build:
@@ -35,4 +42,4 @@ fmt:
 	gofmt -w .
 
 clean:
-	rm -rf bin
+	rm -rf bin .ci

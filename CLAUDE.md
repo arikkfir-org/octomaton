@@ -52,9 +52,12 @@
 
 ## Deployment
 
-- `deploy/` is the hub's deployment of Octomaton (Kustomize). The Argo CD Application `octomaton` in
-  `arikkfir-org/delivery` applies it from `main` and tags the image with that commit's short SHA, so every merge to
-  `main` deploys itself. The code never reads `deploy/`.
+- `deploy/` is the hub's deployment of Octomaton (Kustomize), as written, its Namespace included. The Argo CD
+  Application `octomaton` in `arikkfir-org/delivery` (`platform/octomaton/manifests`) applies it from `main` and
+  overrides what `delivery` decides in its `kustomize` options: the image's tag (that commit's short SHA, so every merge
+  to `main` deploys itself) and the namespace's `kfirs.com/public-ingress` label. Its AppProject `octomaton` admits only
+  the namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding, and the namespaced kinds `deploy/`
+  holds: a new kind or cluster-scoped object needs `delivery` changed first. The code never reads `deploy/`.
 - Follow `delivery`'s rules there: pin every other image; secrets only as `ExternalSecret`s on the `ClusterSecretStore`
   `gcp-secret-manager`; a NetworkPolicy admitting only the `traefik` namespace to every served pod. Leave the
   `octomaton` image untagged: Argo CD sets the tag.
@@ -63,7 +66,10 @@
 - `octomaton` and `go-import` run two replicas each, spread over nodes, with a PodDisruptionBudget
   (`maxUnavailable: 1`). Octomaton needs no single-replica guard: every replica serves webhooks, and only the Lease
   holder reports, schedules and cleans up.
-- CI renders `deploy/` and validates it with kubeconform; run `kubectl kustomize deploy` before pushing a change there.
+- Pods meet the restricted Pod Security Standard, which the namespace enforces.
+- CI renders `deploy/` as written and as `delivery`'s `main` deploys it (`deploy/manifests.sh`), and validates both with
+  kubeconform; run `make manifests` before pushing a change there. When you rename something `delivery` patches, change
+  `delivery` too.
 - `images/reviewer/` is the hub's pull request reviewer image, run by `arikkfir-org/tooling`'s reviewer; the code never
   reads it. `reviewer-image` publishes it from `main` as `ci-octomaton-release`, with a `paths` filter, and moves its
   `main` tag, which tooling runs: a merge that changes it reaches the next review. `reviewer-image-check` builds it on
@@ -78,7 +84,7 @@
 
 ## Commands
 
-- `make test`, `make lint`, `make build`, `make image` (ko; needs registry credentials).
+- `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
 - Releases have no version tags: every push to `main` publishes an image tagged with the commit's short SHA, which is
   also the version the binary reports.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.

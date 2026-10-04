@@ -186,6 +186,16 @@ func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
 				h.host.SetPullRequest(repo, openPR(func(p *ci.PullRequestState) { p.Draft = true }))
 				h.host.Fail("Comment", gitHubDown)
 			}},
+		{name: "a refused command", event: command(1, "maintainer", "/deploy"),
+			setup: func(h *harness) {
+				setupComment(h)
+				h.runner.Fail("Create", &ci.Refusal{Title: "Refused", Reason: "the PipelineRun references Secret \"x\""})
+			}},
+		{name: "a command refused because the cluster would not create its run", event: command(1, "maintainer", "/deploy"), wantUndone: true,
+			setup: func(h *harness) {
+				setupComment(h)
+				h.runner.Fail("Create", &ci.Refusal{Title: "Could not create the PipelineRun", Reason: "Kubernetes refused it", Cause: kubeDown})
+			}},
 		{name: "a command whose pull request would not read", event: command(1, "maintainer", "/deploy"), wantUndone: true,
 			setup: func(h *harness) { setupComment(h); h.host.Fail("PullRequest", gitHubDown) }},
 		{name: "a re-run whose requester's permission would not read", wantUndone: true, event: reRun(&ci.RerunEvent{}),

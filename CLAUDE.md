@@ -64,9 +64,9 @@
   `octomaton` image untagged: Argo CD sets the tag.
 - `release` must publish an image for every push to `main`, so it never gets a `paths` filter: Argo CD runs the image of
   whatever commit `main` is at.
-- `octomaton` and `go-import` run two replicas each, spread over nodes, with a PodDisruptionBudget
-  (`maxUnavailable: 1`). Octomaton needs no single-replica guard: every replica serves webhooks, and only the Lease
-  holder reports, schedules and cleans up.
+- `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
+  single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
+  Go import page isn't here: `delivery`'s `go-import` serves it with every hub module domain's.
 - Pods meet the restricted Pod Security Standard, which the namespace enforces.
 - CI renders `deploy/` as written and as `delivery`'s `main` deploys it (`deploy/manifests.sh`), and validates both with
   kubeconform; run `make manifests` before pushing a change there. When you rename something `delivery` patches, change

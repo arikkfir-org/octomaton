@@ -9,14 +9,3 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: go-import
-  namespace: octomaton
-spec:
-  maxUnavailable: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: go-import

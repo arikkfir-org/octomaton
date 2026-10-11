@@ -376,9 +376,8 @@ Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 808
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
 Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
-refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton` and of `go-import`, spread
-over nodes when there are several, each with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes
-both.
+refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton`, spread over nodes when
+there are several, with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes both.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).
@@ -406,7 +405,7 @@ configuration.
 ## Development
 
 The module path is `octomaton.dev`: `https://octomaton.dev` answers `go get` with a `go-import` tag pointing at this
-repository, so the linter installs with:
+repository (served by `delivery`'s `go-import`, which answers for every hub module domain), so the linter installs with:
 
 ```bash
 go install octomaton.dev/cmd/octomaton-lint@latest

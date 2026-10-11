@@ -1,5 +1,6 @@
 # octomaton.dev, on the public gateway's octomaton-dev listener. The GitHub App's webhook is the only path that reaches
-# Octomaton (deliveries are verified with the webhook secret, HMAC); go-import answers everything else.
+# Octomaton (deliveries are verified with the webhook secret, HMAC). Everything else, the Go import page, is the route
+# of delivery's go-import (namespace go-import), which this exact path takes precedence over.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -21,11 +22,4 @@ spec:
             value: /github/hooks
       backendRefs:
         - name: octomaton
-          port: 80
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: go-import
           port: 80

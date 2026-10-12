@@ -15,8 +15,8 @@ pipelines:
       revision: "{{ .Revision }}"
     timeout: 30m
 
-  # Publish the image of every push to main, tagged with the commit's short SHA (also the version the
-  # binary reports) and "main". There are no version tags. Argo CD deploys every commit on main with the image
+  # Publish the images of every push to main, tagged with the commit's short SHA (also the version the
+  # binaries report) and "main". There are no version tags. Argo CD deploys every commit on main with the images
   # of that commit (deploy/), so release runs on every push: never give it a paths filter.
   - name: release
     pipelineRun: .tekton/release.yaml

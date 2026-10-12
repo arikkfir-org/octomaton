@@ -18,7 +18,7 @@ import (
 	"octomaton.dev/internal/system/telemetry"
 )
 
-// service names the process in its telemetry and prefixes its environment variables.
+// service names the process in its telemetry.
 const service = "octomaton"
 
 // flushTimeout bounds the flush of the telemetry exporters at exit.

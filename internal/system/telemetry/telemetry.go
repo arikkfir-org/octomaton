@@ -16,10 +16,11 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	"octomaton.dev/internal/system/config"
 )
 
-// Config is read from the environment by Setup, prefixed with the service name: for the service
-// octomaton, OCTOMATON_LOG_LEVEL.
+// Config is read from the environment by Setup, with the configuration's prefix whatever the
+// service: OCTOMATON_LOG_LEVEL.
 type Config struct {
 	// LogLevel is the lowest level logged: debug, info, warn or error.
 	LogLevel slog.Level `envconfig:"LOG_LEVEL" default:"info"`
@@ -30,12 +31,12 @@ type Telemetry struct {
 	shutdowns []func(context.Context) error
 }
 
-// Setup reads the Config of service from the environment, then installs the process-wide logger
-// and propagators and, on GKE, the OpenTelemetry providers exporting to Google Cloud. Call
+// Setup reads the Config from the environment, then installs the process-wide logger and
+// propagators and, on GKE, the OpenTelemetry providers exporting to Google Cloud as service. Call
 // Shutdown before the process exits to flush them.
 func Setup(ctx context.Context, service, version string) (*Telemetry, error) {
 	var c Config
-	if err := envconfig.Process(service, &c); err != nil {
+	if err := envconfig.Process(config.Prefix, &c); err != nil {
 		return nil, err
 	}
 	gcp, err := detect(ctx)

@@ -52,7 +52,7 @@ sequenceDiagram
 | Read Cloud Logging, which GKE already fills | Every line of every container is there for 30 days, shipped within seconds, with nothing new to store or run in CI | Reading the pod: it's gone. Archiving each step's log to a bucket when its TaskRun ends: it races the node's deletion a minute later, and needs a bucket, its retention, an archiver watching runs and grants for both. Keeping CI nodes up longer: the idle vCPU-hours the autoscaling profile removed, and the logs still go with the node |
 | In the Dashboard, through its external logs | Every check links there, behind the hub's sign-in, and the Dashboard needs only a URL | The Cloud Console's Logs Explorer: a Google Cloud role for each reader, away from the run |
 | A server of its own | Only it holds the logging grant, and it serves only inside the cluster | A proxy inside `octomaton`: the webhook server, on the public gateway, would get a grant it doesn't need. Tekton Results: a database, an API server and a watcher, to keep what Cloud Logging already keeps |
-| `roles/logging.viewAccessor` on the `_Default` view | Reads only what the view shows, and writes nothing | `roles/logging.viewer` on the project: the project's other logs too, the `_Required` bucket's audit logs included |
+| `roles/logging.viewAccessor` on the `_Default` view | Reads only what the view shows, and writes nothing | `roles/logging.viewer` on the project: the project's other logs too, the `_Required` bucket's audit logs included. A view of CI's containers alone, whose flexible filter can match `resource.labels.namespace_name`: infra's pipelines can't create or plan one without a logging role each, and the plans' would read every log (infra's `docs/infra/designs/node-pools.md`) |
 | Plain text, a page at a time | The Dashboard shows a `text/plain` answer as the log, and the pod's memory stays flat whatever the log's length | Buffering the log: a long one would sit in a 128 MiB pod |
 | One replica, no PodDisruptionBudget | It serves only logs whose pods are gone, to people reading them: a restart is seconds of "Unable to fetch log" | Two replicas and a budget, which the hub keeps for services others depend on |
 | A namespace outside `ci-` is a 404 | It reads like no namespace at all | 403, which tells it apart from one that doesn't exist |
@@ -90,5 +90,4 @@ To roll back, unset the Dashboard's external logs URL in `delivery`: logs of pod
 
 ## Open questions
 
-- A log view of `k8s_container` entries only would narrow the grant to containers' logs. A view can't select namespaces (its filter takes only the source, the resource type and the log ID), so the `ci-` check stays in the code either way.
 - The Dashboard asks pods for timestamped lines and can show the timestamps; starting each line with its entry's timestamp would bring them to archived logs too.

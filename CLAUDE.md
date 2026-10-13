@@ -68,8 +68,10 @@
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
   single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
   Go import page isn't here: `delivery`'s `go-import` serves it with every hub module domain's.
-- `octomaton-logs` runs one replica without a PodDisruptionBudget, which a single replica must never get: while it
-  restarts, only the logs of pods already gone fail to show. Its ServiceAccount mounts no token (it calls no Kubernetes
+- `octomaton-logs` runs one replica, with a PodDisruptionBudget of `maxUnavailable: 1` and
+  `unhealthyPodEvictionPolicy: AlwaysAllow`, so a drain evicts it even while it isn't ready: while it restarts, only the
+  logs of pods already gone fail to show. Both Deployments roll out by surging (`maxSurge: 1`,
+  `maxUnavailable: 0`), and every workload in `deploy/` has a budget, as `delivery`'s rules require. Its ServiceAccount mounts no token (it calls no Kubernetes
   API) and reads Cloud Logging through Workload Identity, which needs `roles/logging.viewAccessor` on its log view.
 - Pods meet the restricted Pod Security Standard, which the namespace enforces.
 - CI renders `deploy/` as written and as `delivery`'s `main` deploys it (`deploy/manifests.sh`), and validates both with

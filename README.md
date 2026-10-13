@@ -409,7 +409,7 @@ Every replica serves webhooks; the replica holding the Lease `octomaton` in its 
 refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton`, spread over nodes when
 there are several, with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes both.
 Deployment/ServiceAccount/Service/NetworkPolicy `octomaton-logs` serve
-[archived step logs](#archived-step-logs-octomaton-logs): one replica without a PodDisruptionBudget (while it restarts,
+[archived step logs](#archived-step-logs-octomaton-logs): one replica (while it restarts,
 only the logs of pods already gone fail to show), Service port 80 → container 8080, reachable only from the Tekton
 Dashboard's pods, and no ServiceAccount token in its pod.
 

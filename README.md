@@ -354,6 +354,36 @@ ServiceAccount, which needs `roles/telemetry.metricsWriter`, `roles/telemetry.tr
 `roles/serviceusage.serviceUsageConsumer` (the project is the quota project). Anywhere else, logs are text and nothing
 is exported.
 
+## Archived step logs (`octomaton-logs`)
+
+The Tekton Dashboard reads a step's log from its pod, which goes with its node: the cluster autoscaler deletes an empty
+CI node about a minute after its last pod ends. GKE has shipped every container's output to Cloud Logging, so when the
+Dashboard can't read a pod's log, its backend asks `octomaton-logs`, a second server built from this repository, which
+reads the container's log from there ([design](docs/octomaton/designs/archived-step-logs.md)).
+
+`GET /logs/<namespace>/<pod>/<container>?startTime=…&completionTime=…` (the TaskRun's times, RFC 3339, both optional)
+answers `200`, `text/plain`: the container's lines, oldest first, from a minute before `startTime` (30 days back
+without it) to five minutes after `completionTime` (no end without it), sent page by page. A text line loses its
+trailing newline; a line GKE parsed as JSON comes back as compact JSON. A log that ends early ends with a line saying
+so: after 50,000 lines, or when Cloud Logging fails once lines are sent. A namespace outside
+`OCTOMATON_LOGS_NAMESPACE_PREFIX` answers 404, a malformed name or time 400, and a failed first read 502. `GET /healthz`
+and `GET /readyz` answer `ok`. All on 8080.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `OCTOMATON_LOGS_VIEW` | required | the log view read, `projects/<project>/locations/<location>/buckets/<bucket>/views/<view>`; its project is the quota project of the reads |
+| `OCTOMATON_LOGS_CLUSTER`, `OCTOMATON_LOGS_LOCATION` | required | the GKE cluster whose containers' logs are served, and its zone or region |
+| `OCTOMATON_LOGS_NAMESPACE_PREFIX` | `ci-` | only namespaces whose names start with it are served; it can't be empty |
+| `OCTOMATON_LOGS_ADDRESS` | `:8080` | address of `/logs`, `/healthz` and `/readyz` |
+| `OCTOMATON_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `octomaton-logs` | added to the resource of exported metrics and traces |
+
+It calls Cloud Logging's `entries:list` with the Application Default Credentials, for the scope `logging.read`, and
+bills the reads to the view's project (`X-Goog-User-Project`). On GKE, those are its Kubernetes ServiceAccount's,
+`octomaton/octomaton-logs`, which needs `roles/logging.viewAccessor` on the view and
+`roles/serviceusage.serviceUsageConsumer` on the project. Its telemetry goes where the server's does, so it also needs
+`roles/telemetry.metricsWriter` and `roles/telemetry.tracesWriter`.
+
 ## GitHub App
 
 `octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, homepage
@@ -368,8 +398,8 @@ App by its ID, never by its name.
 
 The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize), the hub's deployment as written: the Argo CD Application
 `octomaton` in [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main`, in its
-AppProject `octomaton`, and overrides what `delivery` decides: it tags the image with the synced commit's short SHA, so
-every merge to `main` rolls out once `release` has published that image, and labels the namespace
+AppProject `octomaton`, and overrides what `delivery` decides: it tags the images with the synced commit's short SHA, so
+every merge to `main` rolls out once `release` has published them, and labels the namespace
 `kfirs.com/public-ingress`, which admits the webhook's route to the public gateway. `make manifests` (and CI) renders
 `deploy/` both ways and validates it. Namespace `octomaton` (the restricted Pod Security Standard enforced),
 Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
@@ -378,6 +408,10 @@ Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 808
 Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
 refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton`, spread over nodes when
 there are several, with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes both.
+Deployment/ServiceAccount/Service/NetworkPolicy `octomaton-logs` serve
+[archived step logs](#archived-step-logs-octomaton-logs): one replica without a PodDisruptionBudget (while it restarts,
+only the logs of pods already gone fail to show), Service port 80 → container 8080, reachable only from the Tekton
+Dashboard's pods, and no ServiceAccount token in its pod.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).
@@ -417,7 +451,7 @@ Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through 
 make test      # go vet ./... && go test -race ./...
 make lint      # octomaton-lint . (this repository's own .octomaton.yaml)
 make manifests # deploy/ as written and as delivery's main deploys it, validated (Docker)
-make build     # bin/octomaton and bin/octomaton-lint
+make build     # bin/octomaton, bin/octomaton-logs and bin/octomaton-lint
 ```
 
 Run locally against a cluster (the current `KUBECONFIG` context):
@@ -427,20 +461,30 @@ export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pe
 go run ./cmd/octomaton
 ```
 
+Run the step logs server locally, as your Application Default Credentials (`gcloud auth application-default login`):
+
+```bash
+export OCTOMATON_LOGS_VIEW=projects/arikkfir/locations/global/buckets/_Default/views/_Default \
+  OCTOMATON_LOGS_CLUSTER=hub OCTOMATON_LOGS_LOCATION=me-west1-a
+go run ./cmd/octomaton-logs
+```
+
 ### Architecture
 
-The code has three layers, wired together by `cmd/octomaton`; dependencies point inward
+The code has three layers, wired together by `cmd/octomaton` and `cmd/octomaton-logs`; dependencies point inward
 ([design](https://github.com/arikkfir-org/docs/blob/main/hub/designs/octomaton-architecture.md)):
 
 - **Services** (`internal/services`) hold the CI logic, in Octomaton's own terms. `ci` defines the vocabulary
   (repository, trigger, event, run, report) and the ports the other layers implement: `CodeHost` (GitHub) and `Runner`
   (Tekton).
-- **Adapters** (`internal/adapters`) implement the ports over GitHub, Tekton, Kubernetes and HTTP.
+- **Adapters** (`internal/adapters`) implement the ports over GitHub, Tekton, Kubernetes and HTTP, and serve step logs
+  from Cloud Logging.
 - **System** (`internal/system`) configures the process: configuration, telemetry, metrics, the version.
 
 | Package | Role |
 | --- | --- |
 | `cmd/octomaton` | The server: signals, telemetry, configuration, wiring, shutdown |
+| `cmd/octomaton-logs` | The step logs server: signals, telemetry, configuration, wiring, shutdown |
 | `cmd/octomaton-lint` | The linter's launcher |
 | `internal/services/ci` | Vocabulary and ports; standard library only (`citest`: in-memory `CodeHost` and `Runner`) |
 | `internal/services/pipelines` | `.octomaton.yaml`: schema, event matching, templates |
@@ -453,20 +497,21 @@ The code has three layers, wired together by `cmd/octomaton`; dependencies point
 | `internal/adapters/tekton` | `Runner`: PipelineRun rendering, bookkeeping labels and annotations, status to runs, the watch |
 | `internal/adapters/http` | HTTP server, readiness, the webhook endpoint (signature, deduplication, worker pool) |
 | `internal/adapters/kube`, `leader`, `relay` | Kubernetes clients, Lease election, forwarding deliveries |
+| `internal/adapters/logs` | `octomaton-logs`: its endpoint and probes, reading a container's log from Cloud Logging |
 | `internal/system/config`, `telemetry`, `metrics`, `buildinfo` | Environment configuration, logs and OpenTelemetry, metric recorders, version |
 
-Services are tested against the in-memory `citest` fakes. Adapters are tested against the fake GitHub API and
-client-go's fake clients. `internal/e2e` drives signed webhooks through the real adapters and services. The layering
-itself is tested by `internal/architecture`, which fails on any import that points outward.
+Services are tested against the in-memory `citest` fakes. Adapters are tested against the fake GitHub API, a fake of
+Cloud Logging's API and client-go's fake clients. `internal/e2e` drives signed webhooks through the real adapters and
+services. The layering itself is tested by `internal/architecture`, which fails on any import that points outward.
 
 ## Releases
 
 Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
 `.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated, vet, race tests, build) on pull requests and in
-the merge queue, and `release` on pushes to `main`. `release` publishes the image to
-`me-west1-docker.pkg.dev/arikkfir/images/octomaton`, tagged with the commit's short SHA (for example `afa6953`) and
-`main`. The same short SHA is the version the binary reports and the `service.version` of its telemetry. Argo CD runs
-the image of the newest commit on `main` ([Deployment](#deployment)).
+the merge queue, and `release` on pushes to `main`. `release` publishes the images `octomaton` and `octomaton-logs` to
+`me-west1-docker.pkg.dev/arikkfir/images/`, each tagged with the commit's short SHA (for example `afa6953`) and
+`main`. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Argo CD runs
+the images of the newest commit on `main` ([Deployment](#deployment)).
 
 This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
 model runs; `arikkfir-org/tooling` runs it). `reviewer-image-check` builds it on pull requests that change it, and
@@ -474,8 +519,8 @@ model runs; `arikkfir-org/tooling` runs it). `reviewer-image-check` builds it on
 `me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` runs its
 `main` tag, so a merge that changes it reaches the next review. Octomaton itself never reads it.
 
-The first image has to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
-commit Argo CD deploys. `make image` builds and pushes the image of `HEAD` the way the release pipeline would, except
+The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
+commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, except
 for the `main` tag, and refuses uncommitted changes:
 
 ```bash

@@ -1,7 +1,7 @@
-// Package config loads and validates Octomaton's server configuration. Every setting is an
-// environment variable read by envconfig: OCTOMATON_ followed by the envconfig tags of the field and
-// of the structs holding it, e.g. OCTOMATON_GITHUB_APP_ID. The telemetry package reads the logging
-// settings, OCTOMATON_LOG_LEVEL and OCTOMATON_LOG_FORMAT.
+// Package config loads and validates Octomaton's server configuration, and octomaton-logs' (Logs).
+// Every setting is an environment variable read by envconfig: OCTOMATON_ followed by the envconfig
+// tags of the field and of the structs holding it, e.g. OCTOMATON_GITHUB_APP_ID. The telemetry
+// package reads the logging setting, OCTOMATON_LOG_LEVEL.
 package config
 
 import (

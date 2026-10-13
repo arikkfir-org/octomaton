@@ -1,6 +1,7 @@
-# Octomaton's release: build and push the image of a commit on main with ko,
-# tagged with the commit's short SHA (also the version the binary reports) and
-# main. The pod authenticates to Artifact Registry through Workload Identity
+# Octomaton's release: build and push the images of a commit on main with ko,
+# octomaton and octomaton-logs, each tagged with the commit's short SHA (also
+# the version the binaries report) and main. The pod authenticates to Artifact
+# Registry through Workload Identity
 # (ko's Google keychain uses Application Default Credentials) as
 # ci-octomaton-release, the one ServiceAccount allowed to push, which only main
 # may use (octomaton.dev/branches). Octomaton sets the params.
@@ -36,7 +37,7 @@ spec:
       - name: source
     tasks:
       - name: release
-        # A lost node (an upgrade or a repair) kills the build. Argo CD runs the image of every commit on main, so try
+        # A lost node (an upgrade or a repair) kills the build. Argo CD runs the images of every commit on main, so try
         # again: pushing the same tags twice is harmless.
         retries: 2
         params:
@@ -99,3 +100,18 @@ spec:
                 export VERSION
                 echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
                 go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton
+            # The step logs server, from the same checkout and Go cache: Argo CD runs both images of every commit.
+            - name: publish-logs
+              image: golang:1.27.1
+              env:
+                - name: REVISION
+                  value: $(params.revision)
+                - name: KO_DOCKER_REPO
+                  value: me-west1-docker.pkg.dev/arikkfir/images/octomaton-logs
+              script: |
+                #!/bin/sh
+                set -eu
+                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
+                export VERSION
+                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton-logs

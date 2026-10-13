@@ -24,16 +24,16 @@
   `github.com/arikkfir-org/octomaton`).
 - Layers (see README.md → Architecture): `internal/services` hold the CI logic in Octomaton's own terms;
   `internal/services/ci` defines the vocabulary and the ports (`CodeHost`, `Runner`). `internal/adapters` implement the
-  ports (`github`, `tekton`) and the plumbing (`http`, `kube`, `leader`, `relay`). `internal/system` holds `config`,
-  `telemetry`, `metrics` and `buildinfo`.
+  ports (`github`, `tekton`) and the plumbing (`http`, `kube`, `leader`, `relay`); `logs` is `octomaton-logs`, the step
+  logs server. `internal/system` holds `config`, `telemetry`, `metrics` and `buildinfo`.
 - Dependencies point inward, and `internal/architecture` fails the build otherwise. `services/ci` imports only the
   standard library. Services never import adapters, `k8s.io/*`, go-github or Tekton. Adapters import `services/ci`,
   `services/pipelines`, `adapters/kube` and `system/*`, never another service.
-- `cmd/octomaton` only coordinates startup and shutdown: signals, telemetry, configuration, wiring. Logic goes into an
-  `internal/` package; keep functions short.
-- The server is configured by environment variables only, read with `github.com/kelseyhightower/envconfig`
-  (`internal/system/config`; `internal/system/telemetry` reads `OCTOMATON_LOG_LEVEL`): no flags, no configuration
-  files. Configuration errors never print secret values.
+- `cmd/octomaton` and `cmd/octomaton-logs` only coordinate startup and shutdown: signals, telemetry, configuration,
+  wiring. Logic goes into an `internal/` package; keep functions short.
+- The servers are configured by environment variables only, read with `github.com/kelseyhightower/envconfig`
+  (`internal/system/config`; `internal/system/telemetry` reads `OCTOMATON_LOG_LEVEL` for both): no flags, no
+  configuration files. Configuration errors never print secret values.
 - Tekton objects are `unstructured.Unstructured` with the dynamic client; do not import `github.com/tektoncd/pipeline`.
 - `.octomaton.yaml` is parsed with `go.yaml.in/yaml/v3` (YAML 1.2, `KnownFields(true)`); never with a YAML 1.1 parser
   (an unquoted `on` would become `true`). PipelineRun files use the Kubernetes YAML reader.
@@ -55,18 +55,22 @@
 
 - `deploy/` is the hub's deployment of Octomaton (Kustomize), as written, its Namespace included. The Argo CD
   Application `octomaton` in `arikkfir-org/delivery` (`platform/octomaton/manifests`) applies it from `main` and
-  overrides what `delivery` decides in its `kustomize` options: the image's tag (that commit's short SHA, so every merge
+  overrides what `delivery` decides in its `kustomize` options: the images' tag (that commit's short SHA, so every merge
   to `main` deploys itself) and the namespace's `kfirs.com/public-ingress` label. Its AppProject `octomaton` admits only
   the namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding, and the namespaced kinds `deploy/`
   holds: a new kind or cluster-scoped object needs `delivery` changed first. The code never reads `deploy/`.
 - Follow `delivery`'s rules there: pin every other image; secrets only as `ExternalSecret`s on the `ClusterSecretStore`
-  `gcp-secret-manager`; a NetworkPolicy admitting only the `traefik` namespace to every served pod. Leave the
-  `octomaton` image untagged: Argo CD sets the tag.
-- `release` must publish an image for every push to `main`, so it never gets a `paths` filter: Argo CD runs the image of
-  whatever commit `main` is at.
+  `gcp-secret-manager`; a NetworkPolicy on every served pod admitting only its clients: the `traefik` namespace to
+  `octomaton`, the Tekton Dashboard's pods to `octomaton-logs`. Leave the `octomaton` and `octomaton-logs` images
+  untagged: Argo CD sets their tag.
+- `release` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
+  images of whatever commit `main` is at.
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
   single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
   Go import page isn't here: `delivery`'s `go-import` serves it with every hub module domain's.
+- `octomaton-logs` runs one replica without a PodDisruptionBudget, which a single replica must never get: while it
+  restarts, only the logs of pods already gone fail to show. Its ServiceAccount mounts no token (it calls no Kubernetes
+  API) and reads Cloud Logging through Workload Identity, which needs `roles/logging.viewAccessor` on its log view.
 - Pods meet the restricted Pod Security Standard, which the namespace enforces.
 - CI renders `deploy/` as written and as `delivery`'s `main` deploys it (`deploy/manifests.sh`), and validates both with
   kubeconform; run `make manifests` before pushing a change there. When you rename something `delivery` patches, change
@@ -79,14 +83,15 @@
 ## Tests
 
 - Every change needs table-driven tests; run `go vet ./... && go test -race ./...` (or `make test`) before finishing.
-- Test services against the in-memory fakes in `services/ci/citest`. Test adapters against `githubtest.Server` and
-  client-go fakes. `internal/e2e` covers the webhook-to-check path through the real adapters.
+- Test services against the in-memory fakes in `services/ci/citest`. Test adapters against `githubtest.Server`, a fake
+  of Cloud Logging's API (`adapters/logs`) and client-go fakes. `internal/e2e` covers the webhook-to-check path through
+  the real adapters.
 - `make lint` validates this repository's own `.octomaton.yaml` and `.tekton/` files.
 
 ## Commands
 
 - `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
-- Releases have no version tags: every push to `main` publishes an image tagged with the commit's short SHA, which is
-  also the version the binary reports.
+- Releases have no version tags: every push to `main` publishes the images tagged with the commit's short SHA, which is
+  also the version the binaries report.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

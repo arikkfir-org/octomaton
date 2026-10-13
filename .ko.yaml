@@ -16,3 +16,14 @@ builds:
       # VERSION when set (the release pipeline and `make image` set it), else the commit's short SHA,
       # else "dev".
       - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") (printf "%.7s" .Git.FullCommit) "dev" }}
+  # The same build, of the step logs server.
+  - id: octomaton-logs
+    dir: .
+    main: ./cmd/octomaton-logs
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") (printf "%.7s" .Git.FullCommit) "dev" }}

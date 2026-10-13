@@ -89,14 +89,16 @@ func start(t *testing.T, c Config, gcp *exporters) (*Telemetry, *bytes.Buffer) {
 func TestSetupReadsTheEnvironment(t *testing.T) {
 	tests := []struct {
 		name      string
+		service   string
 		level     string
 		wantLevel slog.Level
 		wantErr   string
 	}{
-		{name: "default", wantLevel: slog.LevelInfo},
-		{name: "debug", level: "debug", wantLevel: slog.LevelDebug},
-		{name: "upper case", level: "WARN", wantLevel: slog.LevelWarn},
-		{name: "unknown level", level: "loud", wantErr: "OCTOMATON_LOG_LEVEL"},
+		{name: "default", service: "octomaton", wantLevel: slog.LevelInfo},
+		{name: "debug", service: "octomaton", level: "debug", wantLevel: slog.LevelDebug},
+		{name: "upper case", service: "octomaton", level: "WARN", wantLevel: slog.LevelWarn},
+		{name: "unknown level", service: "octomaton", level: "loud", wantErr: "OCTOMATON_LOG_LEVEL"},
+		{name: "another service, the same variable", service: "octomaton-logs", level: "debug", wantLevel: slog.LevelDebug},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,7 +106,7 @@ func TestSetupReadsTheEnvironment(t *testing.T) {
 			if tt.level != "" {
 				t.Setenv("OCTOMATON_LOG_LEVEL", tt.level)
 			}
-			tel, err := Setup(context.Background(), "octomaton", "v0.0.0-test")
+			tel, err := Setup(context.Background(), tt.service, "v0.0.0-test")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("Setup error = %v, want one naming %s", err, tt.wantErr)

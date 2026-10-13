@@ -1,4 +1,5 @@
-# One replica at a time may be evicted (node upgrades, drains, scale-down); the other keeps serving.
+# One replica at a time may be evicted (node upgrades, drains, scale-down). octomaton's other replica keeps serving;
+# octomaton-logs has one, which a drain still evicts (delivery's docs/delivery/designs/disruption-budgets.md).
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -9,3 +10,14 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: octomaton-logs
+  namespace: octomaton
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: octomaton-logs

@@ -9,8 +9,14 @@ metadata:
     # Restart when the ConfigMap or the GitHub Secret changes.
     reloader.stakater.com/auto: "true"
 spec:
-  # Two replicas and a PodDisruptionBudget keep it serving while a node drains.
+  # Two replicas and a PodDisruptionBudget keep it serving while a node drains. A rollout starts a new replica before it
+  # stops an old one.
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton

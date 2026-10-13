@@ -19,8 +19,14 @@ metadata:
   labels:
     app.kubernetes.io/name: octomaton-logs
 spec:
-  # One replica and no PodDisruptionBudget: while it restarts, only the logs of pods already gone fail to show.
+  # One replica, whose PodDisruptionBudget lets a drain evict it: while it restarts, only the logs of pods already gone
+  # fail to show. A rollout starts the new pod before it stops the old one.
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton-logs

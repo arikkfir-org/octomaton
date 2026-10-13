@@ -54,7 +54,7 @@ sequenceDiagram
 | A server of its own | Only it holds the logging grant, and it serves only inside the cluster | A proxy inside `octomaton`: the webhook server, on the public gateway, would get a grant it doesn't need. Tekton Results: a database, an API server and a watcher, to keep what Cloud Logging already keeps |
 | `roles/logging.viewAccessor` on the `_Default` view | Reads only what the view shows, and writes nothing | `roles/logging.viewer` on the project: the project's other logs too, the `_Required` bucket's audit logs included. A view of CI's containers alone, whose flexible filter can match `resource.labels.namespace_name`: infra's pipelines can't create or plan one without a logging role each, and the plans' would read every log (infra's `docs/infra/designs/node-pools.md`) |
 | Plain text, a page at a time | The Dashboard shows a `text/plain` answer as the log, and the pod's memory stays flat whatever the log's length | Buffering the log: a long one would sit in a 128 MiB pod |
-| One replica, no PodDisruptionBudget | It serves only logs whose pods are gone, to people reading them: a restart is seconds of "Unable to fetch log" | Two replicas and a budget, which the hub keeps for services others depend on |
+| One replica | It serves only logs whose pods are gone, to people reading them: a restart is seconds of "Unable to fetch log". Its budget of `maxUnavailable: 1`, which every hub workload has since 13 October 2026 (delivery's `docs/delivery/designs/disruption-budgets.md`), never blocks a drain; it had none before | Two replicas, which the hub keeps for services others depend on |
 | A namespace outside `ci-` is a 404 | It reads like no namespace at all | 403, which tells it apart from one that doesn't exist |
 
 ## Security

@@ -1,5 +1,6 @@
 # One replica at a time may be evicted (node upgrades, drains, scale-down). octomaton's other replica keeps serving;
-# octomaton-logs has one, which a drain still evicts (delivery's docs/delivery/designs/disruption-budgets.md).
+# octomaton-logs has one, which a drain still evicts, ready or not: under the default policy a single replica's
+# budget refuses to evict an unready pod, holding the drain (delivery's docs/delivery/designs/disruption-budgets.md).
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -18,6 +19,7 @@ metadata:
   namespace: octomaton
 spec:
   maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
       app.kubernetes.io/name: octomaton-logs

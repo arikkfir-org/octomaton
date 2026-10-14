@@ -14,9 +14,14 @@
   Octomaton writes on its own objects.
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
   templates over the documented context) and the optional `githubToken` workspace.
-- The hub reference (https://docs.dev.kfirs.com/hub/reference.md, section Octomaton) is the contract for the hub's
-  deployment (`deploy/`) and with `delivery`: server config, `.octomaton.yaml` schema, template context, names, mount
-  paths, endpoints, App permissions and RBAC. Change it there first; keep README.md's schema blocks identical to it.
+- README.md is the contract for Octomaton's server configuration, `.octomaton.yaml` schema, template context,
+  endpoints, App permissions and RBAC. `docs/octomaton/designs/deployment.md` and `octomaton-dev.md` document the hub's
+  deployment (`deploy/`) and GitHub App and their wiring with `delivery`. Change them with the code, in the same pull
+  request. A name, address, identity or permission is documented by the repository that creates it: what `delivery`
+  or `infra` creates (tenant namespaces, grants, secrets, hosts) comes from their pages, which Octomaton's pages link
+  rather than repeat. A change to one starts in the repository that creates it, and those that use it follow in the
+  same unit of work. If a change needs a new or different value from another repository, say so; do not diverge
+  silently.
 
 ## Docs
 
@@ -25,7 +30,7 @@
 - Pages at `https://docs.dev.kfirs.com/<path>` (every repository's `docs/`) are behind the hub's sign-in. Read one with
   `curl -fsS https://storage.googleapis.com/arikkfir-docs/.layers/<repository>/<path>`, where `<repository>` is the
   path's first segment when it names a repository (`delivery/designs/node-pools.md` is `delivery`'s) and `docs`
-  otherwise (`hub/reference.md`). Don't clone a repository to read its docs.
+  otherwise (`CONTRIBUTING.md`). Don't clone a repository to read its docs.
 
 ## Code
 
@@ -65,9 +70,10 @@
 - `deploy/` is the hub's deployment of Octomaton (Kustomize), as written, its Namespace included. The Argo CD
   Application `octomaton` in `arikkfir-org/delivery` (`platform/octomaton/manifests`) applies it from `main` and
   overrides what `delivery` decides in its `kustomize` options: the images' tag (that commit's short SHA, so every merge
-  to `main` deploys itself) and the namespace's `kfirs.com/public-ingress` label. Its AppProject `octomaton` admits only
-  the namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding, and the namespaced kinds `deploy/`
-  holds: a new kind or cluster-scoped object needs `delivery` changed first. The code never reads `deploy/`.
+  to `main` deploys itself), the namespace's `kfirs.com/public-ingress` label and the Deployments' node pool. Its
+  AppProject `octomaton` admits only the namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding,
+  and the namespaced kinds `deploy/` holds: a new kind or cluster-scoped object needs `delivery` changed first. The
+  code never reads `deploy/`.
 - Follow `delivery`'s rules there: pin every other image; secrets only as `ExternalSecret`s on the `ClusterSecretStore`
   `gcp-secret-manager`; a NetworkPolicy on every served pod admitting only its clients: the `traefik` namespace to
   `octomaton`, the Tekton Dashboard's pods to `octomaton-logs`. Leave the `octomaton` and `octomaton-logs` images

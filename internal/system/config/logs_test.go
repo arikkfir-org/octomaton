@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// setLogsReferenceEnv sets the variables of the hub reference's Deployment octomaton-logs.
+// setLogsReferenceEnv sets the variables the hub's Deployment octomaton-logs sets (deploy/octomaton-logs.yaml).
 func setLogsReferenceEnv(t *testing.T) {
 	t.Helper()
 	for name, value := range map[string]string{

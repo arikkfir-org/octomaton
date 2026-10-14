@@ -386,22 +386,28 @@ bills the reads to the view's project (`X-Goog-User-Project`). On GKE, those are
 
 ## GitHub App
 
-`octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, homepage
-`https://github.com/arikkfir-org/octomaton`, webhook URL `https://octomaton.dev/github/hooks`. Octomaton identifies the
-App by its ID, never by its name.
+Octomaton acts as a GitHub App, which it identifies by its ID (`OCTOMATON_GITHUB_APP_ID`), never by its name. The App
+needs:
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
-- Events: `push`, `pull_request`, `issue_comment`, `check_suite`, `check_run`, `merge_group`.
+- Events: `push`, `pull_request`, `issue_comment`, `check_suite`, `check_run`, `merge_group`. Octomaton answers any
+  other event `202` and ignores it.
+- Webhook URL: the server's `/github/hooks`, signed with the App's webhook secret.
+
+The hub's App is `octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, with
+the webhook URL `https://octomaton.dev/github/hooks`. It also sends `pull_request_review`, `pull_request_review_comment`
+and `pull_request_review_thread`, which Octomaton ignores ([design](docs/octomaton/designs/octomaton-dev.md)).
 
 ## Deployment
 
 The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize), the hub's deployment as written: the Argo CD Application
 `octomaton` in [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main`, in its
 AppProject `octomaton`, and overrides what `delivery` decides: it tags the images with the synced commit's short SHA, so
-every merge to `main` rolls out once `release` has published them, and labels the namespace
-`kfirs.com/public-ingress`, which admits the webhook's route to the public gateway. `make manifests` (and CI) renders
-`deploy/` both ways and validates it. Namespace `octomaton` (the restricted Pod Security Standard enforced),
+every merge to `main` rolls out once `release` has published them, labels the namespace `kfirs.com/public-ingress`,
+which admits the webhook's route to the public gateway, and puts every Deployment on node pool `system`.
+`make manifests` (and CI) renders `deploy/` both ways and validates it
+([design](docs/octomaton/designs/deployment.md)). Namespace `octomaton` (the restricted Pod Security Standard enforced),
 Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
 (the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
 `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
@@ -416,13 +422,13 @@ Dashboard's pods, and no ServiceAccount token in its pod.
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).
 
-**RBAC Octomaton needs:**
+**RBAC** ([`deploy/rbac.yaml`](deploy/rbac.yaml)):
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (`ClusterRole octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
-| Cluster | PipelineRuns: get, list, watch (the leader's watch, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
-| `octomaton` namespace | Leases: get, create, update |
+| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
+| Cluster (ClusterRole and ClusterRoleBinding `octomaton`) | PipelineRuns and TaskRuns: get, list, watch (the leader watches PipelineRuns in every namespace, for reports, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
+| `octomaton` namespace (Role and RoleBinding `octomaton`) | Leases: get, list, watch, create, update, patch (leader election) |
 
 **Metrics** (in Cloud Monitoring under `prometheus.googleapis.com/`): counters `octomaton.webhooks.received{event}`,
 `octomaton.webhooks.rejected{event,reason}`, `octomaton.runs.created{result}` (`created`, `existing`, `skipped`,

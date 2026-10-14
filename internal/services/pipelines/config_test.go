@@ -206,9 +206,9 @@ func TestParseProblems(t *testing.T) {
 		{name: "bad token access", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, permissions: {contents: all}}}\n", want: "access level"},
 		{name: "token repositories other than all", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [r]}}, githubToken: {workspace: w, repositories: docs}}\n", want: `githubToken.repositories "docs" must be all`},
 		{name: "token repositories misspelt", yaml: head + "  - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [r]}}, githubToken: {workspace: w, repositories: All}}\n", want: `githubToken.repositories "All" must be all (or omitted for the run's repository)`},
-		{name: "token for every repository with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines whose every trigger is comment, review_request or schedule may have a token for every repository"},
-		{name: "token for every repository with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines"},
-		{name: "token for every repository with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only pipelines"},
+		{name: "token for every repository with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository"},
+		{name: "token for every repository with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines"},
+		{name: "token for every repository with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines"},
 		{name: "bad timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: forever}\n", want: "is not a duration"},
 		{name: "zero timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: 0s}\n", want: "must be positive"},
 		{name: "concurrency without group", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, concurrency: {policy: queue}}\n", want: "concurrency.group is required"},
@@ -235,9 +235,9 @@ func TestParseProblems(t *testing.T) {
 		{name: "escaping pipelineRun path in another repository", yaml: head + "  - {name: ci, pipelineRun: {repository: tooling, path: ../a.yaml}, on: {push: {}}}\n", want: "clean repository-relative"},
 		{name: "pipelineRun repository with an owner", yaml: head + "  - {name: ci, pipelineRun: {repository: octo-org/tooling, path: a.yaml}, on: {push: {}}}\n", want: `pipelineRun.repository "octo-org/tooling" is not a repository name`},
 		{name: "pipelineRun repository ..", yaml: head + "  - {name: ci, pipelineRun: {repository: \"..\", path: a.yaml}, on: {push: {}}}\n", want: "is not a repository name"},
-		{name: "secrets with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, secrets: [api-key]}\n", want: "secrets: only pipelines whose every trigger is comment, review_request or schedule may mount Secrets"},
-		{name: "secrets with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, secrets: [api-key]}\n", want: "secrets: only pipelines"},
-		{name: "secrets with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, secrets: [api-key]}\n", want: "secrets: only pipelines"},
+		{name: "secrets with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, secrets: [api-key]}\n", want: "secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets"},
+		{name: "secrets with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, secrets: [api-key]}\n", want: "secrets: only organization pipelines"},
+		{name: "secrets with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, secrets: [api-key]}\n", want: "secrets: only organization pipelines"},
 		{name: "secret name with capitals", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [API_KEY]}\n", want: `secrets[0]: "API_KEY" is not a Secret name`},
 		{name: "secret name too long", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [" + strings.Repeat("a", 254) + "]}\n", want: "secrets[0]: " + `"` + strings.Repeat("a", 254) + `" is not a Secret name`},
 		{name: "duplicate secret", yaml: head + "  - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}, secrets: [api-key, api-key]}\n", want: `secrets[1]: duplicate Secret "api-key"`},
@@ -245,8 +245,9 @@ func TestParseProblems(t *testing.T) {
 		{name: "invalid organization pipeline", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml}\n", want: "organization.pipelines[0] (lint): on: at least one of"},
 		{name: "unknown organization pipeline key", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {push: {}}, retries: 3}\n", want: "field retries not found in pipeline"},
 		{name: "organization pipeline on a schedule", yaml: head + "organization:\n  pipelines:\n    - {name: nightly, pipelineRun: a.yaml, on: {schedule: [{cron: \"0 3 * * *\"}]}}\n", want: "organization.pipelines[0] (nightly): organization pipelines can't use on.schedule"},
-		{name: "organization pipeline with secrets on pull requests", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {pull_request: {}}, secrets: [api-key]}\n", want: "organization.pipelines[0] (lint): secrets: only pipelines"},
-		{name: "organization pipeline with a token for every repository on pull requests", yaml: head + "organization:\n  pipelines:\n    - {name: lint, pipelineRun: a.yaml, on: {pull_request: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "organization.pipelines[0] (lint): githubToken.repositories: only pipelines"},
+		// The organization repository's own pipelines are read at the commit under test, like any repository's.
+		{name: "the organization repository's pipeline with secrets on pull requests", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}}, secrets: [api-key]}\norganization:\n  pipelines:\n    - {name: lint, pipelineRun: b.yaml, on: {pull_request: {}}, secrets: [api-key]}\n", want: "pipelines[0] (ci): secrets: only organization pipelines"},
+		{name: "the organization repository's pipeline with a token for every repository on pushes", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, repositories: all}}\norganization:\n  pipelines: []\n", want: "pipelines[0] (ci): githubToken.repositories: only organization pipelines"},
 		{name: "organization pipeline named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (ci): duplicate pipeline name "ci"`},
 		{name: "organization check named like a pipeline", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}}\norganization:\n  pipelines:\n    - {name: lint, displayName: ci, pipelineRun: b.yaml, on: {push: {}}}\n", want: `organization.pipelines[0] (lint): check name "ci" is taken by pipeline "ci"`},
 	}
@@ -398,8 +399,8 @@ func TestPipelineRunRef(t *testing.T) {
 	}
 }
 
-// TestDefaultBranchTriggers covers the pipelines that may list Secrets and ask for a token for every
-// repository: those whose every trigger reads its definitions from the default branch.
+// TestDefaultBranchTriggers covers the repository pipelines that may list Secrets and ask for a token for
+// every repository: those whose every trigger reads its definitions from the default branch.
 func TestDefaultBranchTriggers(t *testing.T) {
 	tests := []struct {
 		name, on string
@@ -417,6 +418,32 @@ func TestDefaultBranchTriggers(t *testing.T) {
 				t.Fatalf("secrets = %v", got)
 			}
 			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read", "pull_requests": "read"}, AllRepositories: true}
+			if got := p.Token(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Token() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestOrganizationPipelinesReadAtTheDefaultBranch: an organization pipeline is read at the organization
+// repository's default branch whatever triggers it, so it may list Secrets and ask for a token for every
+// repository on pull requests, merge groups and pushes too.
+func TestOrganizationPipelinesReadAtTheDefaultBranch(t *testing.T) {
+	tests := []struct {
+		name, on string
+	}{
+		{"pull_request", "{pull_request: {types: [opened, edited, labeled]}}"},
+		{"merge_group", "{merge_group: {}}"},
+		{"push", "{push: {branches: [main]}}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines: []\norganization:\n  pipelines:\n    - {name: linear, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key], githubToken: {workspace: github-token, permissions: {pull_requests: read}, repositories: all}}\n")
+			p := cfg.Organization.Pipelines[0]
+			if got := p.Secrets; strings.Join(got, ",") != "api-key" {
+				t.Fatalf("secrets = %v", got)
+			}
+			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"pull_requests": "read"}, AllRepositories: true}
 			if got := p.Token(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("Token() = %+v, want %+v", got, want)
 			}

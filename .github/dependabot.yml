@@ -1,0 +1,10 @@
+# Dependabot opens security updates only: open-pull-requests-limit 0 keeps version updates off. Its pull requests need
+# no Linear issue, so they carry the label skip-linear, which check Linear accepts (CONTRIBUTING.md, "Linear").
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    labels: [skip-linear]

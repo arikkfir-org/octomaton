@@ -151,6 +151,16 @@ func (t Trigger) Head() string {
 	return t.Branch
 }
 
+// pullRequestChanges are the pull_request actions that change the pull request itself (its title,
+// description, base or labels) rather than its commit.
+var pullRequestChanges = map[string]bool{"edited": true, "labeled": true, "unlabeled": true}
+
+// ChangesPullRequest reports whether t changes a pull request rather than its commit, so that a
+// pipeline it triggers runs again at the commit, as a run of its own.
+func (t Trigger) ChangesPullRequest() bool {
+	return t.Event == EventPullRequest && pullRequestChanges[t.Action]
+}
+
 // ShortSHA abbreviates a commit SHA for display.
 func ShortSHA(sha string) string {
 	if len(sha) > 7 {

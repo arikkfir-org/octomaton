@@ -86,6 +86,12 @@ func TestDecodeReasons(t *testing.T) {
 		}
 		return ev
 	}
+	// prChange edits or labels pull request #5 in a state.
+	prChange := func(action, state string) *github.PullRequestEvent {
+		ev := prPayload(owner, ghRepo(owner))
+		ev.Action, ev.PullRequest.State = new(action), new(state)
+		return ev
+	}
 	forkReviewRequest := reviewRequest("octo-reviewer", "", "open")
 	forkReviewRequest.PullRequest.Head.Repo = ghRepo("stranger")
 	noDefaultBranch := reviewRequest("octo-reviewer", "", "open")
@@ -110,6 +116,9 @@ func TestDecodeReasons(t *testing.T) {
 		{"pull request from a fork", "pull_request", prPayload(owner, ghRepo("stranger")), "pull request from a fork", ""},
 		{"pull request from a deleted repository", "pull_request", prPayload(owner, nil), "pull request from a fork", ""},
 		{"owner not allowed", "pull_request", prPayload("stranger", ghRepo("stranger")), "repository owner is not allowed", ""},
+		{"label on an open pull request", "pull_request", prChange("labeled", "open"), "", "pull_request octo-org/demo@1111111"},
+		{"edit of a closed pull request", "pull_request", prChange("edited", "closed"), "change to a pull request that is not open", ""},
+		{"label removed from a closed pull request", "pull_request", prChange("unlabeled", "closed"), "change to a pull request that is not open", ""},
 		{"push to a fork", "push", forkPush, "repository is a fork", ""},
 		{"comment in a fork", "issue_comment", forkComment, "repository is a fork", ""},
 		{"check run in a fork", "check_run", &github.CheckRunEvent{Action: new("rerequested"), CheckRun: appCheck, Repo: forkRepo(), Installation: installation, Sender: sender}, "repository is a fork", ""},

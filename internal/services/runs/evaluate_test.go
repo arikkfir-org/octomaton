@@ -74,6 +74,62 @@ func TestEvaluateIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPullRequestChangesRunAgain: an edit or a label changes the pull request, not its commit, so it runs the
+// pipelines that list it again at the same commit, and the new attempt supersedes the older one; only its
+// redelivery finds its run. Other actions at the same commit find the commit's run, as before.
+func TestPullRequestChangesRunAgain(t *testing.T) {
+	const cfg = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - name: ci
+    pipelineRun: .tekton/ci.yaml
+    on:
+      pull_request: {types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled]}
+`
+	tests := []struct {
+		action string
+		again  bool
+	}{
+		{"edited", true},
+		{"labeled", true},
+		{"unlabeled", true},
+		{"reopened", false},
+		{"ready_for_review", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.action, func(t *testing.T) {
+			h := newHarness(t)
+			h.files(sha1, cfg, ciRun)
+			h.evaluate(branchPR(sha1), EvalOptions{})
+			change := branchPR(sha1)
+			change.Action, change.DeliveryID = tt.action, "change-1"
+			h.evaluate(change, EvalOptions{})
+			h.evaluate(change, EvalOptions{}) // its redelivery
+
+			runs := h.runner.Runs()
+			if !tt.again {
+				if len(runs) != 1 {
+					t.Fatalf("runs = %d, want the commit's one run", len(runs))
+				}
+				return
+			}
+			if len(runs) != 2 {
+				t.Fatalf("runs = %d, want 2", len(runs))
+			}
+			first, second := h.run("demo-ci-1111111-1"), h.run("demo-ci-1111111-2")
+			if !first.CancelRequested || first.Cancellation.SupersededBy != second.ID.Name {
+				t.Fatalf("the first run must be superseded by the second: %+v", first)
+			}
+			if second.CancelRequested || second.Phase != ci.Released || second.Trigger.Action != tt.action {
+				t.Fatalf("the second run must run for %s: %+v", tt.action, second)
+			}
+			if n := len(h.host.ReportsNamed("ci")); n != 2 {
+				t.Fatalf("reports = %d, want 2", n)
+			}
+		})
+	}
+}
+
 func TestEvaluateConfigProblems(t *testing.T) {
 	tests := []struct {
 		name      string

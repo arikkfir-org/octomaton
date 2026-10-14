@@ -155,6 +155,21 @@ func TestOrganizationPipelineRunsBelongToTheRepository(t *testing.T) {
 	}
 }
 
+// TestOrganizationPipelineMountsSecretsOnPullRequests: an organization pipeline is read at the organization
+// repository's default branch, so a pull request's run of it may mount the Secrets it lists.
+func TestOrganizationPipelineMountsSecretsOnPullRequests(t *testing.T) {
+	h := newHarness(t)
+	setupOrganization(h)
+	lint := "      githubToken: {workspace: github-token}\n"
+	h.host.SetFile(orgRepo, "", ".octomaton.yaml", strings.Replace(orgConfig, lint, lint+"      secrets: [lint-key]\n", 1))
+	h.evaluate(branchPR(sha1), EvalOptions{ReportConfigErrors: true})
+
+	run := h.run("demo-lint-1111111-1")
+	if got := h.runner.Spec(run.ID).Secrets; !reflect.DeepEqual(got, []string{"lint-key"}) {
+		t.Fatalf("secrets = %v, want [lint-key]", got)
+	}
+}
+
 // TestTokenForEveryRepository: a pipeline that asks for a token for every repository gets one token
 // for the whole installation, with the permissions it asks for, not one restricted to its repository.
 func TestTokenForEveryRepository(t *testing.T) {

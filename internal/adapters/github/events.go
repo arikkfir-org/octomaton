@@ -193,6 +193,10 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 	if t.FromFork() {
 		return t, pr.GetDraft(), "pull request from a fork"
 	}
+	// A closed pull request's edits and labels change nothing a check guards.
+	if t.ChangesPullRequest() && pr.GetState() != "open" {
+		return t, pr.GetDraft(), "change to a pull request that is not open"
+	}
 	if ev.GetAction() == "review_requested" {
 		t, reason := reviewRequestTrigger(t, ev)
 		return t, pr.GetDraft(), reason

@@ -356,9 +356,9 @@ func (c *Config) validate(check PermissionCheck) []string {
 	}
 	// Names and check names are unique across both lists: the organization repository runs both.
 	names := newNames()
-	problems = append(problems, names.validate("pipelines", c.Pipelines, check)...)
+	problems = append(problems, names.validate("pipelines", c.Pipelines, check, false)...)
 	if c.Organization != nil {
-		problems = append(problems, names.validate("organization.pipelines", c.Organization.Pipelines, check)...)
+		problems = append(problems, names.validate("organization.pipelines", c.Organization.Pipelines, check, true)...)
 		for i, p := range c.Organization.Pipelines {
 			if len(p.On.Schedule) > 0 {
 				problems = append(problems, fmt.Sprintf("%s: organization pipelines can't use on.schedule", label("organization.pipelines", i, p.Name)))
@@ -376,12 +376,14 @@ type names struct {
 
 func newNames() names { return names{pipelines: map[string]bool{}, checks: map[string]string{}} }
 
-func (n names) validate(list string, ps []Pipeline, check PermissionCheck) []string {
+// validate checks the pipelines of a list and claims their names; organization says whether the list
+// is the organization pipelines.
+func (n names) validate(list string, ps []Pipeline, check PermissionCheck, organization bool) []string {
 	var problems []string
 	for i := range ps {
 		p := &ps[i]
 		prefix := label(list, i, p.Name)
-		for _, problem := range p.validate(check) {
+		for _, problem := range p.validate(check, organization) {
 			problems = append(problems, prefix+": "+problem)
 		}
 		problems = append(problems, n.take(prefix, p)...)
@@ -467,7 +469,7 @@ func ForRepository(repository, organization string, own, org *Config) (*Config, 
 	return merged, nil
 }
 
-func (p *Pipeline) validate(check PermissionCheck) []string {
+func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
@@ -608,8 +610,9 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 		}
 	}
 
-	// Pull requests, merge groups and pushes read their definitions at the commit under test.
-	headDefinitions := on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil
+	// Pull requests, merge groups and pushes read a repository's own definitions at the commit under
+	// test. Organization pipelines are always read at the organization repository's default branch.
+	headDefinitions := !organization && (on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil)
 	if gt := p.GitHubToken; gt != nil {
 		if strings.TrimSpace(gt.Workspace) == "" {
 			add("githubToken.workspace is required")
@@ -623,7 +626,7 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 		case "":
 		case AllRepositories:
 			if headDefinitions {
-				add("githubToken.repositories: only pipelines whose every trigger is comment, review_request or schedule may have a token for every repository, because only they read their definitions from the default branch")
+				add("githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository, because only they read their definitions from a default branch")
 			}
 		default:
 			add("githubToken.repositories %q must be %s (or omitted for the run's repository)", gt.Repositories, AllRepositories)
@@ -631,7 +634,7 @@ func (p *Pipeline) validate(check PermissionCheck) []string {
 	}
 
 	if len(p.Secrets) > 0 && headDefinitions {
-		add("secrets: only pipelines whose every trigger is comment, review_request or schedule may mount Secrets, because only they read their definitions from the default branch")
+		add("secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets, because only they read their definitions from a default branch")
 	}
 	seenSecrets := map[string]bool{}
 	for i, name := range p.Secrets {

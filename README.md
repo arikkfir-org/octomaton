@@ -36,7 +36,8 @@ sequenceDiagram
 2. The event is matched against each pipeline's triggers. A matching pipeline whose path filters do not match gets a
    check run concluded `skipped` (required checks do not block). Forks are ignored outright: see [Security](#security).
 3. Runs are named `<repo>-<pipeline>-<sha7>-<attempt>`. A redelivery, or a second event for the same commit, pipeline and
-   branch, finds the existing run. Each comment command and review request gets its own run, new commits on a pull
+   branch, finds the existing run. Each comment command, review request and pull request change (`edited`, `labeled`,
+   `unlabeled`) gets its own run, new commits on a pull
    request run every review request still pending on it again, and re-runs create the next attempt.
 4. Runs are created held, then their check run and token Secret are created, then they are released per their
    concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
@@ -97,10 +98,11 @@ pipelines:
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
-                                       # one; only when every trigger reads definitions from the default branch
+                                       # one; only when every trigger reads definitions from a default branch, or in
+                                       # an organization pipeline
     secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
-                                       # trigger reads definitions from the default branch (comment, review_request,
-                                       # schedule)
+                                       # trigger reads definitions from a default branch (comment, review_request,
+                                       # schedule), or in an organization pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
     concurrency:                       # optional; default for pull_request and review_request:
                                        # group "pr-<number>", policy supersede
@@ -115,7 +117,7 @@ organization:                          # only in the organization repository: pi
 
 | Trigger | Matches | Notes |
 | --- | --- | --- |
-| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests. |
+| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. |
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
@@ -140,8 +142,9 @@ to the pipelines of every repository of that owner, the organization repository 
 organization repository's default branch, even for its own pull requests. A plain `pipelineRun` path in them names a
 file of the organization repository. Their runs belong to the repository: its namespace, checks, template context and
 token. A repository pipeline with the name or check name of an organization pipeline is a configuration error of that
-repository, so no repository can replace one. Organization pipelines can't use `schedule`, and `secrets` follows the
-same rule as for any pipeline. `organization` in any other repository, or when the setting is unset, is a
+repository, so no repository can replace one. Organization pipelines can't use `schedule`. Since they are read at the
+organization repository's default branch whatever triggers them, they may list `secrets` and ask for a token for every
+repository on any trigger. `organization` in any other repository, or when the setting is unset, is a
 configuration error. Without the setting, the file or the section, there are no organization pipelines. A repository
 without its own `.octomaton.yaml` still runs them, and an unreadable or invalid organization repository configuration
 stops every pipeline of the repository, reported on the `octomaton` check.
@@ -154,8 +157,8 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun must be self-contained: remote references are refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
-| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
-| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only a pipeline whose every trigger is `comment`, `review_request` or `schedule` may list any, because only those read definitions from the default branch. |
+| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
+| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -292,10 +295,12 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   run, no run, no reaction or reply to comment commands on it, and no re-run of reports stored for it. Pull requests
   from the repository's own branches run automatically: pushing a branch there takes write access.
 - A run may mount no Secret other than the token Octomaton binds and those its pipeline lists in `secrets` (volumes,
-  workspaces, projected sources, `env` and `envFrom` are checked). Only a pipeline whose every trigger reads its
-  definitions from the default branch may list any, so definitions at a pull request's head never reach a listed
-  Secret. Tokens are scoped to the event's repository with least permissions, unless the pipeline asks for every
-  repository (`githubToken.repositories: all`), which follows the same rule as `secrets`.
+  workspaces, projected sources, `env` and `envFrom` are checked). Only an organization pipeline, or a pipeline whose
+  every trigger reads its definitions from the default branch, may list any, so definitions at a pull request's head
+  never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
+  pull request of the owner, Dependabot's included: it must never run the pull request's code. Tokens are scoped to the
+  event's repository with least permissions, unless the pipeline asks for every repository
+  (`githubToken.repositories: all`), which follows the same rule as `secrets`.
 - Remote Tekton references are refused (`pipelineRef`, `taskRef`, a step's `ref`, any `resolver` or `bundle`), because
   Octomaton can only check the definitions it can see: a PipelineRun holds its whole `spec.pipelineSpec`, with a
   `taskSpec` per task.

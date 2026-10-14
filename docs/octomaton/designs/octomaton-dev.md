@@ -48,7 +48,7 @@ sequenceDiagram
 | Module path `octomaton.dev` | Short, owned, and independent of where the repository lives; `go install` works through the `go-import` tag | `github.com/arikkfir-org/octomaton` (imports follow repository renames); `octo` (not installable, and dotless paths are reserved for the standard library) |
 | The hub serves the domain | Cloud DNS, cert-manager and the public gateway already exist; everything stays in Terraform and Argo CD | GitHub Pages |
 | One host, two backends | The webhook stays the only path that reaches Octomaton; the rest is a static answer | A separate webhook host |
-| Caddy, the hub's one `go-import` for every module domain ([design](../../hub/designs/go-import-pages.md)) | No code to maintain; one workload answers for every hub module domain | Serving the tag from Octomaton itself; a Caddy of Octomaton's own in its namespace, which it ran until October 2026 |
+| Caddy, the hub's one `go-import` for every module domain ([design](../../delivery/designs/go-import-pages.md)) | No code to maintain; one workload answers for every hub module domain | Serving the tag from Octomaton itself; a Caddy of Octomaton's own in its namespace, which it ran until October 2026 |
 | A certificate and listener of its own | A problem with the new domain can't block renewal of the `*.kfirs.com` certificate | A SAN on the wildcard certificate |
 | GitHub App named `octomaton-dev`, with the repository as its homepage | `Octomaton`, the product's name, is taken on GitHub. Octomaton and the rulesets' required check identify the App by its ID, so the name only labels its checks and comments | `Octomaton` (taken); a homepage at `https://octomaton.dev` (which redirects to the repository anyway) |
 

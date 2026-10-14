@@ -10,8 +10,9 @@
 
 Dependencies point inward: adapters use the services' vocabulary; services never import an adapter or a provider's
 SDK. Behaviour, configuration and every external name stay as they are. This reshapes
-[octomaton#1](https://github.com/arikkfir-org/octomaton/pull/1) before its review; it doesn't change the
-[contract](../../hub/reference.md#octomaton). What Octomaton does is in the [Phase 2 design](phase-2-octomaton.md).
+[octomaton#1](https://github.com/arikkfir-org/octomaton/pull/1) before its review; it changes neither Octomaton's
+[configuration](https://github.com/arikkfir-org/octomaton#server-configuration) nor its [deployment](deployment.md).
+What Octomaton does is in the [Phase 2 design](phase-2-octomaton.md).
 
 ## Why
 
@@ -220,8 +221,8 @@ other.
 ## Behaviour and contract
 
 Unchanged: environment variables, endpoints, check names and markers (written only by `adapters/github`), labels and
-annotations (written only by `adapters/tekton`), metrics, RBAC and IAM. The reference needs no change. The few
-behaviour changes are listed under [As built](#as-built).
+annotations (written only by `adapters/tekton`), metrics, RBAC and IAM: neither the README nor the
+[deployment](deployment.md) changes. The few behaviour changes are listed under [As built](#as-built).
 
 ## Decisions
 

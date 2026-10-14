@@ -3,7 +3,7 @@
 **Goal**: replace GitHub Actions. A GitHub App delivers webhooks to Octomaton in GKE; Octomaton runs the Tekton
 `PipelineRun`s that the repository's root `.octomaton.yaml` maps to those events and reports each one as a GitHub
 check run. Code: [arikkfir-org/octomaton](https://github.com/arikkfir-org/octomaton). Names and wiring:
-[reference](../../hub/reference.md#octomaton). Domain, webhook host and Go module path: [octomaton.dev](octomaton-dev.md).
+[deployment](deployment.md). The GitHub App, domain, webhook host and Go module path: [octomaton.dev](octomaton-dev.md).
 
 ## Principles
 
@@ -62,8 +62,8 @@ pipelines:
     concurrency: {group: "pr-{{ .PullRequest.Number }}", policy: supersede}
 ```
 
-The full schema and template context are in the [reference](../../hub/reference.md#repository-configuration-octomatonyaml)
-and the Octomaton README.
+The full schema and template context are in the
+[README](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
 
 ## Behaviour
 
@@ -121,7 +121,7 @@ flowchart LR
 | `ci-infra` | `ci-infra-plan` | none | reads the project, the state and the plan's credentials | infra's `ci` |
 | `ci-infra` | `ci-infra-apply` | `main` | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
 
-Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests' runs need them: what they write reaches only pull requests' environments and the tests site, behind the hub's sign-in. Every grant: the reference's [GCP identities and permissions](../../hub/reference.md#gcp-identities-and-permissions); the tenants' objects: [Octomaton](../../hub/reference.md#octomaton), "Tenant namespaces".
+Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests' runs need them: what they write reaches only pull requests' environments and the tests site, behind the hub's sign-in. Every grant: `infra`'s [IAM](../../infra/terraform/gcp.md#iam); what Octomaton may do in a tenant: ClusterRole [`octomaton-tenant`](deployment.md#rbac).
 
 ### ServiceAccount branches
 
@@ -171,8 +171,9 @@ flowchart TD
 | Telemetry exporters flush | 5 s |
 
 Telemetry follows where the process runs. On GKE (a pod with a GCP metadata server), everything goes to Google Cloud,
-linked by trace ID; anywhere else, logs are text and nothing is exported. Variables and grants:
-[reference](../../hub/reference.md#server-configuration).
+linked by trace ID; anywhere else, logs are text and nothing is exported. Variables:
+[server configuration](https://github.com/arikkfir-org/octomaton#server-configuration); the hub's values and grants:
+[deployment](deployment.md#endpoints-and-telemetry).
 
 ```mermaid
 flowchart LR
@@ -219,7 +220,7 @@ flowchart LR
 
 ## Rollout
 
-1. Create the GitHub App (permissions and events in the [reference](../../hub/reference.md#octomaton)); store its ID, key
+1. Create the GitHub App (permissions and events in [octomaton.dev](octomaton-dev.md#github-app)); store its ID, key
    and webhook secret in Secret Manager.
 2. Build the first image locally with `ko` (see the [bootstrap runbook](../../infra/runbooks/bootstrap.md)); afterwards
    Octomaton builds itself: every push to `main` publishes an image tagged with the commit's short SHA.

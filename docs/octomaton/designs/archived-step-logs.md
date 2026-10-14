@@ -1,6 +1,6 @@
 # Step logs after their pods are gone
 
-**Decision**: When the Tekton Dashboard can't read a step's log from its pod, its backend asks `octomaton-logs`, a second server built from [arikkfir-org/octomaton](https://github.com/arikkfir-org/octomaton), which reads that container's log from Cloud Logging, where GKE ships every container's output, and answers it as plain text. It runs in namespace `octomaton` as its own ServiceAccount, whose Workload Identity principal alone holds `roles/logging.viewAccessor` on the `_Default` log view. It serves only `ci-` namespaces, and only the Dashboard's pods reach it. Names and identities: [reference](../../hub/reference.md#octomaton).
+**Decision**: When the Tekton Dashboard can't read a step's log from its pod, its backend asks `octomaton-logs`, a second server built from [arikkfir-org/octomaton](https://github.com/arikkfir-org/octomaton), which reads that container's log from Cloud Logging, where GKE ships every container's output, and answers it as plain text. It runs in namespace `octomaton` as its own ServiceAccount, whose Workload Identity principal alone holds `roles/logging.viewAccessor` on the `_Default` log view. It serves only `ci-` namespaces, and only the Dashboard's pods reach it. Names and identities: [deployment](deployment.md#objects).
 
 ## Context
 
@@ -81,7 +81,7 @@ sequenceDiagram
 
 ## Rollout
 
-1. `docs`: the [reference](../../hub/reference.md#octomaton) gains `octomaton-logs`: its Deployment, ServiceAccount, Service, NetworkPolicy and image, its principal's roles, and the Dashboard's external logs URL.
+1. `docs`: the hub reference gains `octomaton-logs`: its Deployment, ServiceAccount, Service, NetworkPolicy and image, its principal's roles, and the Dashboard's external logs URL.
 2. `infra`: grant `octomaton/octomaton-logs` `roles/logging.viewAccessor` on view `_Default` of bucket `_Default`, and `roles/serviceusage.serviceUsageConsumer`, `roles/telemetry.metricsWriter` and `roles/telemetry.tracesWriter` on the project.
 3. `delivery`: Application `octomaton` tags `images/octomaton-logs` with `${ARGOCD_APP_REVISION_SHORT}`, and TektonConfig sets the Dashboard's external logs to `http://octomaton-logs.octomaton.svc.cluster.local/logs`. Until the next step, the Dashboard's fallback fails as reading the pod does.
 4. `octomaton`: this change merges. `release` publishes both images, and Argo CD deploys `octomaton-logs` with the commit's tag.

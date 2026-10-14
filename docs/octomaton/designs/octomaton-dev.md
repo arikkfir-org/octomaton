@@ -1,15 +1,31 @@
 # octomaton.dev: domain, webhook and Go module
 
 **Goal**: give Octomaton an identity of its own. `octomaton.dev` carries the GitHub App's webhook and the Go module
-path, and names Octomaton's labels and configuration API group, independently of the hub's `kfirs.com`. Names and
-wiring: [reference](../../hub/reference.md#octomaton). Migration from Octomatron:
-[rename runbook](../runbooks/rename.md).
+path, and names Octomaton's labels and configuration API group, independently of the hub's `kfirs.com`. The hub's
+GitHub App: [below](#github-app); the deployment behind the webhook: [deployment](deployment.md). Migration from
+Octomatron: [rename runbook](../runbooks/rename.md).
+
+## GitHub App
+
+The hub's App, created by hand. What Octomaton needs of any App is in its
+[README](https://github.com/arikkfir-org/octomaton#github-app).
+
+| Item | Value |
+| --- | --- |
+| Name | `octomaton-dev` (`Octomaton` is taken on GitHub) |
+| App ID | `5114814`. Octomaton (`OCTOMATON_GITHUB_APP_ID`) and the `Default branch` ruleset's required checks ([`infra`'s GitHub root](../../infra/terraform/github.md#the-default-branch-ruleset)) identify the App by it, never by its name |
+| Homepage | `https://github.com/arikkfir-org/octomaton` |
+| Installation | All `arikkfir-org` repositories |
+| Webhook URL | `https://octomaton.dev/github/hooks` |
+| Repository permissions | Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge queues: read |
+| Events | `push`, `pull_request`, `issue_comment`, `check_suite`, `check_run`, `merge_group`; also `pull_request_review`, `pull_request_review_comment` and `pull_request_review_thread`, which Octomaton ignores ([reviewer](pr-reviewer.md)) |
+| Credentials | Its ID, private key and webhook secret reach Octomaton through Secret `octomaton-github` ([deployment](deployment.md#configuration)) |
 
 ## Traffic
 
 ```mermaid
 flowchart LR
-  GH["GitHub App<br/>Octomaton"] -->|"POST /github/hooks"| LB
+  GH["GitHub App<br/>octomaton-dev"] -->|"POST /github/hooks"| LB
   GO["go command,<br/>proxy.golang.org"] -->|"GET /path?go-get=1"| LB
   BR["Browser"] -->|"GET /path"| LB
   LB["octomaton.dev<br/>ingress-public L4 LB"] --> GW["Traefik gateway public<br/>listener octomaton-dev"]

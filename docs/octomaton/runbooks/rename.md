@@ -3,7 +3,8 @@
 One-off migration from Octomatron to Octomaton, with Octomaton's own domain `octomaton.dev` for its webhook, Go module,
 labels and configuration API group ([design](../designs/octomaton-dev.md)). Each step says who does it: Claude prepares
 every change as a pull request; you merge, apply, and handle the GitHub App, secret values and the registrar. Once
-step 2 lands, the [reference](../../hub/reference.md) and the [bootstrap runbook](../../infra/runbooks/bootstrap.md) describe the new names.
+step 2 lands, the [bootstrap runbook](../../infra/runbooks/bootstrap.md) describes the new names; Octomaton's pages
+now hold them ([octomaton.dev](../designs/octomaton-dev.md), [deployment](../designs/deployment.md)).
 
 This migration is complete, and this page is its record. arikkfir-org/infra#17 replaces `terraform/github`'s
 `octomaton_app_id` variable with a constant, `local.octomaton_app_id` in `rulesets.tf`. From that change on, the
@@ -16,7 +17,7 @@ This migration is complete, and this page is its record. arikkfir-org/infra#17 r
 | Repository | `arikkfir-org/octomatron` | `arikkfir-org/octomaton` |
 | Go module | `github.com/arikkfir-org/octomatron` | `octomaton.dev`: `go install octomaton.dev/cmd/octomaton-lint@latest` |
 | Commands and image | `cmd/octomatron` (server, `lint`, `version`), `images/octomatron` | `cmd/octomaton` (server), `cmd/octomaton-lint`, `images/octomaton` |
-| GitHub App | `octomatron` | `Octomaton`, homepage `https://github.com/arikkfir-org/octomaton`; App ID, installation and private key unchanged |
+| GitHub App | `octomatron` | `octomaton-dev` (`Octomaton` is taken on GitHub), homepage `https://github.com/arikkfir-org/octomaton`; App ID, installation and private key unchanged |
 | Webhook URL | `https://octomatron.dev.kfirs.com/github/hooks` | `https://octomaton.dev/github/hooks` |
 | Repository config | `.octomatron.yaml`, `apiVersion: octomatron.kfirs.com/v1` | `.octomaton.yaml`, `apiVersion: octomaton.dev/v1` |
 | Bookkeeping | labels `octomatron.kfirs.com/…`, config-error check `octomatron` | labels `octomaton.dev/…`, check `octomaton` |

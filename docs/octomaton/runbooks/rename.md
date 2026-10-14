@@ -3,7 +3,7 @@
 One-off migration from Octomatron to Octomaton, with Octomaton's own domain `octomaton.dev` for its webhook, Go module,
 labels and configuration API group ([design](../designs/octomaton-dev.md)). Each step says who does it: Claude prepares
 every change as a pull request; you merge, apply, and handle the GitHub App, secret values and the registrar. Once
-step 2 lands, the [reference](../../hub/reference.md) and the [bootstrap runbook](../../hub/runbooks/bootstrap.md) describe the new names.
+step 2 lands, the [reference](../../hub/reference.md) and the [bootstrap runbook](../../infra/runbooks/bootstrap.md) describe the new names.
 
 This migration is complete, and this page is its record. arikkfir-org/infra#17 replaces `terraform/github`'s
 `octomaton_app_id` variable with a constant, `local.octomaton_app_id` in `rulesets.tf`. From that change on, the
@@ -100,7 +100,7 @@ Expect only these changes:
 | `octomaton/octomaton` as `roles/telemetry.metricsWriter`, `roles/telemetry.tracesWriter` and `roles/serviceusage.serviceUsageConsumer` on the project; the `cloudtrace` and `telemetry` APIs | |
 
 cert-manager's existing grant on zone `kfirs-com` only moves to a new address. If you never applied this root, the plan
-is [bootstrap](../../hub/runbooks/bootstrap.md) step 4 with the new names.
+is [bootstrap](../../infra/runbooks/bootstrap.md) step 4 with the new names.
 
 ## 4. Delegate octomaton.dev (you)
 
@@ -135,7 +135,7 @@ add octomaton-github-private-key   < octomatron.YYYY-MM-DD.private-key.pem
 printf '%s' "<new webhook secret>" | add octomaton-github-webhook-secret
 ```
 
-If you haven't done [bootstrap](../../hub/runbooks/bootstrap.md) step 5 yet, add its other secrets now too.
+If you haven't done [bootstrap](../../infra/runbooks/bootstrap.md) step 5 yet, add its other secrets now too.
 
 ## 6. First image (you)
 
@@ -157,7 +157,7 @@ failure for a while.
 
 Check that `dig +short NS octomaton.dev` lists the Cloud DNS servers: the Gateways wait for the `octomaton.dev`
 certificate, as they do for the wildcard one. Then merge the delivery pull request (#1, admin bypass). If Argo CD
-isn't installed yet, continue with [bootstrap](../../hub/runbooks/bootstrap.md) step 7; otherwise Argo CD syncs `main` on its own.
+isn't installed yet, continue with [bootstrap](../../infra/runbooks/bootstrap.md) step 7; otherwise Argo CD syncs `main` on its own.
 
 ## 8. Verify
 
@@ -169,8 +169,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://octomaton.dev/github/ho
 go install octomaton.dev/cmd/octomaton-lint@latest && octomaton-lint -version    # v0.0.0-<time>-<sha>: newest main commit
 ```
 
-Then [bootstrap](../../hub/runbooks/bootstrap.md) step 9: a pull request gets a `ci` check from Octomaton, and the App's recent
-deliveries succeed. Finish any bootstrap steps still open (8 to 11).
+Then [bootstrap](../../infra/runbooks/bootstrap.md) step 10: a pull request gets a `ci` check from Octomaton, and the App's recent
+deliveries succeed. Finish any bootstrap steps still open (8 to 12).
 
 ## 9. Clean up
 

@@ -21,7 +21,7 @@ func testKeyPEM(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 }
 
-// setReferenceEnv sets the variables of the hub reference's Deployment.
+// setReferenceEnv sets variables like those the hub's Deployment octomaton sets (deploy/).
 func setReferenceEnv(t *testing.T) {
 	t.Helper()
 	for name, value := range map[string]string{

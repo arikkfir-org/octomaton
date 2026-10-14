@@ -11,7 +11,7 @@ import (
 	"octomaton.dev/internal/services/ci"
 )
 
-// referenceExample is the .octomaton.yaml example from the hub reference.
+// referenceExample is the .octomaton.yaml example in README.md (Repository configuration).
 const referenceExample = `
 apiVersion: octomaton.dev/v1
 pipelines:

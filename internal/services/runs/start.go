@@ -151,8 +151,8 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 }
 
 // sameRun reports whether a run is the one a start for t would create: the run of the same comment
-// command, review request delivery or schedule slot, or else of the same head (at the same commit, as
-// the query selects).
+// command, review request delivery, pull request change delivery or schedule slot, or else of the same
+// head (at the same commit, as the query selects).
 func sameRun(t ci.Trigger) func(ci.Run) bool {
 	return func(r ci.Run) bool {
 		o := r.Trigger
@@ -165,6 +165,10 @@ func sameRun(t ci.Trigger) func(ci.Run) bool {
 			return o.ReviewRequest != nil && o.DeliveryID == t.DeliveryID && strings.EqualFold(o.ReviewRequest.Reviewer, t.ReviewRequest.Reviewer)
 		case t.Schedule != nil:
 			return o.Schedule != nil && o.Schedule.Slot == t.Schedule.Slot
+		case t.ChangesPullRequest():
+			// An edit or a label changes the pull request, not its commit, so what a pipeline checks may have changed:
+			// each is its own run at the commit; only its redeliveries find it.
+			return o.ChangesPullRequest() && o.DeliveryID == t.DeliveryID
 		default:
 			return o.Comment == nil && o.ReviewRequest == nil && o.Schedule == nil && o.Head() == t.Head()
 		}

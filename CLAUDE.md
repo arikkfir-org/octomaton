@@ -14,9 +14,18 @@
   Octomaton writes on its own objects.
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
   templates over the documented context) and the optional `githubToken` workspace.
-- The hub reference (`arikkfir-org/docs`, `hub/reference.md` → Octomaton) is the contract for the hub's deployment
-  (`deploy/`) and with `delivery`: server config, `.octomaton.yaml` schema, template context, names, mount paths,
-  endpoints, App permissions and RBAC. Change it there first; keep README.md's schema blocks identical to it.
+- The hub reference (https://docs.dev.kfirs.com/hub/reference.md, section Octomaton) is the contract for the hub's
+  deployment (`deploy/`) and with `delivery`: server config, `.octomaton.yaml` schema, template context, names, mount
+  paths, endpoints, App permissions and RBAC. Change it there first; keep README.md's schema blocks identical to it.
+
+## Docs
+
+- Octomaton's designs and runbooks are in `docs/octomaton/`: a change keeps those it touches true, in the same pull
+  request.
+- Pages at `https://docs.dev.kfirs.com/<path>` (every repository's `docs/`) are behind the hub's sign-in. Read one with
+  `curl -fsS https://storage.googleapis.com/arikkfir-docs/.layers/<repository>/<path>`, where `<repository>` is the
+  path's first segment when it names a repository (`delivery/designs/node-pools.md` is `delivery`'s) and `docs`
+  otherwise (`hub/reference.md`). Don't clone a repository to read its docs.
 
 ## Code
 

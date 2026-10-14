@@ -85,21 +85,68 @@ and the Octomaton README.
 
 ## Tenancy and identity
 
+**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it. The annotation sits on the identity, in `delivery`, where a pull request can't change it, and it is the one Octomaton setting outside `.octomaton.yaml`.
+
 ```mermaid
 flowchart LR
-  SB[octomaton/octomaton] -- creates PipelineRuns, token Secrets --> NS1[ci-docs]
-  SB --> NS2[ci-octomaton]
-  SB --> NS3[ci-...]
-  NS1 -- KSA docs-publisher, main only --> B1[(arikkfir-docs: object user on its layer)]
-  NS2 -- KSA ci-octomaton-release, main only --> B2[(Artifact Registry images: writer)]
+  OCT["octomaton/octomaton"] -->|"creates PipelineRuns and token Secrets"| NS["ci-REPOSITORY"]
+  subgraph NS["tenant ci-REPOSITORY"]
+    P["pipeline<br/>no Google Cloud role"]
+    D["docs-reader, docs-publisher"]
+    X["the repository's own:<br/>ci-REPOSITORY-PIPELINE"]
+  end
+  PR["pull request or merge group run"] -->|"names none, or an unannotated one"| P
+  PR -. "refused by Octomaton" .-> M
+  MAIN["push to main"] --> M["annotated octomaton.dev/branches: main"]
+  M -->|"Workload Identity"| G[("its bucket, repository or project roles")]
 ```
 
-- Each repository runs in its own namespace, `ci-<repository>`, created in `delivery` (onboarding a repository is a
-  small change there, plus IAM in `infra` if it needs cloud access).
-- Runs use the namespace's `pipeline` service account unless they name another. GCP permissions attach only to ServiceAccounts a pipeline names, never to `pipeline`, through Workload Identity, so one repository's pipelines can never use another's permissions ([CI ServiceAccounts](../../hub/designs/ci-service-accounts.md)).
-- Octomaton's own identity can create `PipelineRun`s and token Secrets only in tenant namespaces
-  (`ClusterRole octomaton-tenant`, bound per namespace), and watch runs cluster-wide.
-- Tekton's default pod template schedules runs onto the `ci` node pool.
+- `delivery` creates each tenant (`platform/ci-tenants`): the namespace, `pipeline`, `docs-reader` and `docs-publisher` for the docs site, the reviewer's objects, the repository's own ServiceAccounts, and RoleBinding `octomaton` to ClusterRole `octomaton-tenant`. `infra` grants the roles. Onboarding a repository is a change to both.
+- Octomaton's own identity creates `PipelineRun`s and token Secrets only in tenant namespaces, and watches runs cluster-wide.
+- Tekton's default pod template schedules runs onto node pool `ci`.
+
+### ServiceAccounts
+
+| Tenant | ServiceAccount | `octomaton.dev/branches` | Google Cloud | Named by |
+| --- | --- | --- | --- | --- |
+| every | `pipeline` | none | nothing | every run that names no other |
+| every | `docs-reader` | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
+| every | `docs-publisher` | `main` | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
+| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewer](pr-reviewer.md)) |
+| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` | tooling's `publish` |
+| `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `images` | this repository's `release` and `reviewer-image` |
+| `ci-fin` | `ci-fin-release` | `main` | writes repository `images` and Fin's CI cache | fin's `release` |
+| `ci-fin` | `ci-fin-preview` | none | writes repository `previews`, reads the CI cache | fin's `preview` |
+| `ci-fin` | `ci-fin-ci` | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
+| `ci-infra` | `ci-infra-plan` | none | reads the project, the state and the plan's credentials | infra's `ci` |
+| `ci-infra` | `ci-infra-apply` | `main` | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
+
+Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests' runs need them: what they write reaches only pull requests' environments and the tests site, behind the hub's sign-in. Every grant: the reference's [GCP identities and permissions](../../hub/reference.md#gcp-identities-and-permissions); the tenants' objects: [Octomaton](../../hub/reference.md#octomaton), "Tenant namespaces".
+
+### ServiceAccount branches
+
+| Item | Value |
+| --- | --- |
+| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none |
+| Check | Before creating a run, Octomaton reads each ServiceAccount its PipelineRun names: `spec.taskRunTemplate.serviceAccountName` and `spec.taskRunSpecs[].serviceAccountName`, the only fields that name one in a `tekton.dev/v1` PipelineRun, the one version Octomaton accepts. When one carries the annotation and the run's branch matches none of its globs, the run is refused: no PipelineRun, and its check fails with the reason |
+| Fails closed | A named ServiceAccount Octomaton can't read (a missing permission, an API error), an empty or invalid annotation, and a name that isn't a string refuse the run the same way. A run goes through only when every named ServiceAccount was read and is unannotated or matches |
+| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch and matches nothing |
+| Not checked | A PipelineRun that names no ServiceAccount: it runs as Tekton's default, which must never carry the annotation or a role. A ServiceAccount that doesn't exist: Tekton fails the run |
+| Permission | ClusterRole `octomaton-tenant` gets `get` on `serviceaccounts` |
+
+Octomaton checks every ServiceAccount a PipelineRun file names, whether or not a task that uses it runs, so an annotated ServiceAccount must not appear in any file a pull request runs: tooling keeps `publish` in a file of its own, `.tekton/publish.yaml`, apart from `.tekton/ci.yaml`.
+
+### Why
+
+A run's PipelineRun file comes from the commit under test, so a pull request's run can name any ServiceAccount in its namespace, and a run that names none runs as `pipeline`. A GKE identity says only which namespace and ServiceAccount a pod runs as, never which branch: only Octomaton knows the branch. Before this, `pipeline` held each tenant's write roles, open to every branch, Dependabot's included, whose dependency code runs in CI (forks never run):
+
+| Tenant | `pipeline` could | Worst case |
+| --- | --- | --- |
+| `ci-tooling` | write bucket `arikkfir-claude` | replace `setup.sh`, which Claude Code web sessions pipe to `bash` |
+| `ci-octomaton` | push to repository `images` | overwrite the tag Octomaton runs from, so a restart runs that code with the GitHub App's private key |
+| `ci-docs` | write bucket `arikkfir-docs` | rewrite the docs site |
+
+ENG-50 moved those roles to the ServiceAccounts above; `ci-docs`'s went with ENG-49, when the docs site moved its publishing to `docs-publisher`.
 
 ## Process
 
@@ -149,6 +196,9 @@ flowchart LR
 | Deterministic run names with attempts (`<repo>-<pipeline>-<sha7>-<n>`) | Redeliveries and duplicate events find the existing run; re-runs are new attempts | Random names (duplicates on redelivery) |
 | Skipped checks for path-filtered pipelines | Required checks can't deadlock on unrelated changes | Not reporting (blocks merges) |
 | Namespace per repository | Isolation of credentials and permissions | Shared CI namespace |
+| No Google Cloud role on `pipeline` | A run that names no ServiceAccount runs as `pipeline`, which Octomaton never checks | Annotating `pipeline`, which would refuse every pull request's run |
+| The branch restriction on the ServiceAccount, in `delivery` | Only Octomaton knows a run's branch, and a pull request can't change `delivery` | A list in `.octomaton.yaml` (a pull request edits it); a branch condition on the principal (GKE identities carry none); a namespace for runs from `main` (a repository has one namespace) |
+| A ServiceAccount per publishing pipeline, `ci-<repository>-<pipeline>`; pipelines of one repository that need the same role on the same resource share one | Roles stay per pipeline. `reviewer-image` publishes as `ci-octomaton-release`: Artifact Registry grants per repository, so an account of its own would hold the same role on `images` | One shared name in every tenant; `ci-octomaton-reviewer-image` |
 | Unstructured objects + dynamic client | Avoids the heavy Tekton Go module; only a few status fields are read | Tekton typed clients |
 | Leader election for the reconciler only | Any replica can take webhooks; one writer updates check runs | Single replica without election |
 | Configuration from environment variables only (`envconfig`) | One mechanism for settings and secrets: the ConfigMap and the Secret map straight to variables, nothing is mounted, and every problem is reported at startup | A YAML file with mounted secret files; flags |
@@ -164,13 +214,14 @@ flowchart LR
   garbage-collected with the run.
 - Pull requests can change their own pipeline files, so they can name any ServiceAccount in their namespace. Namespaces
   separate repositories, and within a namespace a ServiceAccount annotated `octomaton.dev/branches` is refused to every
-  other branch ([CI ServiceAccounts](../../hub/designs/ci-service-accounts.md)).
+  other branch ([ServiceAccount branches](#serviceaccount-branches)). A new ServiceAccount, annotated or not, has no
+  role until `infra` grants one, since roles bind to named principals.
 
 ## Rollout
 
 1. Create the GitHub App (permissions and events in the [reference](../../hub/reference.md#octomaton)); store its ID, key
    and webhook secret in Secret Manager.
-2. Build the first image locally with `ko` (see the [bootstrap runbook](../../hub/runbooks/bootstrap.md)); afterwards
+2. Build the first image locally with `ko` (see the [bootstrap runbook](../../infra/runbooks/bootstrap.md)); afterwards
    Octomaton builds itself: every push to `main` publishes an image tagged with the commit's short SHA.
 3. Argo CD deploys every commit on `main` with its own image ([deployment](deployment.md)).
 4. Apply the GitHub rulesets once `Continuous Integration` checks appear on pull requests.

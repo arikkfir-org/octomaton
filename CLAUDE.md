@@ -23,6 +23,13 @@
   same unit of work. If a change needs a new or different value from another repository, say so; do not diverge
   silently.
 
+## Work
+
+- Large tasks run as Linear projects (https://docs.dev.kfirs.com/CONTRIBUTING.md, "Projects"): suggest one to your
+  person and create it once they agree; one issue per slice, however many pull requests it takes; slices preferably
+  self-contained and deployable on their own; keep the project's status current, with an update at each milestone or
+  significant change.
+
 ## Docs
 
 - Octomaton's designs and runbooks are in `docs/octomaton/`: a change keeps those it touches true, in the same pull

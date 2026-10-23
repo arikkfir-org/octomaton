@@ -50,7 +50,7 @@ spec:
         - name: octomaton-logs
           # No tag here: Argo CD sets it to the short SHA of the commit it deploys, as for octomaton's, and release
           # publishes both images for every commit on main.
-          image: me-west1-docker.pkg.dev/arikkfir/images/octomaton-logs
+          image: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
           # Configured by environment variables only; the README lists them.
           env:
             # The log view read, whose project is the quota project, and the cluster whose containers it serves.

@@ -92,7 +92,7 @@ spec:
                 - name: REVISION
                   value: $(params.revision)
                 - name: KO_DOCKER_REPO
-                  value: me-west1-docker.pkg.dev/arikkfir/images/octomaton
+                  value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton
               script: |
                 #!/bin/sh
                 set -eu
@@ -107,7 +107,7 @@ spec:
                 - name: REVISION
                   value: $(params.revision)
                 - name: KO_DOCKER_REPO
-                  value: me-west1-docker.pkg.dev/arikkfir/images/octomaton-logs
+                  value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
               script: |
                 #!/bin/sh
                 set -eu

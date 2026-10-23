@@ -43,7 +43,7 @@ sequenceDiagram
 | Answer | `200`, `text/plain`: a line per entry, its `textPayload` without the trailing newline, or its `jsonPayload` (GKE parses a JSON line into it) as compact JSON; an entry with neither is skipped. Each page is written and flushed as it arrives, so a long log never sits in memory. No entries: an empty body |
 | Limits | 50,000 lines, then a last line saying the log was cut there: 50 pages, within the 60 `entries:list` requests a minute Cloud Logging allows a project. Two minutes to read one log |
 | Failures | A read that fails before any line is sent answers 502, logged with the request's trace. One that fails later ends the log with a line saying the rest could not be read: the status is already sent, and the Dashboard's proxy would end the response as if it were whole. A client that leaves cancels the read |
-| Deployment | `deploy/`: ServiceAccount, Deployment (one replica), Service (port 80 → 8080) and NetworkPolicy `octomaton-logs`, image `images/octomaton-logs`, which `release` publishes with `octomaton`'s and Argo CD tags the same way ([deployment](deployment.md)). Configuration: [README](https://github.com/arikkfir-org/octomaton/blob/main/README.md#archived-step-logs-octomaton-logs) |
+| Deployment | `deploy/`: ServiceAccount, Deployment (one replica), Service (port 80 → 8080) and NetworkPolicy `octomaton-logs`, image `octomaton/octomaton-logs`, which `release` publishes with `octomaton`'s and Argo CD tags the same way ([deployment](deployment.md)). Configuration: [README](https://github.com/arikkfir-org/octomaton/blob/main/README.md#archived-step-logs-octomaton-logs) |
 
 ## Decisions
 
@@ -83,7 +83,7 @@ sequenceDiagram
 
 1. `docs`: the hub reference gains `octomaton-logs`: its Deployment, ServiceAccount, Service, NetworkPolicy and image, its principal's roles, and the Dashboard's external logs URL.
 2. `infra`: grant `octomaton/octomaton-logs` `roles/logging.viewAccessor` on view `_Default` of bucket `_Default`, and `roles/serviceusage.serviceUsageConsumer`, `roles/telemetry.metricsWriter` and `roles/telemetry.tracesWriter` on the project.
-3. `delivery`: Application `octomaton` tags `images/octomaton-logs` with `${ARGOCD_APP_REVISION_SHORT}`, and TektonConfig sets the Dashboard's external logs to `http://octomaton-logs.octomaton.svc.cluster.local/logs`. Until the next step, the Dashboard's fallback fails as reading the pod does.
+3. `delivery`: Application `octomaton` tags `octomaton/octomaton-logs` with `${ARGOCD_APP_REVISION_SHORT}`, and TektonConfig sets the Dashboard's external logs to `http://octomaton-logs.octomaton.svc.cluster.local/logs`. Until the next step, the Dashboard's fallback fails as reading the pod does.
 4. `octomaton`: this change merges. `release` publishes both images, and Argo CD deploys `octomaton-logs` with the commit's tag.
 
 To roll back, unset the Dashboard's external logs URL in `delivery`: logs of pods that are gone read "Unable to fetch log" again.

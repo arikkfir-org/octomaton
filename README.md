@@ -520,12 +520,14 @@ services. The layering itself is tested by `internal/architecture`, which fails 
 Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
 `.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated, vet, race tests, build) on pull requests and in
 the merge queue, and `release` on pushes to `main`. `release` publishes the images `octomaton` and `octomaton-logs` to
-`me-west1-docker.pkg.dev/arikkfir/images/`, each tagged with the commit's short SHA (for example `afa6953`) and
-`main`. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Argo CD runs
+`me-west1-docker.pkg.dev/arikkfir/octomaton/`, a public repository of Octomaton's own
+([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), each tagged with the
+commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Argo CD runs
 the images of the newest commit on `main` ([Deployment](#deployment)).
 
 This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
-model runs; `arikkfir-org/tooling` runs it). `reviewer-image-check` builds it on pull requests that change it, and
+model runs; `arikkfir-org/tooling` runs it), which is the hub's rather than a release of Octomaton's, so it stays in
+the hub's private `images` repository. `reviewer-image-check` builds it on pull requests that change it, and
 `reviewer-image` publishes it from `main` when it changes, with rootless BuildKit, to
 `me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` runs its
 `main` tag, so a merge that changes it reaches the next review. Octomaton itself never reads it.

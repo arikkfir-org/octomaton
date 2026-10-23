@@ -45,12 +45,15 @@ the pattern for everything below: the host's decisions live with the host.
 flowchart LR
   subgraph O["arikkfir-org/octomaton: deploy/, applied as written"]
     NS[Namespace octomaton]
-    SA[ServiceAccounts]
+    SA[ServiceAccount octomaton]
     RBAC[ClusterRoles, bindings, Role leases]
     D1[Deployment octomaton x2]
+    SVC[Service octomaton]
+  end
+  subgraph L["deploy/logs/, optional"]
+    SA2[ServiceAccount octomaton-logs]
     D2[Deployment octomaton-logs x1]
-    SVC[Services octomaton, octomaton-logs]
-    PDB[PodDisruptionBudgets]
+    SVC2[Service octomaton-logs]
   end
   subgraph H["the host's repository: delivery, or weesp-ai/cluster"]
     APP[Application: revision, image tags, patches]
@@ -64,12 +67,14 @@ flowchart LR
   end
   GH[GitHub App] -->|POST /github/hooks| RT --> SVC
   APP -->|applies, tags, labels, places| O
+  APP2[Application for logs, optional] -->|applies, tags| L
   CM1 -->|envFrom| D1
   CM2 -->|envFrom| D2
   SEC -->|env| D1
   NP -.->|admits| SVC
   IAM -.->|binds| SA
-  TD[Tekton Dashboard] -->|GET /logs| SVC
+  IAM -.->|binds| SA2
+  TD[Tekton Dashboard] -->|GET /logs| SVC2
   DASH -.-> TD
 ```
 
@@ -83,13 +88,18 @@ installation has, identically:
 | Namespace `octomaton`, restricted Pod Security Standard, `Delete=false,Prune=false` | Every installation needs it, and the pods meet the standard wherever they run; a host adds labels with a patch |
 | ServiceAccounts `octomaton` and `octomaton-logs` | The identities the RBAC and the host's cloud grants name; a host adds annotations (a Workload Identity binding) with a patch |
 | ClusterRoles `octomaton` and `octomaton-tenant`, ClusterRoleBinding `octomaton`, Role and RoleBinding `octomaton` (leases) | What the servers do in any cluster, in Kubernetes' terms ([RBAC](deployment.md#rbac)) |
-| Deployments `octomaton` (two replicas, spread) and `octomaton-logs` (one), PodDisruptionBudgets | The servers; images named in Octomaton's public repository, untagged, for the host to tag |
-| Services `octomaton` and `octomaton-logs`, port 80 → 8080 | The names the host's route and the Dashboard's external logs URL point at |
+| Deployment `octomaton` (two replicas, spread) and its PodDisruptionBudget | The server; its image named in Octomaton's public repository, untagged, for the host to tag |
+| Service `octomaton`, port 80 → 8080 | The name the host's route points at |
 
-The Deployments change in one way: both read their settings from a ConfigMap through `envFrom`, `octomaton` from
-ConfigMap `octomaton` (as today) and `octomaton-logs` from ConfigMap `octomaton-logs` (today the three
-`OCTOMATON_LOGS_*` entries of its `env`; the downward API entries and `OTEL_RESOURCE_ATTRIBUTES` stay in `env`, they
-are the pod's, not the host's), and neither ConfigMap is in `deploy/`. The host writes them. A missing one holds the pod in `CreateContainerConfigError`, as the
+`octomaton-logs` leaves the base for a second kustomization, `deploy/logs/`: its ServiceAccount, Deployment, budget
+and Service, the image untagged like the server's. A host that wants archived logs deploys it with a second
+Application at the same revision and tag; a host that doesn't never deploys it. The base is then free of anything
+that assumes a cloud.
+
+Both Deployments read their settings from a ConfigMap through `envFrom`, `octomaton` from ConfigMap `octomaton` (as
+today) and `octomaton-logs` from ConfigMap `octomaton-logs` (today the three `OCTOMATON_LOGS_*` entries of its `env`;
+the downward API entries and `OTEL_RESOURCE_ATTRIBUTES` stay in `env`, they are the pod's, not the host's), and
+neither ConfigMap is in `deploy/`. The host writes them. A missing one holds the pod in `CreateContainerConfigError`, as the
 missing Secret `octomaton-github` does today, until the host provides it.
 
 Everything else leaves `deploy/` for the host's repository, unchanged in content for the hub:
@@ -112,8 +122,8 @@ What an installation provides, in the order a new host meets it. This is the REA
 | A GitHub App with the [permissions and events the README lists](https://github.com/arikkfir-org/octomaton#github-app), installed where Octomaton serves, its webhook at `https://<host>/github/hooks` | App `octomaton-dev`, created by hand ([octomaton.dev](octomaton-dev.md#github-app)) | App `bracket-octomaton` |
 | Secret `octomaton-github` in namespace `octomaton`, keys `app-id`, `private-key`, `webhook-secret` | An ExternalSecret on `gcp-secret-manager`, values in Secret Manager | An ExternalSecret on `gcp-secret-store`, values in Secret Manager |
 | ConfigMap `octomaton`: the [server's settings](https://github.com/arikkfir-org/octomaton#server-configuration); `OCTOMATON_GITHUB_ALLOWED_OWNERS` required | `arikkfir-org`, `https://tekton.dev.kfirs.com`, Argo CD's webhook, `tooling` | `weesp-ai`, `https://tekton.dev.getbracket.io`, Argo CD's webhook, `tooling` |
-| ConfigMap `octomaton-logs`: the [step logs server's settings](https://github.com/arikkfir-org/octomaton#archived-step-logs-octomaton-logs), or no `octomaton-logs` at all | View `_Default` of project `arikkfir`, cluster `hub`, `me-west1-a` | Its view, `primary-v2`, its region |
-| `deploy/` applied as written, at a commit of its choosing, the images tagged | Application `octomaton`, `targetRevision: main`, tag `${ARGOCD_APP_REVISION_SHORT}` | Application `octomaton`, a pinned commit, the same tag expression |
+| `deploy/` applied as written, at a commit of its choosing, the image tagged | Application `octomaton`, `targetRevision: main`, tag `${ARGOCD_APP_REVISION_SHORT}` | Application `octomaton`, a pinned commit, the same tag expression |
+| Optionally `deploy/logs/` the same way, with ConfigMap `octomaton-logs`: the [step logs server's settings](https://github.com/arikkfir-org/octomaton#archived-step-logs-octomaton-logs) | Application `octomaton-logs`; view `_Default` of project `arikkfir`, cluster `hub`, `me-west1-a` | Application `octomaton-logs`; its view, `primary-v2`, its region |
 | Additions through kustomize options: labels, annotations, node placement | `kfirs.com/public-ingress`, node pool `system` | ServiceAccount annotations, node selectors |
 | A route from the webhook's URL to Service `octomaton` port 80, `POST /github/hooks` only | HTTPRoute on `traefik/public`, listener `octomaton-dev` | HTTPRoute on the shared Gateway |
 | Network admission: who reaches each Service | NetworkPolicies `octomaton` and `octomaton-logs` | Its own |
@@ -186,7 +196,7 @@ it instead of Octomaton's.
 | --- | --- | --- |
 | The host writes the ConfigMaps; `deploy/` ships none | Every value in them is the host's; a ConfigMap of defaults is one the host patches, which is the coupling this removes | Defaults in `deploy/` for a host to patch (today); a Helm chart with values, which the hub's Argo CD overrides less directly than a Kustomize image and the second host would still fill in by hand |
 | The route, the ExternalSecret and the NetworkPolicies leave | They name the host's gateway, store and namespaces, and no two hosts share them; Octomaton needs a Secret and a route, not a way of making them | Parametrizing them (a `sectionName` to patch, a store name to patch): still the host rewriting Octomaton's objects |
-| `octomaton-logs` stays in the base | It is part of the product and degrades gracefully without its ConfigMap only once a host runs it; a host that doesn't want it scales it to zero with a patch | A Kustomize component to opt in ([open question](#open-questions)) |
+| `octomaton-logs` is its own kustomization, `deploy/logs/` | Its own workload on purpose (only it holds a log-reading grant, and it serves only inside the cluster), and a host decides whether to run it at all; a second Application needs no overlay, and takes the same revision and image override as the first | Part of the base, scaled to zero by hosts that don't want it; a Kustomize component, which needs the host to write an overlay |
 | `OCTOMATON_GITHUB_ALLOWED_OWNERS` is required | An unset allow-list is a cluster that runs strangers' pipelines; both installations set it already | Keeping "empty serves everyone" for a public multi-tenant deployment nobody runs |
 | Objects move between Applications by name, under `Prune=false` first | Argo CD adopts an object its source names; the host's Application takes the objects over when Octomaton's stops naming them, and `Prune=false` guarantees that the hand-over can't delete them whichever Application synced last | Renaming the moved objects (two ExternalSecrets owning one Secret conflict; a second route competes with the first); removing before adding (minutes without the webhook's route and with the Secret gone) |
 | The as-deployed check moves to `delivery` | The options are `delivery`'s, so a mismatch is `delivery`'s to find; Octomaton's CI stops cloning a repository it has no business knowing | Keeping it in Octomaton with the host's repository as a parameter: still one host's check in the product's CI |
@@ -241,23 +251,35 @@ only ordering constraints; slices on different arrows are independent.
 | # | Repository | Slice | Depends on | Done when |
 | --- | --- | --- | --- | --- |
 | 1 | octomaton | This pull request: the design, and `OCTOMATON_GITHUB_ALLOWED_OWNERS` required (config, its tests, the README's table) | none | The server refuses to start without it; the hub's and Bracket's ConfigMaps already set it, so nothing restarts differently |
-| 2 | octomaton | The moving objects (ConfigMap `octomaton`, ExternalSecret `octomaton-github`, HTTPRoute `octomaton`, NetworkPolicies `octomaton` and `octomaton-logs`) get `argocd.argoproj.io/sync-options: Prune=false`; `octomaton-logs` reads ConfigMap `octomaton-logs` through `envFrom` with `optional: true` beside its `env`, so the ConfigMap can arrive first | none | Argo CD shows the annotation; nothing else changes |
+| 2 | octomaton | The moving objects (ConfigMap `octomaton`, ExternalSecret `octomaton-github`, HTTPRoute `octomaton`, NetworkPolicies `octomaton` and `octomaton-logs`, and `octomaton-logs`'s ServiceAccount, Deployment, budget and Service) get `argocd.argoproj.io/sync-options: Prune=false`; `octomaton-logs` reads ConfigMap `octomaton-logs` through `envFrom` with `optional: true` beside its `env`, so the ConfigMap can arrive first | none | Argo CD shows the annotation; nothing else changes |
 | 3 | delivery | `platform/octomaton/manifests` gains the five objects with today's content plus ConfigMap `octomaton-logs`, deployed by the wrapper `octomaton-environment` under project `default` as the AppProject is; `ci` gains the as-deployed render of Octomaton's `deploy/`; `docs/delivery/designs/octomaton.md` is written with the hub's values | 2 | Both Applications name the objects (Argo CD's shared-resource warning, with identical content); the new ConfigMap exists; `delivery`'s `ci` renders `deploy/` with the Application's options |
-| 4 | octomaton | `deploy/` drops the five objects and the three `OCTOMATON_LOGS_*` entries of `octomaton-logs`'s `env` (its `envFrom` becomes required); `manifests.sh`, `Makefile` and `ci` validate `deploy/` as written only; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
-| 5 | delivery | AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | A `deploy/` that named one of them again would fail to sync |
+| 4 | octomaton | `deploy/` drops the five objects; `octomaton-logs` moves to `deploy/logs/`, without the three `OCTOMATON_LOGS_*` entries of its `env` (its `envFrom` becomes required); `manifests.sh`, `Makefile` and `ci` validate `deploy/` and `deploy/logs/` as written only; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
+| 5 | delivery | Application `octomaton-logs` at `deploy/logs/`, same revision and tag override, in project `octomaton`, adopting the objects slice 4 left; AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | `octomaton-logs` is tracked by its own Application; a `deploy/` that named a dropped kind again would fail to sync |
 | 6 | infra | `ci-tooling-publish` gets `roles/artifactregistry.writer` on repository `images` | none | Applied on merge; `ci-octomaton-release` keeps its grant until slice 8 |
 | 7 | tooling | `images/reviewer/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 6 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
 | 8 | octomaton | `images/reviewer/`, the two pipelines and their `.tekton/` files go; the reviewer design drops the image; `infra` drops `ci-octomaton-release`'s grant on `images` in the same step or the next | 7 | The next review pulls an image `tooling` published |
-| 9 | weesp-ai/cluster | `manifests/octomaton` gains ConfigMaps `octomaton` and `octomaton-logs`, an ExternalSecret on `gcp-secret-store`, an HTTPRoute on the shared Gateway and its NetworkPolicies; `apps/octomaton.yaml` drops the patches that rewrote them and bumps the pin past slice 4; its AppProject narrows like slice 5 ([DEV-1605](https://linear.app/weesp-ai/issue/DEV-1605)) | 4 | Bracket's installation adds to `deploy/` and rewrites nothing in it |
+| 9 | weesp-ai/cluster | `manifests/octomaton` gains ConfigMaps `octomaton` and `octomaton-logs`, an ExternalSecret on `gcp-secret-store`, an HTTPRoute on the shared Gateway and its NetworkPolicies; `apps/octomaton.yaml` drops the patches that rewrote them and bumps the pin past slice 4; it adds Application `octomaton-logs` at `deploy/logs/` and its AppProject narrows like slice 5 ([DEV-1605](https://linear.app/weesp-ai/issue/DEV-1605)) | 4 | Bracket's installation adds to `deploy/` and rewrites nothing in it |
+
+Each slice's pull request also updates this page: it flips its row below to delivered, with the pull request's
+number, so the page says at any time what is in and what is not.
+
+| Slice | Status |
+| --- | --- |
+| 1 | pending |
+| 2 | pending |
+| 3 | pending |
+| 4 | pending |
+| 5 | pending |
+| 6 | pending |
+| 7 | pending |
+| 8 | pending |
+| 9 | pending |
 
 Rollback is per slice and in reverse: 5 first, then 4 reverts to a `deploy/` that names the objects again, which
 Argo CD adopts back; 3 then removes `delivery`'s copies; 8 and 7 revert independently of 1 to 5.
 
 ## Open questions
 
-- Should `octomaton-logs` be a Kustomize component (`deploy/components/logs`) a host adds, rather than part of the
-  base it scales to zero? A host without Cloud Logging has no use for it, and a component states that better than a
-  replica count; the base would then be cloud-free entirely.
 - Does the Namespace belong in the base? Both hosts take it with a patch for their labels, and Argo CD's
   `CreateNamespace` with `managedNamespaceMetadata` is the alternative the hub rejected once
   ([deployment](deployment.md#decisions)); a third host may want its own name.

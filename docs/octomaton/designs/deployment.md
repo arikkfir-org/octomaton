@@ -208,3 +208,7 @@ leaves behind. Reverting `delivery` first would drop the label while `deploy/` s
 
 - The wait for the image could go away: `release` could move a branch (say `deployed`) once the image is published,
   and Argo CD would follow that branch. `release` would then need write access to the repository.
+
+- Superseded in part by [host-agnostic Octomaton](host-agnostic.md): the route, the ExternalSecret, the
+  NetworkPolicies and the servers' settings leave `deploy/` for the host's repository, and the as-deployed render
+  leaves `ci` for `delivery`'s.

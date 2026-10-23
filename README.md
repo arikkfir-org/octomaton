@@ -331,7 +331,7 @@ The server takes no arguments: environment variables configure it, and it exits 
 | `OCTOMATON_GITHUB_APP_ID` | required | the GitHub App's ID |
 | `OCTOMATON_GITHUB_PRIVATE_KEY` | required | the App's PEM private key (PKCS#1 or PKCS#8) |
 | `OCTOMATON_GITHUB_WEBHOOK_SECRET` | required | the App's webhook secret |
-| `OCTOMATON_GITHUB_ALLOWED_OWNERS` | every owner | users and organizations whose installations are served, comma-separated |
+| `OCTOMATON_GITHUB_ALLOWED_OWNERS` | required | users and organizations whose installations are served, comma-separated; installations on any other owner are ignored |
 | `OCTOMATON_TEKTON_DASHBOARD_URL` | none | Tekton Dashboard base URL that check runs link to |
 | `OCTOMATON_NAMESPACE_TEMPLATE` | `ci-{{ .Repository.Name }}` | namespace of a repository's runs, rendered then sanitized |
 | `OCTOMATON_NAMESPACE_OVERRIDES` | none | `owner/name:namespace` pairs, comma-separated; they win over the template |

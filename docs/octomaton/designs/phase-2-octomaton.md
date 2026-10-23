@@ -112,9 +112,9 @@ flowchart LR
 | every | `pipeline` | none | nothing | every run that names no other |
 | every | `docs-reader` | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
 | every | `docs-publisher` | `main` | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
-| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewer](pr-reviewer.md)) |
-| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` | tooling's `publish` |
-| `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `images` | this repository's `release` and `reviewer-image` |
+| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
+| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
+| `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `octomaton` | this repository's `release` |
 | `ci-fin` | `ci-fin-release` | `main` | writes repository `images` and Fin's CI cache | fin's `release` |
 | `ci-fin` | `ci-fin-preview` | none | writes repository `previews`, reads the CI cache | fin's `preview` |
 | `ci-fin` | `ci-fin-ci` | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
@@ -199,7 +199,7 @@ flowchart LR
 | Namespace per repository | Isolation of credentials and permissions | Shared CI namespace |
 | No Google Cloud role on `pipeline` | A run that names no ServiceAccount runs as `pipeline`, which Octomaton never checks | Annotating `pipeline`, which would refuse every pull request's run |
 | The branch restriction on the ServiceAccount, in `delivery` | Only Octomaton knows a run's branch, and a pull request can't change `delivery` | A list in `.octomaton.yaml` (a pull request edits it); a branch condition on the principal (GKE identities carry none); a namespace for runs from `main` (a repository has one namespace) |
-| A ServiceAccount per publishing pipeline, `ci-<repository>-<pipeline>`; pipelines of one repository that need the same role on the same resource share one | Roles stay per pipeline. `reviewer-image` publishes as `ci-octomaton-release`: Artifact Registry grants per repository, so an account of its own would hold the same role on `images` | One shared name in every tenant; `ci-octomaton-reviewer-image` |
+| A ServiceAccount per publishing pipeline, `ci-<repository>-<pipeline>`; pipelines of one repository that need the same role on the same resource share one | Roles stay per pipeline. Artifact Registry grants per repository, so two pipelines that push to the same one would each hold the same role on it | One shared name in every tenant; an account per pipeline whatever its role |
 | Unstructured objects + dynamic client | Avoids the heavy Tekton Go module; only a few status fields are read | Tekton typed clients |
 | Leader election for the reconciler only | Any replica can take webhooks; one writer updates check runs | Single replica without election |
 | Configuration from environment variables only (`envconfig`) | One mechanism for settings and secrets: the ConfigMap and the Secret map straight to variables, nothing is mounted, and every problem is reported at startup | A YAML file with mounted secret files; flags |

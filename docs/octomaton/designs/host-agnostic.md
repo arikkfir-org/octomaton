@@ -169,7 +169,8 @@ every pull request. Bracket's `cluster` does the same in its `Validate` when it 
 `publish` tenant, `ci-tooling-publish` (`octomaton.dev/branches: main`), gets `roles/artifactregistry.writer` on
 `images` in `infra`, beside `ci-octomaton-release`'s, which then only `octomaton`'s own repository needs. The
 [reviewer design](pr-reviewer.md) here keeps Octomaton's part (the trigger, organization pipelines, `secrets`,
-`githubToken.repositories: all`) and drops the image.
+`githubToken.repositories: all`) and names no reviewer or repository; the hub's reviewer, its use of them and the
+image are `tooling`'s design's.
 
 ### README and docs
 
@@ -184,7 +185,7 @@ it: they describe one installation.
 | [deployment](deployment.md) | The design of `deploy/` as a base any host applies: what it holds and why, the untagged images and the tag override, the Namespace in the base, the ConfigMaps and Secret the host writes. Its hub tables (objects' hub values, configuration values, endpoints at `kfirs.com`, roles, rollout history) move to `delivery`'s `docs/delivery/designs/octomaton.md`, the hub's installation |
 | [octomaton.dev](octomaton-dev.md) | Keeps the product's identity: `octomaton.dev` as the Go module path, the labels' and configuration's API group. The hub's App, its webhook, the traffic through the hub's gateway and the Go import page move to `delivery`'s page; the [rename runbook](../../delivery/runbooks/octomaton-rename.md), the hub's one-off migration, goes with them |
 | [archived step logs](archived-step-logs.md) | Keeps the design of the server. The hub's view, grants, NetworkPolicy and Dashboard setting move to `delivery`'s page |
-| [pull request reviewer](pr-reviewer.md) | Keeps Octomaton's settings for a reviewer; the image goes to `tooling`'s [reviewer design](../../tooling/designs/pr-reviewer.md) |
+| [pull request reviewers](pr-reviewer.md) | Keeps Octomaton's settings for a review bot, naming no reviewer or repository; the image and the hub's reviewer go to `tooling`'s [reviewer design](../../tooling/designs/pr-reviewer.md) |
 | [architecture](architecture.md), [principles](phase-2-octomaton.md), [retries](github-retries.md), [redaction](check-run-redaction.md), [Linear check](linear-check.md) | Unchanged: they describe the product |
 
 `delivery`'s new page is where the hub's values live, and other hub pages (`infra`'s IAM, `tooling`'s reviewer) link
@@ -217,8 +218,8 @@ it instead of Octomaton's.
 - `ci` here no longer fails when `delivery` renames something; `delivery`'s does. The bump in `cluster` is checked by
   `cluster`'s `Validate`. A rename in `deploy/` is therefore a breaking change for hosts and says so in its pull
   request.
-- Until `tooling` publishes the reviewer's image, Octomaton's `reviewer-image` keeps moving `main`; the two publish the
-  same Dockerfile for the slice or two they overlap.
+- Between slices 7 and 8 both repositories published the reviewer's image from the same Dockerfile and moved its
+  `main` tag; since slice 8, `tooling` is its only publisher.
 
 The hand-over of one of the moving objects, the route, across slices 2 to 5:
 
@@ -256,7 +257,7 @@ only ordering constraints; slices on different arrows are independent.
 | 4 | octomaton | `deploy/` drops the five objects; `octomaton-logs` moves to `deploy/logs/`, without the three `OCTOMATON_LOGS_*` entries of its `env` (its `envFrom` becomes required), keeping `Prune=false` until slice 5 hands it to Application `octomaton-logs`, after which a follow-up here removes it; `manifests.sh`, `Makefile` and `ci` validate `deploy/` and `deploy/logs/` as written only, with the default schemas; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above; `arikkfir-org/docs` repoints its two links to the rename runbook (`README.md`, `hub/designs/docs-ownership.md`) at `delivery/runbooks/octomaton-rename.md` once slice 3 has published it | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
 | 5 | delivery | Application `octomaton-logs` at `deploy/logs/`, same revision and tag override, in project `octomaton`, adopting the objects slice 4 left; the `Prune=false` annotation comes off the host's copies, the hand-over being over; AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | `octomaton-logs` is tracked by its own Application; the objects are prunable by their new owner again; a `deploy/` that named a dropped kind again would fail to sync |
 | 6 | infra | `ci-tooling-publish` gets `roles/artifactregistry.writer` on repository `images` | none | Applied on merge; `ci-octomaton-release` keeps its grant until slice 8 |
-| 7 | tooling | `images/reviewer/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 6 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
+| 7 | tooling | `reviewer/image/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 6 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
 | 8 | octomaton | `images/reviewer/`, the two pipelines and their `.tekton/` files go; the reviewer design drops the image; `infra` drops `ci-octomaton-release`'s grant on `images` in the same step or the next | 7 | The next review pulls an image `tooling` published |
 | 9 | weesp-ai/cluster | `manifests/octomaton` gains ConfigMaps `octomaton` and `octomaton-logs`, an ExternalSecret on `gcp-secret-store`, an HTTPRoute on the shared Gateway and its NetworkPolicies; `apps/octomaton.yaml` drops the patches that rewrote them and bumps the pin past slice 4; it adds Application `octomaton-logs` at `deploy/logs/` and its AppProject narrows like slice 5 ([DEV-1605](https://linear.app/weesp-ai/issue/DEV-1605)) | 4 | Bracket's installation adds to `deploy/` and rewrites nothing in it |
 
@@ -270,9 +271,9 @@ number, so the page says at any time what is in and what is not.
 | 3 | delivered: [delivery#76](https://github.com/arikkfir-org/delivery/pull/76) |
 | 4 | delivered: [octomaton#42](https://github.com/arikkfir-org/octomaton/pull/42) |
 | 5 | delivered: [delivery#77](https://github.com/arikkfir-org/delivery/pull/77); [octomaton#43](https://github.com/arikkfir-org/octomaton/pull/43) takes `Prune=false` off `deploy/logs/`, the adoption being over |
-| 6 | pending |
-| 7 | pending |
-| 8 | pending |
+| 6 | delivered: [infra#83](https://github.com/arikkfir-org/infra/pull/83) |
+| 7 | delivered: [tooling#51](https://github.com/arikkfir-org/tooling/pull/51), with [delivery#78](https://github.com/arikkfir-org/delivery/pull/78) and [docs#67](https://github.com/arikkfir-org/docs/pull/67) |
+| 8 | delivered: [octomaton#44](https://github.com/arikkfir-org/octomaton/pull/44); [infra#84](https://github.com/arikkfir-org/infra/pull/84) drops `ci-octomaton-release`'s grant on `images`, and [delivery#79](https://github.com/arikkfir-org/delivery/pull/79) its tenant's docs |
 | 9 | pending |
 
 Rollback is per slice and in reverse: 5 first, then 4 reverts to a `deploy/` that names the objects again, which

@@ -550,13 +550,6 @@ the merge queue, and `release` on pushes to `main`. `release` publishes the imag
 commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Which tag an
 installation runs is the host's choice ([Hosting Octomaton](#hosting-octomaton)).
 
-This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
-model runs; `arikkfir-org/tooling` runs it), which is the hub's rather than a release of Octomaton's, so it stays in
-the hub's private `images` repository. `reviewer-image-check` builds it on pull requests that change it, and
-`reviewer-image` publishes it from `main` when it changes, with rootless BuildKit, to
-`me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main`. `tooling` runs its
-`main` tag, so a merge that changes it reaches the next review. Octomaton itself never reads it.
-
 The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
 commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, except
 for the `main` tag, and refuses uncommitted changes:

@@ -266,7 +266,7 @@ number, so the page says at any time what is in and what is not.
 | Slice | Status |
 | --- | --- |
 | 1 | delivered: [octomaton#39](https://github.com/arikkfir-org/octomaton/pull/39) |
-| 2 | pending |
+| 2 | delivered: [octomaton#40](https://github.com/arikkfir-org/octomaton/pull/40) |
 | 3 | pending |
 | 4 | pending |
 | 5 | pending |

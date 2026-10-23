@@ -106,7 +106,7 @@ README's [server configuration](https://github.com/arikkfir-org/octomaton#server
 
 | Source | `octomaton` | `octomaton-logs` |
 | --- | --- | --- |
-| ConfigMap | `octomaton`, through `envFrom` | none |
+| ConfigMap | `octomaton`, through `envFrom` | `octomaton-logs`, through `envFrom` with `optional: true`: the host may write it ahead of slice 4, and until then the Deployment's `env` below takes precedence |
 | Downward API | `OCTOMATON_POD_NAME` and `OCTOMATON_POD_NAMESPACE`: the Lease's holder and namespace | none |
 | The Deployment's `env` | none | `OCTOMATON_LOGS_VIEW`, `OCTOMATON_LOGS_CLUSTER` and `OCTOMATON_LOGS_LOCATION` |
 | Secret `octomaton-github` | `app-id`, `private-key` and `webhook-secret` as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET` | none |

@@ -295,7 +295,7 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 ## Check runs
 
 - Each run reports on a check named after its pipeline (its `displayName`, or else its `name`): `queued` →
-  `in_progress` → `completed`, linked to `https://tekton.dev.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`,
+  `in_progress` → `completed`, linked to `<OCTOMATON_TEKTON_DASHBOARD_URL>/#/namespaces/<namespace>/pipelineruns/<name>` (no link when unset),
   with `external_id` `<namespace>/<name>`.
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
@@ -547,8 +547,8 @@ Every commit on `main` is a release, named by its short SHA; there are no versio
 the merge queue, and `release` on pushes to `main`. `release` publishes the images `octomaton` and `octomaton-logs` to
 `me-west1-docker.pkg.dev/arikkfir/octomaton/`, a public repository of Octomaton's own
 ([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), each tagged with the
-commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Argo CD runs
-the images of the newest commit on `main` ([Deployment](#deployment)).
+commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Which tag an
+installation runs is the host's choice ([Hosting Octomaton](#hosting-octomaton)).
 
 This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
 model runs; `arikkfir-org/tooling` runs it), which is the hub's rather than a release of Octomaton's, so it stays in

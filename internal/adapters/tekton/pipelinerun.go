@@ -34,11 +34,21 @@ var (
 )
 
 const (
-	// apiVersion is the only PipelineRun API version Octomaton accepts.
+	// apiVersion is the API version of the PipelineRuns Octomaton creates, and the only one it
+	// accepts in a pipelineRun file.
 	apiVersion = "tekton.dev/v1"
 	// kindPipelineRun is the only kind Octomaton accepts in a pipelineRun file.
 	kindPipelineRun = "PipelineRun"
 )
+
+// apiVersions are the API versions Octomaton accepts for each kind of file: the ones Tekton serves
+// (StepAction has no v1).
+var apiVersions = map[string][]string{
+	kindPipelineRun: {apiVersion},
+	kindPipeline:    {apiVersion},
+	kindTask:        {apiVersion},
+	kindStepAction:  {"tekton.dev/v1beta1", "tekton.dev/v1alpha1"},
+}
 
 // Values of spec.status Octomaton writes: a pending run is held until the
 // field is cleared; a cancelled one stops, running its finally tasks.
@@ -144,8 +154,8 @@ func parseDocument(data []byte, kind string) (*unstructured.Unstructured, error)
 		return nil, fmt.Errorf("the document is not a YAML mapping: %w", err)
 	}
 	pr := &unstructured.Unstructured{Object: obj}
-	if v := pr.GetAPIVersion(); v != apiVersion {
-		return nil, fmt.Errorf("apiVersion must be %q (got %q)", apiVersion, v)
+	if v := pr.GetAPIVersion(); !slices.Contains(apiVersions[kind], v) {
+		return nil, fmt.Errorf("apiVersion must be %s (got %q)", strings.ReplaceAll(quoteAll(apiVersions[kind]), ", ", " or "), v)
 	}
 	if k := pr.GetKind(); k != kind {
 		return nil, fmt.Errorf("kind must be %q (got %q)", kind, k)

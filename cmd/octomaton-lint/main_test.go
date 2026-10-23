@@ -28,7 +28,7 @@ func TestRun(t *testing.T) {
 	write(files, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: ci}}\n")
 	write(files, "ci.pipeline.yaml", "apiVersion: tekton.dev/v1\nkind: Pipeline\nspec: {tasks: [{name: check, taskRef: {name: check}}]}\n")
 	write(files, "check.task.yaml", "apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: [{name: clone, ref: {name: clone}, params: [{name: url, value: u}]}]}\n")
-	write(files, "clone.step.yaml", "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: git, params: [{name: url}], args: [$(params.url)]}\n")
+	write(files, "clone.step.yaml", "apiVersion: tekton.dev/v1beta1\nkind: StepAction\nspec: {image: git, params: [{name: url}], args: [$(params.url)]}\n")
 	missing := t.TempDir()
 	write(missing, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {}}}\n")
 	write(missing, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: gone}}\n")

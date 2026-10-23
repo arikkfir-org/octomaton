@@ -54,7 +54,7 @@ spec:
       args: [plan, $(params.root)]
 `,
 	".tekton/clone.step.yaml": `
-apiVersion: tekton.dev/v1
+apiVersion: tekton.dev/v1beta1
 kind: StepAction
 metadata: {name: clone}
 spec:
@@ -71,7 +71,7 @@ spec:
   results: [{name: sha}]
 `,
 	".tekton/arrays.step.yaml": `
-apiVersion: tekton.dev/v1
+apiVersion: tekton.dev/v1alpha1
 kind: StepAction
 spec:
   image: busybox
@@ -79,8 +79,22 @@ spec:
   args: ["$(params.flags[*])"]
 `,
 	".tekton/bad.task.yaml":  "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
+	".tekton/v1.step.yaml":   "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
+	".tekton/bare.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nmetadata: {labels: {a: b}}\n",
+	".tekton/chain.step.yaml": `
+apiVersion: tekton.dev/v1beta1
+kind: StepAction
+spec:
+  image: busybox
+  params:
+    - {name: a, type: string}
+    - {name: b, default: "$(params.a)/b"}
+    - {name: c, default: "$(params.b)/c"}
+    - {name: d, default: "$(params.c)/d"}
+  args: ["$(params.d)", "$(params.a)"]
+`,
 	".tekton/two.task.yaml":  "apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: []}\n---\napiVersion: tekton.dev/v1\nkind: Task\n",
-	".tekton/dup.step.yaml":  "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox, workingDir: /w}\n",
+	".tekton/dup.step.yaml":  "apiVersion: tekton.dev/v1beta1\nkind: StepAction\nspec: {image: busybox, workingDir: /w}\n",
 	".tekton/none.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nspec:\n  steps:\n    - name: s\n      ref: {name: nowhere}\n",
 }
 
@@ -176,6 +190,20 @@ func TestExpand(t *testing.T) {
               args: ["https://example/abc"]
               results: [{name: sha}]
 `},
+		{name: "a provided value is left for Tekton, defaults resolve through it", reads: []string{".tekton/chain.step.yaml"},
+			spec: "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec:\n          steps:\n            - {name: s, ref: {name: chain}, params: [{name: a, value: $(params.b)}]}\n",
+			want: `
+  pipelineSpec:
+    tasks:
+      - name: t
+        taskSpec:
+          steps:
+            - {name: s, image: busybox, args: ["$(params.b)/b/c/d", "$(params.b)"]}
+`},
+		{name: "a StepAction at v1, which Tekton does not serve", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: v1}}]}}]\n", reads: []string{".tekton/v1.step.yaml"},
+			err: "`.tekton/v1.step.yaml` is not a valid StepAction file: apiVersion must be \"tekton.dev/v1beta1\" or \"tekton.dev/v1alpha1\" (got \"tekton.dev/v1\")"},
+		{name: "a Task file without a spec", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: bare}}]\n", reads: []string{".tekton/bare.task.yaml"},
+			err: "`.tekton/bare.task.yaml` is not a valid Task file: it has no spec"},
 		{name: "pipelineRef and pipelineSpec", spec: "  pipelineRef: {name: ci}\n  pipelineSpec: {tasks: []}\n", err: "spec holds both pipelineRef and pipelineSpec"},
 		{name: "taskRef and taskSpec", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check}, taskSpec: {steps: []}}]\n", err: "task `t` holds both taskRef and taskSpec"},
 		{name: "a reference with more than a name", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check, kind: Task}}]\n",

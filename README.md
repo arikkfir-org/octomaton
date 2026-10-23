@@ -213,13 +213,14 @@ Without `concurrency`, pull request and review request runs of the same pipeline
 A PipelineRun may keep its pipeline, each task and each step in a Tekton file of its own, through Tekton's own
 references by name. Octomaton resolves each name to a file in the PipelineRun file's directory, at the commit the
 PipelineRun file was read at, and inlines it before it checks the run, so Tekton gets the same self-contained PipelineRun
-it would with everything written inline, and every file is valid against Tekton's schemas:
+it would with everything written inline, and every file is valid against Tekton's schemas (at the API version Tekton
+serves the kind: `StepAction` has no `v1`):
 
 | Reference | File | Becomes |
 | --- | --- | --- |
 | `spec.pipelineRef: {name: ci}` | `ci.pipeline.yaml`, one `tekton.dev/v1` `Pipeline` | `spec.pipelineSpec` |
 | a task's `taskRef: {name: check}` | `check.task.yaml`, one `tekton.dev/v1` `Task` | the task's `taskSpec` (the Task's labels and annotations go in its `metadata`) |
-| a step's `ref: {name: clone}` | `clone.step.yaml`, one `tekton.dev/v1` `StepAction` | the step's fields, with the step's `params` substituted for `$(params.<name>)` as Tekton would (string params only, defaults included; a param the StepAction does not declare, or declares without a default and the step does not pass, is refused) |
+| a step's `ref: {name: clone}` | `clone.step.yaml`, one `tekton.dev/v1beta1` (or `v1alpha1`) `StepAction` | the step's fields, with the StepAction's `$(params.<name>)` replaced by the step's `params` as given (a reference in one, such as the Task's `$(params.revision)`, is for Tekton) or else by the StepAction's defaults, in which references to other params are resolved; string params only; a param the StepAction does not declare, or declares without a default and the step does not pass, is refused |
 
 A reference holds nothing but `name` (no `kind`, `apiVersion`, `resolver` or `bundle`), and a name is a file's name
 (lower-case letters, digits, `-` and `.`). A Pipeline file's tasks reference Task files and a Task file's steps

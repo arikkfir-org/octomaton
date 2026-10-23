@@ -18,7 +18,7 @@ import (
 
 // Tekton's references by name (spec.pipelineRef, a task's taskRef, a step's ref) name files beside the
 // PipelineRun file: <name>.pipeline.yaml, <name>.task.yaml and <name>.step.yaml, each one Tekton
-// object of that kind. Octomaton inlines them before it checks the run, so Tekton gets a
+// object of that kind, at a version Tekton serves it (apiVersions). Octomaton inlines them before it checks the run, so Tekton gets a
 // self-contained PipelineRun and every check sees every definition.
 const (
 	kindPipeline   = "Pipeline"
@@ -223,13 +223,15 @@ func (x *expander) step(where string, step map[string]any) error {
 	return nil
 }
 
-// stepParams returns the values of a StepAction's params for a step: the step's params, then the
-// action's defaults. Only string params are inlined: Tekton expands array and object ones in ways
-// that depend on where they are used.
+// stepParams returns the values of a StepAction's params for a step: the step's params as given
+// (what they reference, such as the Task's params, is Tekton's to substitute), then the action's
+// defaults, in which references to other params are resolved, as Tekton does. Only string params
+// are inlined: Tekton expands array and object ones in ways that depend on where they are used.
 func stepParams(where, what string, step, action map[string]any) (map[string]string, error) {
 	declared, _ := action["params"].([]any)
 	given, _ := step["params"].([]any)
 	values := map[string]string{}
+	defaults := map[string]bool{}
 	for _, p := range given {
 		m, _ := p.(map[string]any)
 		name, _ := m["name"].(string)
@@ -261,18 +263,39 @@ func stepParams(where, what string, step, action map[string]any) (map[string]str
 		if !isString {
 			return nil, fmt.Errorf("param `%s` of %s has a default that is not a string; %s inlines string params only", name, what, where)
 		}
-		values[name] = s
+		values[name], defaults[name] = s, true
 	}
 	for name := range values {
 		if !names[name] {
 			return nil, fmt.Errorf("%s passes param `%s`, which %s does not declare", where, name, what)
 		}
 	}
-	// A default may reference another param, as Tekton resolves it.
-	for name, value := range values {
-		values[name], _ = substitute(value, values).(string)
-	}
+	resolveDefaults(values, defaults)
 	return values, nil
+}
+
+// resolveDefaults replaces the params each default references, once, after the defaults it
+// references are resolved, so a chain of defaults resolves whatever its order and nothing brought
+// in by a replacement (a given value's reference to a Task param) is replaced again. Defaults
+// that reference each other in a cycle stay as they are, for Tekton to reject.
+func resolveDefaults(values map[string]string, defaults map[string]bool) {
+	unresolved := maps.Clone(defaults)
+	for progress := true; progress && len(unresolved) > 0; {
+		progress = false
+		for _, name := range slices.Sorted(maps.Keys(unresolved)) {
+			ready := true
+			for _, ref := range paramRef.FindAllStringSubmatch(values[name], -1) {
+				if dep := ref[1] + ref[2] + ref[3]; dep != name && unresolved[dep] {
+					ready = false
+				}
+			}
+			if ready {
+				values[name], _ = substitute(values[name], values).(string)
+				delete(unresolved, name)
+				progress = true
+			}
+		}
+	}
 }
 
 func article(word string) string {
@@ -282,17 +305,22 @@ func article(word string) string {
 	return "a"
 }
 
-// substitute replaces $(params.<name>) (also $(params['<name>']) and $(params["<name>"])) in every
-// string of v.
+// paramRef matches a reference to a param: $(params.<name>), $(params['<name>']) or
+// $(params["<name>"]).
+var paramRef = regexp.MustCompile(`\$\(params\.([^.)\[\]]+)\)|\$\(params\['([^']+)'\]\)|\$\(params\["([^"]+)"\]\)`)
+
+// substitute replaces, in every string of v, each reference to a param in values by its value, in
+// one pass: what a value brings in is not scanned again.
 func substitute(v any, values map[string]string) any {
 	switch t := v.(type) {
 	case string:
-		for name, value := range values {
-			for _, form := range []string{"$(params." + name + ")", "$(params['" + name + "'])", `$(params["` + name + `"])`} {
-				t = strings.ReplaceAll(t, form, value)
+		return paramRef.ReplaceAllStringFunc(t, func(ref string) string {
+			m := paramRef.FindStringSubmatch(ref)
+			if value, ok := values[m[1]+m[2]+m[3]]; ok {
+				return value
 			}
-		}
-		return t
+			return ref
+		})
 	case map[string]any:
 		for k, child := range t {
 			t[k] = substitute(child, values)
@@ -342,6 +370,9 @@ func (x *expander) file(where, kind, name string) (*unstructured.Unstructured, e
 		return nil, &readError{err: fmt.Errorf("reading `%s`: %w", p, err)}
 	}
 	file, err := parseDocument(data, kind)
+	if err == nil && file.Object["spec"] == nil {
+		err = errors.New("it has no spec")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("`%s` is not a valid %s file: %v", p, kind, err)
 	}

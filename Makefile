@@ -20,10 +20,10 @@ vet:
 lint:
 	$(GO) run ./cmd/octomaton-lint .
 
-## manifests: render deploy/ as Argo CD deploys it, as written and as delivery's main overrides it, and validate it
+## manifests: render deploy/ and deploy/logs/ as written and validate them
 manifests:
 	rm -rf .ci/manifests
-	docker run --rm -v "$(CURDIR):/src" -w /src -u "$$(id -u):$$(id -g)" -e HOME=/tmp -e REVISION=$(VERSION) \
+	docker run --rm -v "$(CURDIR):/src" -w /src -u "$$(id -u):$$(id -g)" -e HOME=/tmp \
 		--entrypoint sh $(K8S_IMAGE) deploy/manifests.sh .ci/manifests
 
 ## build: static binaries in bin/: octomaton and octomaton-logs (the servers) and octomaton-lint

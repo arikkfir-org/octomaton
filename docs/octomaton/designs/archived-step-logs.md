@@ -1,6 +1,6 @@
 # Step logs after their pods are gone
 
-**Decision**: When the Tekton Dashboard can't read a step's log from its pod, its backend asks `octomaton-logs`, a second server built from [arikkfir-org/octomaton](https://github.com/arikkfir-org/octomaton), which reads that container's log from Cloud Logging, where GKE ships every container's output, and answers it as plain text. It runs in namespace `octomaton` as its own ServiceAccount, whose Workload Identity principal alone holds `roles/logging.viewAccessor` on the `_Default` log view. It serves only `ci-` namespaces, and only the Dashboard's pods reach it. Names and identities: [deployment](deployment.md#objects).
+**Decision**: When the Tekton Dashboard can't read a step's log from its pod, its backend asks `octomaton-logs`, a second server built from [arikkfir-org/octomaton](https://github.com/arikkfir-org/octomaton), which reads that container's log from Cloud Logging, where GKE ships every container's output, and answers it as plain text. It runs in namespace `octomaton` as its own ServiceAccount, to which the host alone binds an identity holding `roles/logging.viewAccessor` on its log view. It serves only `ci-` namespaces, and the host admits only the Dashboard's pods to it. The objects: [deployment](deployment.md#design); the hub's view, grants, admission and Dashboard setting: `delivery`'s [hosting Octomaton](../../delivery/designs/octomaton.md).
 
 ## Context
 
@@ -43,7 +43,7 @@ sequenceDiagram
 | Answer | `200`, `text/plain`: a line per entry, its `textPayload` without the trailing newline, or its `jsonPayload` (GKE parses a JSON line into it) as compact JSON; an entry with neither is skipped. Each page is written and flushed as it arrives, so a long log never sits in memory. No entries: an empty body |
 | Limits | 50,000 lines, then a last line saying the log was cut there: 50 pages, within the 60 `entries:list` requests a minute Cloud Logging allows a project. Two minutes to read one log |
 | Failures | A read that fails before any line is sent answers 502, logged with the request's trace. One that fails later ends the log with a line saying the rest could not be read: the status is already sent, and the Dashboard's proxy would end the response as if it were whole. A client that leaves cancels the read |
-| Deployment | `deploy/`: ServiceAccount, Deployment (one replica), Service (port 80 → 8080) and NetworkPolicy `octomaton-logs`, image `octomaton/octomaton-logs`, which `release` publishes with `octomaton`'s and Argo CD tags the same way ([deployment](deployment.md)). Configuration: [README](https://github.com/arikkfir-org/octomaton/blob/main/README.md#archived-step-logs-octomaton-logs) |
+| Deployment | `deploy/logs/`: ServiceAccount, Deployment (one replica), budget and Service (port 80 → 8080) `octomaton-logs`, image `octomaton/octomaton-logs`, which `release` publishes with `octomaton`'s and the host tags the same way, applied by a host that wants archived logs and by no one else ([deployment](deployment.md)). Its settings come from ConfigMap `octomaton-logs`, which the host writes: [README](https://github.com/arikkfir-org/octomaton/blob/main/README.md#archived-step-logs-octomaton-logs) |
 
 ## Decisions
 
@@ -61,7 +61,7 @@ sequenceDiagram
 
 | Concern | Handling |
 | --- | --- |
-| Who reaches it | Only pods labelled `app.kubernetes.io/name: dashboard` in namespace `tekton-pipelines` (NetworkPolicy `octomaton-logs`); it has no route on any gateway. People reach the Dashboard through the hub's sign-in and Middleware `admins` ([admins only](../../delivery/designs/admins-only.md)), and read what they read in the pod's log before its node went |
+| Who reaches it | Only the Dashboard's pods, which the host's NetworkPolicy admits (the hub's: pods labelled `app.kubernetes.io/name: dashboard` in namespace `tekton-pipelines`); it has no route on any gateway. People reach the Dashboard through the hub's sign-in and Middleware `admins` ([admins only](../../delivery/designs/admins-only.md)), and read what they read in the pod's log before its node went |
 | What it reads | The view's grant covers every log the `_Default` bucket holds, not only CI's. The code narrows it: only namespaces starting with `ci-` (`OCTOMATON_LOGS_NAMESPACE_PREFIX`, which can't be empty), only the hub cluster's `k8s_container` entries, one container at a time. Names are validated before they reach the filter, so no request widens it |
 | Writes | None: the view's grant only reads. `roles/serviceusage.serviceUsageConsumer` bills the reads to the project |
 | Credentials | Workload Identity: no key, no Secret. The pod mounts no Kubernetes token and calls no Kubernetes API |

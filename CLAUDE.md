@@ -15,8 +15,8 @@
 - PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
   templates over the documented context) and the optional `githubToken` workspace.
 - README.md is the contract for Octomaton's server configuration, `.octomaton.yaml` schema, template context,
-  endpoints, App permissions and RBAC. `docs/octomaton/designs/deployment.md` and `octomaton-dev.md` document the hub's
-  deployment (`deploy/`) and GitHub App and their wiring with `delivery`. Change them with the code, in the same pull
+  endpoints, App permissions and RBAC. `docs/octomaton/designs/deployment.md` documents `deploy/` as the base any host
+  applies, and `host-agnostic.md` the contract a host meets; a host's installation is documented by the host. Change them with the code, in the same pull
   request. A name, address, identity or permission is documented by the repository that creates it: what `delivery`
   or `infra` creates (tenant namespaces, grants, secrets, hosts) comes from their pages, which Octomaton's pages link
   rather than repeat. A change to one starts in the repository that creates it, and those that use it follow in the
@@ -78,17 +78,19 @@
 
 ## Deployment
 
-- `deploy/` is the hub's deployment of Octomaton (Kustomize), as written, its Namespace included. The Argo CD
-  Application `octomaton` in `arikkfir-org/delivery` (`platform/octomaton/manifests`) applies it from `main` and
-  overrides what `delivery` decides in its `kustomize` options: the images' tag (that commit's short SHA, so every merge
-  to `main` deploys itself), the namespace's `kfirs.com/public-ingress` label and the Deployments' node pool. Its
-  AppProject `octomaton` admits only the namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding,
-  and the namespaced kinds `deploy/` holds: a new kind or cluster-scoped object needs `delivery` changed first. The
-  code never reads `deploy/`.
-- Follow `delivery`'s rules there: pin every other image; secrets only as `ExternalSecret`s on the `ClusterSecretStore`
-  `gcp-secret-manager`; a NetworkPolicy on every served pod admitting only its clients: the `traefik` namespace to
-  `octomaton`, the Tekton Dashboard's pods to `octomaton-logs`. Leave the `octomaton` and `octomaton-logs` images
-  untagged: Argo CD sets their tag.
+- `deploy/` is Octomaton's deployment as every installation applies it (Kustomize), its Namespace included, and
+  `deploy/logs/` the step logs server a host applies the same way or not at all. Neither names a host: the images are
+  untagged, the servers read ConfigMaps `octomaton` and `octomaton-logs` and Secret `octomaton-github` that the host
+  writes, and the route, network admission, cloud grants and Dashboard setting are the host's (README.md, "Hosting
+  Octomaton"). A host adds to `deploy/`'s objects with kustomize patches (labels, annotations, node placement) and
+  never needs to rewrite one: a change that makes a host patch something, or that renames an object a host patches or
+  reads by name, is a breaking change for every host and says so in its pull request. The code never reads `deploy/`.
+- The hub's installation is `arikkfir-org/delivery`'s (`platform/octomaton/manifests`, its
+  `docs/delivery/designs/octomaton.md`): Application `octomaton` applies `deploy/` from `main`, tags the images with
+  the synced commit's short SHA (so every merge to `main` deploys itself) and patches the namespace's label and the
+  node pool; AppProject `octomaton` admits only namespace `octomaton`, Octomaton's own ClusterRoles and
+  ClusterRoleBinding, and the namespaced kinds `deploy/` holds, so a new kind or cluster-scoped object needs `delivery`
+  changed first. Secrets only through the host; a NetworkPolicy is the host's too.
 - `release` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
   images of whatever commit `main` is at.
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
@@ -100,9 +102,8 @@
   `maxUnavailable: 0`), and every workload in `deploy/` has a budget, as `delivery`'s rules require. Its ServiceAccount mounts no token (it calls no Kubernetes
   API) and reads Cloud Logging through Workload Identity, which needs `roles/logging.viewAccessor` on its log view.
 - Pods meet the restricted Pod Security Standard, which the namespace enforces.
-- CI renders `deploy/` as written and as `delivery`'s `main` deploys it (`deploy/manifests.sh`), and validates both with
-  kubeconform; run `make manifests` before pushing a change there. When you rename something `delivery` patches, change
-  `delivery` too.
+- CI renders `deploy/` and `deploy/logs/` as written (`deploy/manifests.sh`) and validates them with kubeconform; run
+  `make manifests` before pushing a change there. How a host renders them is the host's CI to check.
 - `images/reviewer/` is the hub's pull request reviewer image, run by `arikkfir-org/tooling`'s reviewer; the code never
   reads it. `reviewer-image` publishes it from `main` as `ci-octomaton-release`, with a `paths` filter, and moves its
   `main` tag, which tooling runs: a merge that changes it reaches the next review. `reviewer-image-check` builds it on

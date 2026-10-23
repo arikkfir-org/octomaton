@@ -1,8 +1,8 @@
 # Octomaton's own CI and release, run by Octomaton. Schema: README.md.
 apiVersion: octomaton.dev/v1
 pipelines:
-  # Lint, vet, test and build every pull request and every merge queue group, and validate the hub's deployment
-  # (deploy/), as written and as delivery deploys it.
+  # Lint, vet, test and build every pull request and every merge queue group, and validate deploy/ and
+  # deploy/logs/ as written.
   - name: ci
     displayName: Continuous Integration
     pipelineRun: .tekton/ci.yaml
@@ -16,7 +16,7 @@ pipelines:
     timeout: 30m
 
   # Publish the images of every push to main, tagged with the commit's short SHA (also the version the
-  # binaries report) and "main". There are no version tags. Argo CD deploys every commit on main with the images
+  # binaries report) and "main". There are no version tags. A host may deploy every commit on main with the images
   # of that commit (deploy/), so release runs on every push: never give it a paths filter.
   - name: release
     pipelineRun: .tekton/release.yaml

@@ -1,18 +1,14 @@
-# The hub's deployment of Octomaton, as written. The Application octomaton in arikkfir-org/delivery deploys it from main
-# with Argo CD and overrides what delivery decides through its kustomize options, the image's tag among them;
-# manifests.sh renders it both ways. Names and wiring: docs/octomaton/designs/deployment.md. Octomaton itself never
-# reads this directory.
+# Octomaton's deployment, as every installation applies it: the Namespace, the server's identity and RBAC, the server
+# and its Service. A host applies it as written (Argo CD, or kustomize build), tags the image, and provides the rest
+# by name: ConfigMap octomaton, Secret octomaton-github, a route to Service octomaton, network admission and cloud
+# grants (the README's Hosting Octomaton). The step logs server is deploy/logs/, applied the same way or not at all.
+# Octomaton itself never reads this directory.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
   - service-account.yaml
   - rbac.yaml
-  - config-map.yaml
-  - external-secret.yaml
   - deployment.yaml
-  - pod-disruption-budgets.yaml
+  - pod-disruption-budget.yaml
   - service.yaml
-  - http-route.yaml
-  - network-policy.yaml
-  - octomaton-logs.yaml

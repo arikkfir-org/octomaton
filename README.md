@@ -55,6 +55,36 @@ sequenceDiagram
    A replica drops a delivery it is handling or handled in the last hour, unless a failed call left part of its event
    undone: then its redelivery is handled again, until one copy succeeds.
 
+## Hosting Octomaton
+
+Octomaton runs in any Kubernetes cluster that runs Tekton Pipelines. [`deploy/`](deploy/) (Kustomize) is what every
+installation applies as written: Namespace `octomaton` (the restricted Pod Security Standard enforced), ServiceAccount
+`octomaton` and its [RBAC](#deployment), Deployment `octomaton` (two replicas, spread over nodes, a PodDisruptionBudget
+of `maxUnavailable: 1`) and Service `octomaton` (port 80 → container 8080). [`deploy/logs/`](deploy/logs/) is the
+[step logs server](#archived-step-logs-octomaton-logs), `octomaton-logs`, applied the same way by a host that wants
+archived step logs in its Tekton Dashboard, and by no one else. Neither names a host: the images are untagged, and the
+servers read their settings from objects the host writes, by name. A host provides, in this order:
+
+| The host provides | How |
+| --- | --- |
+| A [GitHub App](#github-app), installed on the owners it serves, its webhook at `https://<host>/github/hooks` | Created by hand, once |
+| Secret `octomaton-github` in namespace `octomaton`, keys `app-id`, `private-key` and `webhook-secret` | However the host makes Secrets: an ExternalSecret, a sealed Secret, `kubectl create secret` |
+| ConfigMap `octomaton` in namespace `octomaton`: the [server's settings](#server-configuration) as environment variables; `OCTOMATON_GITHUB_ALLOWED_OWNERS` is required | Plain YAML in the host's repository |
+| `deploy/` applied as written, at a commit of its choosing, the image `me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton` tagged with that commit's short SHA ([releases](#releases)) | An Argo CD Application with `kustomize.images`, or `kustomize edit set image` and `kubectl apply -k` |
+| A route from the webhook's URL to Service `octomaton`, port 80, path `/github/hooks` | An HTTPRoute, an Ingress; whatever fronts the cluster |
+| Network admission to the pods labelled `app.kubernetes.io/name: octomaton`, port 8080, from the route's proxy, if the cluster has NetworkPolicies | A NetworkPolicy in namespace `octomaton` |
+| RoleBinding `octomaton` of ClusterRole `octomaton-tenant` to ServiceAccount `octomaton/octomaton` in every namespace runs are created in ([RBAC](#deployment)) | With the tenant namespaces |
+| Optionally `deploy/logs/`, applied the same way at the same commit, the image `…/octomaton-logs` tagged the same; ConfigMap `octomaton-logs` with the [step logs server's settings](#archived-step-logs-octomaton-logs); a cloud identity for ServiceAccount `octomaton/octomaton-logs` that reads the log view; admission from the Dashboard's pods to the pods labelled `app.kubernetes.io/name: octomaton-logs`, port 8080; and the Dashboard's external logs URL, `http://octomaton-logs.octomaton.svc.cluster.local/logs` | A second Application, a ConfigMap, a Workload Identity binding, a NetworkPolicy, a Dashboard setting |
+| Additions to `deploy/`'s objects: labels on the Namespace, annotations on the ServiceAccounts (a Workload Identity binding), node selectors and tolerations on the Deployments | Kustomize patches, in the Application's `kustomize.patches` or an overlay |
+| Validation of `deploy/` as the host renders it | The host's CI renders `deploy/` with its options; this repository's validates `deploy/` as written only |
+
+Both Deployments restart when their ConfigMap or Secret changes (Reloader's `reloader.stakater.com/auto`), where the
+host runs Reloader. A missing ConfigMap or Secret holds the pod in `CreateContainerConfigError` until the host provides
+it; an empty `OCTOMATON_GITHUB_ALLOWED_OWNERS` exits the server at startup. The hub's installation, as one worked
+example: [hosting Octomaton](https://github.com/arikkfir-org/delivery/blob/main/docs/delivery/designs/octomaton.md) in
+`arikkfir-org/delivery`; the design behind the split:
+[host-agnostic Octomaton](docs/octomaton/designs/host-agnostic.md).
+
 ## Repository configuration (`.octomaton.yaml`)
 
 The only file Octomaton reads from a repository, always at the root. It is parsed as YAML 1.2, so the `on` key needs
@@ -265,7 +295,7 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
 ## Check runs
 
 - Each run reports on a check named after its pipeline (its `displayName`, or else its `name`): `queued` →
-  `in_progress` → `completed`, linked to `https://tekton.dev.kfirs.com/#/namespaces/<namespace>/pipelineruns/<name>`,
+  `in_progress` → `completed`, linked to `<OCTOMATON_TEKTON_DASHBOARD_URL>/#/namespaces/<namespace>/pipelineruns/<name>` (no link when unset),
   with `external_id` `<namespace>/<name>`.
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
@@ -384,8 +414,8 @@ and `GET /readyz` answer `ok`. All on 8080.
 | `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `octomaton-logs` | added to the resource of exported metrics and traces |
 
 It calls Cloud Logging's `entries:list` with the Application Default Credentials, for the scope `logging.read`, and
-bills the reads to the view's project (`X-Goog-User-Project`). On GKE, those are its Kubernetes ServiceAccount's,
-`octomaton/octomaton-logs`, which needs `roles/logging.viewAccessor` on the view and
+bills the reads to the view's project (`X-Goog-User-Project`). On GKE, those are the identity its host binds to
+ServiceAccount `octomaton/octomaton-logs`, which needs `roles/logging.viewAccessor` on the view and
 `roles/serviceusage.serviceUsageConsumer` on the project. Its telemetry goes where the server's does, so it also needs
 `roles/telemetry.metricsWriter` and `roles/telemetry.tracesWriter`.
 
@@ -400,29 +430,23 @@ needs:
   other event `202` and ignores it.
 - Webhook URL: the server's `/github/hooks`, signed with the App's webhook secret.
 
-The hub's App is `octomaton-dev` (`Octomaton` is taken on GitHub), installed on all `arikkfir-org` repositories, with
-the webhook URL `https://octomaton.dev/github/hooks`. It also sends `pull_request_review`, `pull_request_review_comment`
-and `pull_request_review_thread`, which Octomaton ignores ([design](docs/octomaton/designs/octomaton-dev.md)).
+An App may send more events than these (`pull_request_review`, say); Octomaton answers them `202` and ignores them.
+Octomaton serves only the installations of the owners `OCTOMATON_GITHUB_ALLOWED_OWNERS` lists.
 
 ## Deployment
 
-The hub runs Octomaton from [`deploy/`](deploy/) (Kustomize), the hub's deployment as written: the Argo CD Application
-`octomaton` in [`arikkfir-org/delivery`](https://github.com/arikkfir-org/delivery) syncs it from `main`, in its
-AppProject `octomaton`, and overrides what `delivery` decides: it tags the images with the synced commit's short SHA, so
-every merge to `main` rolls out once `release` has published them, labels the namespace `kfirs.com/public-ingress`,
-which admits the webhook's route to the public gateway, and puts every Deployment on node pool `system`.
-`make manifests` (and CI) renders `deploy/` both ways and validates it
-([design](docs/octomaton/designs/deployment.md)). Namespace `octomaton` (the restricted Pod Security Standard enforced),
-Deployment/ServiceAccount/Service `octomaton` (Service port 80 → container 8080), ConfigMap `octomaton`
-(the non-secret variables, through `envFrom`), Secret `octomaton-github` (keys `app-id`, `private-key` and
-`webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and `OCTOMATON_GITHUB_WEBHOOK_SECRET`).
-Every replica serves webhooks; the replica holding the Lease `octomaton` in its namespace reports runs, fires schedules,
-refreshes tokens and deletes PVCs of finished runs. The hub runs two replicas of `octomaton`, spread over nodes when
-there are several, with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes both.
-Deployment/ServiceAccount/Service/NetworkPolicy `octomaton-logs` serve
-[archived step logs](#archived-step-logs-octomaton-logs): one replica (while it restarts,
-only the logs of pods already gone fail to show), Service port 80 → container 8080, reachable only from the Tekton
-Dashboard's pods, and no ServiceAccount token in its pod.
+[`deploy/`](deploy/) and [`deploy/logs/`](deploy/logs/) are what a host applies ([hosting Octomaton](#hosting-octomaton));
+`make manifests` (and CI) renders both as written and validates them
+([design](docs/octomaton/designs/deployment.md)). Deployment/ServiceAccount/Service `octomaton` (Service port 80 →
+container 8080) read ConfigMap `octomaton` (the non-secret variables, through `envFrom`) and Secret `octomaton-github`
+(keys `app-id`, `private-key` and `webhook-secret`, as `OCTOMATON_GITHUB_APP_ID`, `OCTOMATON_GITHUB_PRIVATE_KEY` and
+`OCTOMATON_GITHUB_WEBHOOK_SECRET`). Every replica serves webhooks; the replica holding the Lease `octomaton` in its
+namespace reports runs, fires schedules, refreshes tokens and deletes PVCs of finished runs. Two replicas, spread over
+nodes when there are several, with a PodDisruptionBudget of `maxUnavailable: 1`, so a node drain never takes both.
+Deployment/ServiceAccount/Service `octomaton-logs` (`deploy/logs/`) serve
+[archived step logs](#archived-step-logs-octomaton-logs): one replica (while it restarts, only the logs of pods already
+gone fail to show), Service port 80 → container 8080, ConfigMap `octomaton-logs` through `envFrom`, and no
+ServiceAccount token in its pod.
 
 Endpoints (all on 8080): `POST /github/hooks`; `GET /healthz` (process up); `GET /readyz` (Kubernetes API reachable and, on
 the leader, the PipelineRun informer synced).
@@ -461,7 +485,7 @@ Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through 
 ```bash
 make test      # go vet ./... && go test -race ./...
 make lint      # octomaton-lint . (this repository's own .octomaton.yaml)
-make manifests # deploy/ as written and as delivery's main deploys it, validated (Docker)
+make manifests # deploy/ and deploy/logs/ as written, validated (Docker)
 make build     # bin/octomaton, bin/octomaton-logs and bin/octomaton-lint
 ```
 
@@ -523,8 +547,8 @@ Every commit on `main` is a release, named by its short SHA; there are no versio
 the merge queue, and `release` on pushes to `main`. `release` publishes the images `octomaton` and `octomaton-logs` to
 `me-west1-docker.pkg.dev/arikkfir/octomaton/`, a public repository of Octomaton's own
 ([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), each tagged with the
-commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Argo CD runs
-the images of the newest commit on `main` ([Deployment](#deployment)).
+commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Which tag an
+installation runs is the host's choice ([Hosting Octomaton](#hosting-octomaton)).
 
 This repository also publishes the hub's pull request reviewer image, `images/reviewer` (opencode plus the tools the
 model runs; `arikkfir-org/tooling` runs it), which is the hub's rather than a release of Octomaton's, so it stays in

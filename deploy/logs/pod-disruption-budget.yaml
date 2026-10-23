@@ -1,0 +1,17 @@
+# octomaton-logs has one replica, which a drain still evicts, ready or not: under the default policy a single replica's
+# budget refuses to evict an unready pod, holding the drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: octomaton-logs
+  namespace: octomaton
+  # Octomaton's deploy/ held this until October 2026; a host's Application for deploy/logs/ adopts it by name
+  # (docs/octomaton/designs/host-agnostic.md): never pruned on the way, whichever Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: octomaton-logs

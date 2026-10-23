@@ -91,12 +91,9 @@ spec:
                 go run ./cmd/octomaton-lint .
             - name: manifests
               image: docker.io/alpine/k8s:1.37.1
-              env:
-                - name: REVISION
-                  value: $(params.revision)
               script: |
                 #!/bin/sh
-                # deploy/ as written, and as delivery's main deploys it; the image's kustomize is Argo CD's.
+                # deploy/ and deploy/logs/ as written; how a host renders them is the host's to check.
                 set -eu
                 deploy/manifests.sh .ci/manifests
             - name: vet

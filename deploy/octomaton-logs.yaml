@@ -137,7 +137,7 @@ kind: NetworkPolicy
 metadata:
   name: octomaton-logs
   namespace: octomaton
-  # Moving to deploy/logs/, under an Application of its own (docs/octomaton/designs/host-agnostic.md): never pruned
+  # Moving to the host's repository (docs/octomaton/designs/host-agnostic.md): never pruned
   # on the way, whichever Application synced last.
   annotations:
     argocd.argoproj.io/sync-options: Prune=false

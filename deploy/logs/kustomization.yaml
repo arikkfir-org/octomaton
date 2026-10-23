@@ -1,0 +1,12 @@
+# octomaton-logs, the step logs server, for a host that wants archived step logs in its Tekton Dashboard: its
+# ServiceAccount, Deployment, budget and Service, in the namespace deploy/ creates. A host applies it as written at the
+# same revision as deploy/, tags the image the same way, and provides ConfigMap octomaton-logs, a cloud identity that
+# reads the log view, network admission from the Dashboard's pods and the Dashboard's external logs URL (the README's
+# Hosting Octomaton). A host that doesn't want it never applies it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service-account.yaml
+  - deployment.yaml
+  - service.yaml
+  - pod-disruption-budget.yaml

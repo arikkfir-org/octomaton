@@ -267,8 +267,8 @@ number, so the page says at any time what is in and what is not.
 | --- | --- |
 | 1 | delivered: [octomaton#39](https://github.com/arikkfir-org/octomaton/pull/39) |
 | 2 | delivered: [octomaton#40](https://github.com/arikkfir-org/octomaton/pull/40) |
-| 3 | pending |
-| 4 | pending |
+| 3 | delivered: [delivery#76](https://github.com/arikkfir-org/delivery/pull/76) |
+| 4 | delivered: this pull request. `deploy/logs/`'s objects keep `Prune=false` until the hub's Application `octomaton-logs` (slice 5) has adopted them; a follow-up here removes it |
 | 5 | pending |
 | 6 | pending |
 | 7 | pending |

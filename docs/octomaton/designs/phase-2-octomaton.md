@@ -220,7 +220,7 @@ flowchart LR
 
 ## Rollout
 
-1. Create the GitHub App (permissions and events in [octomaton.dev](octomaton-dev.md#github-app)); store its ID, key
+1. Create the GitHub App (permissions and events in the [README](https://github.com/arikkfir-org/octomaton#github-app)); store its ID, key
    and webhook secret in Secret Manager.
 2. Build the first image locally with `ko` (see the [bootstrap runbook](../../infra/runbooks/bootstrap.md)); afterwards
    Octomaton builds itself: every push to `main` publishes an image tagged with the commit's short SHA.

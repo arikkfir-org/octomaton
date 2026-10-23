@@ -150,6 +150,7 @@ type Installation interface {
 
 // Runner is the CI system that executes pipelines: Tekton on Kubernetes.
 type Runner interface {
+	Expand(ctx context.Context, spec RunSpec, read FileReader) ([]byte, error) // the definition with the files it references inlined
 	Check(ctx context.Context, spec RunSpec) error                     // a *Refusal before anything exists
 	Create(ctx context.Context, spec RunSpec, attempt int) (Run, error) // held; ErrExists when the attempt exists
 	Get(ctx context.Context, id RunID) (Run, error)

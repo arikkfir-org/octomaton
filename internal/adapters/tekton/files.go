@@ -1,0 +1,350 @@
+package tekton
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"path"
+	"regexp"
+	"slices"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"octomaton.dev/internal/services/ci"
+	"sigs.k8s.io/yaml"
+)
+
+// Tekton's references by name (spec.pipelineRef, a task's taskRef, a step's ref) name files beside the
+// PipelineRun file: <name>.pipeline.yaml, <name>.task.yaml and <name>.step.yaml, each one Tekton
+// object of that kind. Octomaton inlines them before it checks the run, so Tekton gets a
+// self-contained PipelineRun and every check sees every definition.
+const (
+	kindPipeline   = "Pipeline"
+	kindTask       = "Task"
+	kindStepAction = "StepAction"
+	// maxFiles bounds the files one PipelineRun may reference: each is a read from the code host.
+	maxFiles = 20
+)
+
+var fileSuffix = map[string]string{kindPipeline: ".pipeline.yaml", kindTask: ".task.yaml", kindStepAction: ".step.yaml"}
+
+// refName is what a reference's name may be: a file's name, without separators.
+var refName = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
+
+// missingFile is a referenced file that does not exist; it Is ci.ErrNotFound.
+type missingFile struct{ msg string }
+
+func (e *missingFile) Error() string        { return e.msg }
+func (e *missingFile) Is(target error) bool { return target == ci.ErrNotFound }
+func missing(format string, args ...any) error {
+	return &missingFile{msg: fmt.Sprintf(format, args...)}
+}
+
+// readError is a referenced file the reader could not read, for a reason a retry may get past.
+type readError struct{ err error }
+
+func (e *readError) Error() string { return e.err.Error() }
+func (e *readError) Unwrap() error { return e.err }
+
+// expand inlines the Pipeline, Task and StepAction files definition (the PipelineRun file at
+// pipelineRunPath) references by name, read with read from its directory, and returns the
+// self-contained definition: definition itself when it references none. The problems of a
+// reference or a file are plain errors (a file that does not exist Is ci.ErrNotFound); a file that
+// could not be read is a *readError.
+func expand(ctx context.Context, definition []byte, pipelineRunPath string, read ci.FileReader) ([]byte, error) {
+	pr, err := parsePipelineRun(definition)
+	if err != nil {
+		return nil, err
+	}
+	x := &expander{ctx: ctx, dir: path.Dir(pipelineRunPath), read: read, files: map[string]*unstructured.Unstructured{}}
+	if err := x.pipelineRun(pr.Object); err != nil {
+		return nil, err
+	}
+	if !x.changed {
+		return definition, nil
+	}
+	out, err := yaml.Marshal(pr.Object)
+	if err != nil {
+		return nil, fmt.Errorf("serializing the expanded PipelineRun: %w", err)
+	}
+	return out, nil
+}
+
+type expander struct {
+	ctx  context.Context
+	dir  string
+	read ci.FileReader
+	// files holds each file read, by path, so a file referenced twice is read once.
+	files   map[string]*unstructured.Unstructured
+	changed bool
+}
+
+// pipelineRun inlines the pipeline, then the tasks of the pipeline, then the steps of every task.
+func (x *expander) pipelineRun(obj map[string]any) error {
+	spec, _ := obj["spec"].(map[string]any)
+	if spec == nil {
+		return nil
+	}
+	if ref, ok := spec["pipelineRef"]; ok {
+		if _, both := spec["pipelineSpec"]; both {
+			return errors.New("spec holds both pipelineRef and pipelineSpec")
+		}
+		name, err := x.name("spec.pipelineRef", ref)
+		if err != nil || name == "" {
+			return err
+		}
+		file, err := x.file("spec.pipelineRef", kindPipeline, name)
+		if err != nil {
+			return err
+		}
+		delete(spec, "pipelineRef")
+		spec["pipelineSpec"] = file.Object["spec"]
+	}
+	ps, _ := spec["pipelineSpec"].(map[string]any)
+	if ps == nil {
+		return nil
+	}
+	for _, list := range []string{"tasks", "finally"} {
+		tasks, _ := ps[list].([]any)
+		for i, t := range tasks {
+			task, _ := t.(map[string]any)
+			if task == nil {
+				continue
+			}
+			where := fmt.Sprintf("task `%s`", taskName(task, fmt.Sprintf("%s[%d]", list, i)))
+			if list == "finally" {
+				where = "finally " + where
+			}
+			if err := x.task(where, task); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func taskName(task map[string]any, fallback string) string {
+	if name, _ := task["name"].(string); name != "" {
+		return name
+	}
+	return fallback
+}
+
+// task inlines a task's Task file, then the StepAction files of its steps.
+func (x *expander) task(where string, task map[string]any) error {
+	if ref, ok := task["taskRef"]; ok {
+		if _, both := task["taskSpec"]; both {
+			return fmt.Errorf("%s holds both taskRef and taskSpec", where)
+		}
+		name, err := x.name(where+"'s taskRef", ref)
+		if err != nil {
+			return err
+		}
+		if name != "" {
+			file, err := x.file(where+"'s taskRef", kindTask, name)
+			if err != nil {
+				return err
+			}
+			delete(task, "taskRef")
+			task["taskSpec"] = embeddedTask(file)
+		}
+	}
+	ts, _ := task["taskSpec"].(map[string]any)
+	if ts == nil {
+		return nil
+	}
+	steps, _ := ts["steps"].([]any)
+	for i, s := range steps {
+		step, _ := s.(map[string]any)
+		if step == nil {
+			continue
+		}
+		name, _ := step["name"].(string)
+		if name == "" {
+			name = fmt.Sprintf("steps[%d]", i)
+		}
+		if err := x.step(fmt.Sprintf("step `%s` of %s", name, where), step); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// embeddedTask is a Task file as a pipeline task's taskSpec: its spec, with the labels and
+// annotations of its metadata, which Tekton puts on the TaskRun as it would for a referenced Task.
+// Each use gets its own copy: the steps of one may be expanded apart from another's.
+func embeddedTask(file *unstructured.Unstructured) map[string]any {
+	spec, _ := runtime.DeepCopyJSONValue(file.Object["spec"]).(map[string]any)
+	meta := map[string]any{}
+	for _, k := range []string{"labels", "annotations"} {
+		if v, found, _ := unstructured.NestedFieldCopy(file.Object, "metadata", k); found {
+			meta[k] = v
+		}
+	}
+	if len(meta) > 0 {
+		spec["metadata"] = meta
+	}
+	return spec
+}
+
+// step inlines a step's StepAction file: the action's fields become the step's, with the step's
+// params substituted the way Tekton does when it resolves the ref.
+func (x *expander) step(where string, step map[string]any) error {
+	ref, ok := step["ref"]
+	if !ok {
+		return nil
+	}
+	name, err := x.name(where+"'s ref", ref)
+	if err != nil || name == "" {
+		return err
+	}
+	file, err := x.file(where+"'s ref", kindStepAction, name)
+	if err != nil {
+		return err
+	}
+	action, _ := runtime.DeepCopyJSONValue(file.Object["spec"]).(map[string]any)
+	what := fmt.Sprintf("StepAction `%s`", name)
+	values, err := stepParams(where, what, step, action)
+	if err != nil {
+		return err
+	}
+	delete(step, "ref")
+	delete(step, "params")
+	delete(action, "params")
+	delete(action, "description")
+	for _, k := range slices.Sorted(maps.Keys(action)) {
+		if _, dup := step[k]; dup {
+			return fmt.Errorf("%s sets `%s`, which %s sets too", where, k, what)
+		}
+		step[k] = substitute(action[k], values)
+	}
+	return nil
+}
+
+// stepParams returns the values of a StepAction's params for a step: the step's params, then the
+// action's defaults. Only string params are inlined: Tekton expands array and object ones in ways
+// that depend on where they are used.
+func stepParams(where, what string, step, action map[string]any) (map[string]string, error) {
+	declared, _ := action["params"].([]any)
+	given, _ := step["params"].([]any)
+	values := map[string]string{}
+	for _, p := range given {
+		m, _ := p.(map[string]any)
+		name, _ := m["name"].(string)
+		value, isString := m["value"].(string)
+		if name == "" || !isString {
+			return nil, fmt.Errorf("%s passes a param that is not a named string: %s inlines string params only", where, what)
+		}
+		values[name] = value
+	}
+	names := map[string]bool{}
+	for _, p := range declared {
+		m, _ := p.(map[string]any)
+		name, _ := m["name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("%s declares a param without a name", what)
+		}
+		names[name] = true
+		if typ, _ := m["type"].(string); typ != "" && typ != "string" {
+			return nil, fmt.Errorf("param `%s` of %s is %s %s; %s inlines string params only", name, what, article(typ), typ, where)
+		}
+		if _, ok := values[name]; ok {
+			continue
+		}
+		def, has := m["default"]
+		if !has {
+			return nil, fmt.Errorf("%s gives no value to param `%s` of %s, which has no default", where, name, what)
+		}
+		s, isString := def.(string)
+		if !isString {
+			return nil, fmt.Errorf("param `%s` of %s has a default that is not a string; %s inlines string params only", name, what, where)
+		}
+		values[name] = s
+	}
+	for name := range values {
+		if !names[name] {
+			return nil, fmt.Errorf("%s passes param `%s`, which %s does not declare", where, name, what)
+		}
+	}
+	// A default may reference another param, as Tekton resolves it.
+	for name, value := range values {
+		values[name], _ = substitute(value, values).(string)
+	}
+	return values, nil
+}
+
+func article(word string) string {
+	if strings.HasPrefix(word, "a") || strings.HasPrefix(word, "o") {
+		return "an"
+	}
+	return "a"
+}
+
+// substitute replaces $(params.<name>) (also $(params['<name>']) and $(params["<name>"])) in every
+// string of v.
+func substitute(v any, values map[string]string) any {
+	switch t := v.(type) {
+	case string:
+		for name, value := range values {
+			for _, form := range []string{"$(params." + name + ")", "$(params['" + name + "'])", `$(params["` + name + `"])`} {
+				t = strings.ReplaceAll(t, form, value)
+			}
+		}
+		return t
+	case map[string]any:
+		for k, child := range t {
+			t[k] = substitute(child, values)
+		}
+		return t
+	case []any:
+		for i, child := range t {
+			t[i] = substitute(child, values)
+		}
+		return t
+	}
+	return v
+}
+
+// name returns the name a reference holds, or "" for a reference that is not by name (a resolver,
+// a bundle), which the remote-reference check reports.
+func (x *expander) name(where string, ref any) (string, error) {
+	m, _ := ref.(map[string]any)
+	name, _ := m["name"].(string)
+	if m == nil || name == "" {
+		return "", nil
+	}
+	if len(m) > 1 {
+		return "", fmt.Errorf("%s names `%s`, so it may hold nothing but `name`: Octomaton resolves it to a file beside the PipelineRun file", where, name)
+	}
+	if !refName.MatchString(name) {
+		return "", fmt.Errorf("%s names `%s`, which is not a file's name (lower-case letters, digits, `-` and `.`)", where, name)
+	}
+	return name, nil
+}
+
+// file reads the file a reference names, once per path, and checks it is one object of kind.
+func (x *expander) file(where, kind, name string) (*unstructured.Unstructured, error) {
+	p := path.Join(x.dir, name+fileSuffix[kind])
+	x.changed = true
+	if file, ok := x.files[p]; ok {
+		return file, nil
+	}
+	if len(x.files) >= maxFiles {
+		return nil, fmt.Errorf("the PipelineRun references more than %d files", maxFiles)
+	}
+	data, err := x.read(x.ctx, p)
+	if errors.Is(err, ci.ErrNotFound) {
+		return nil, missing("%s names %s `%s`, whose file `%s` does not exist", where, kind, name, p)
+	}
+	if err != nil {
+		return nil, &readError{err: fmt.Errorf("reading `%s`: %w", p, err)}
+	}
+	file, err := parseDocument(data, kind)
+	if err != nil {
+		return nil, fmt.Errorf("`%s` is not a valid %s file: %v", p, kind, err)
+	}
+	x.files[p] = file
+	return file, nil
+}

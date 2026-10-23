@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -33,6 +34,22 @@ type renderer struct {
 	definitionErr error
 	renderErr     func(ci.RunSpec) error
 	specs         []ci.RunSpec
+}
+
+// Expand appends the file `.tekton/check.task.yaml` to a definition that mentions it, as the
+// runner's would inline a Task file a PipelineRun references.
+func (r *renderer) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
+	if !strings.Contains(string(spec.Definition), "name: check") {
+		return spec.Definition, nil
+	}
+	task, err := read(ctx, ".tekton/check.task.yaml")
+	if errors.Is(err, ci.ErrNotFound) {
+		return nil, errors.New("task `check` names Task `check`, whose file `.tekton/check.task.yaml` does not exist")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]byte{}, spec.Definition...), task...), nil
 }
 
 func (r *renderer) CheckDefinition(spec ci.RunSpec) error { return r.definitionErr }
@@ -84,6 +101,12 @@ func TestLint(t *testing.T) {
 		{name: "a missing definition", cfg: goodConfig, want: []string{".octomaton.yaml: pipeline ci: pipelineRun: open "}},
 		{name: "a bad definition is reported once", cfg: goodConfig, files: run, renderer: &renderer{definitionErr: errors.New("expected exactly one YAML document, found 2")},
 			want: []string{".tekton/ci.yaml: expected exactly one YAML document, found 2"}},
+		{name: "a definition's files are read beside it", cfg: goodConfig,
+			files:        map[string]string{".tekton/ci.yaml": "kind: PipelineRun\n# taskRef: {name: check}\n", ".tekton/check.task.yaml": "kind: Task\n"},
+			wantRendered: []string{"ci on pull_request", "ci on merge_group"}},
+		{name: "a definition's file that does not exist", cfg: goodConfig,
+			files: map[string]string{".tekton/ci.yaml": "kind: PipelineRun\n# taskRef: {name: check}\n"},
+			want:  []string{".tekton/ci.yaml: task `check` names Task `check`, whose file `.tekton/check.task.yaml` does not exist"}},
 		{name: "a run the runner refuses", cfg: goodConfig, files: run,
 			renderer: &renderer{renderErr: func(spec ci.RunSpec) error {
 				if spec.Trigger.Event == ci.EventMergeGroup {

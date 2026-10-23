@@ -56,6 +56,21 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
 		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, Concurrency: conc,
 	}
+	// The files the definition references are read where the definition was.
+	read := func(ctx context.Context, path string) ([]byte, error) { return gh.ReadFile(ctx, repo, path, ref) }
+	spec.Definition, err = s.Runner.Expand(ctx, spec, read)
+	if err != nil {
+		var r *ci.Refusal
+		switch {
+		case errors.Is(err, ci.ErrNotFound):
+			return ci.RunSpec{}, refusal("%v at %s.", err, where)
+		case errors.As(err, &r):
+			return ci.RunSpec{}, r
+		}
+		r = refusal("Could not read a file the pipelineRun file `%s` references: %v", p.PipelineRun, err)
+		r.Cause = err
+		return ci.RunSpec{}, r
+	}
 	if err := s.Runner.Check(ctx, spec); err != nil {
 		var r *ci.Refusal
 		if errors.As(err, &r) {

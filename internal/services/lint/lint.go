@@ -4,9 +4,11 @@
 package lint
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -25,6 +27,8 @@ const (
 // Renderer renders runs as the runner would create them, without creating anything; the Tekton
 // adapter's Renderer implements it.
 type Renderer interface {
+	// Expand inlines the files a definition references by name, read with read, as Runner.Expand.
+	Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error)
 	// CheckDefinition reports what is wrong with a pipeline definition whatever the trigger.
 	CheckDefinition(spec ci.RunSpec) error
 	// Render returns the object the runner would create for spec's first attempt.
@@ -136,6 +140,19 @@ func (l *Linter) lintPipeline(res *Result, root, kind string, p *pipelines.Pipel
 	}
 	base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun.String(), Timeout: p.TimeoutDuration(), Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks}
 	if definition != nil {
+		// The files the definition references are beside it, under the configuration's directory.
+		read := func(_ context.Context, path string) ([]byte, error) {
+			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, ci.ErrNotFound
+			}
+			return data, err
+		}
+		var err error
+		if base.Definition, err = l.Renderer.Expand(context.Background(), base, read); err != nil {
+			add(file, "%v", err)
+			return
+		}
 		if err := l.Renderer.CheckDefinition(base); err != nil {
 			add(file, "%v", err)
 			return

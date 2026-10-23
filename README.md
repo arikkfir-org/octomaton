@@ -7,8 +7,9 @@ run back to GitHub as a check run.
 
 Octomaton is **application-agnostic**: it knows nothing about what a repository builds, its language or layout. The
 only repository files it reads are `.octomaton.yaml` (the repository's own, and the one in its owner's organization
-repository, which a server setting names) and the PipelineRun files they point to. PipelineRun files are plain Tekton
-YAML; Octomaton injects event context only through `params` and an optional GitHub token workspace.
+repository, which a server setting names), the PipelineRun files they point to, and the Pipeline, Task and StepAction
+files those reference by name beside them. PipelineRun files are plain Tekton YAML; Octomaton injects event context
+only through `params` and an optional GitHub token workspace.
 
 ## How it works
 
@@ -22,6 +23,7 @@ sequenceDiagram
   SB->>SB: verify signature, drop duplicate deliveries, answer 202
   SB->>GH: read .octomaton.yaml and the organization pipelines (and the PipelineRun file)
   SB->>SB: match events, branches, tags and paths, then apply trust rules
+  SB->>GH: read the Pipeline, Task and StepAction files the PipelineRun references by name, and inline them
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
   SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy
@@ -164,7 +166,8 @@ ignored and the pipeline runs.
 **Where definitions are read:** pull requests, merge groups and pushes read `.octomaton.yaml` and the PipelineRun file
 at the commit under test. Comment commands, review requests and schedules read them from the default branch (comment
 commands and review requests still run against the pull request's head commit, so a pull request cannot change what
-they run). A `pipelineRun` in another repository is always read at that repository's default branch.
+they run). A `pipelineRun` in another repository is always read at that repository's default branch. The files a
+PipelineRun references by name ([below](#pipeline-task-and-stepaction-files)) are read where it was.
 
 **Organization pipelines:** the organization repository, which `OCTOMATON_ORGANIZATION_REPOSITORY` names (`tooling` in
 the hub), may declare `organization.pipelines` in each owner, with the same fields as `pipelines`. Octomaton adds them
@@ -185,7 +188,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | --- | --- |
 | `name` | Identifies the pipeline: in run names, labels, concurrency groups and `{{ .Pipeline }}`. Unique, organization pipelines included; `[a-z0-9][a-z0-9-]*`, at most 63 characters. `octomaton` is reserved. |
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
-| `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun must be self-contained: remote references are refused (see [Security](#security)). |
+| `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
 | `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
@@ -204,6 +207,58 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 
 Without `concurrency`, pull request and review request runs of the same pipeline and pull request share the group
 `pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained.
+
+### Pipeline, Task and StepAction files
+
+A PipelineRun may keep its pipeline, each task and each step in a Tekton file of its own, through Tekton's own
+references by name. Octomaton resolves each name to a file in the PipelineRun file's directory, at the commit the
+PipelineRun file was read at, and inlines it before it checks the run, so Tekton gets the same self-contained PipelineRun
+it would with everything written inline, and every file is valid against Tekton's schemas:
+
+| Reference | File | Becomes |
+| --- | --- | --- |
+| `spec.pipelineRef: {name: ci}` | `ci.pipeline.yaml`, one `tekton.dev/v1` `Pipeline` | `spec.pipelineSpec` |
+| a task's `taskRef: {name: check}` | `check.task.yaml`, one `tekton.dev/v1` `Task` | the task's `taskSpec` (the Task's labels and annotations go in its `metadata`) |
+| a step's `ref: {name: clone}` | `clone.step.yaml`, one `tekton.dev/v1` `StepAction` | the step's fields, with the step's `params` substituted for `$(params.<name>)` as Tekton would (string params only, defaults included; a param the StepAction does not declare, or declares without a default and the step does not pass, is refused) |
+
+A reference holds nothing but `name` (no `kind`, `apiVersion`, `resolver` or `bundle`), and a name is a file's name
+(lower-case letters, digits, `-` and `.`). A Pipeline file's tasks reference Task files and a Task file's steps
+StepAction files the same way; a step of an inline `taskSpec` may reference a StepAction file too. A file referenced
+twice is read once, and one PipelineRun may reference at most 20 files. A file that does not exist, is not one object
+of its kind, or references anything else refuses the run, like any other problem of the PipelineRun file.
+`octomaton-lint -render` prints the run with the files inlined.
+
+```yaml
+# .tekton/ci.yaml
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+spec:
+  params: [{name: revision, value: ""}]
+  pipelineSpec:
+    params: [{name: revision}]
+    tasks:
+      - name: check
+        params: [{name: revision, value: $(params.revision)}]
+        taskRef: {name: check}                 # .tekton/check.task.yaml
+      - name: plan
+        params: [{name: revision, value: $(params.revision)}, {name: root, value: gcp}]
+        taskRef: {name: plan}                  # .tekton/plan.task.yaml
+```
+
+```yaml
+# .tekton/check.task.yaml
+apiVersion: tekton.dev/v1
+kind: Task
+spec:
+  params: [{name: revision}]
+  steps:
+    - name: clone
+      ref: {name: clone}                       # .tekton/clone.step.yaml
+      params: [{name: revision, value: $(params.revision)}]
+    - name: check
+      image: golang:1.27
+      script: go vet ./... && go test ./...
+```
 
 ### Template context
 
@@ -288,9 +343,9 @@ organization:
       secrets: [model-api-key]               # a Secret of the same name in each repository's namespace
 ```
 
-Validate a configuration and the PipelineRun files it references with `octomaton-lint [-render] PATH...` (PATH is
-the file or its directory); it renders every param for every triggering event with placeholder values, so a template
-that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
+Validate a configuration and the PipelineRun files it references, with the files they reference, with
+`octomaton-lint [-render] PATH...` (PATH is the file or its directory); it renders every param for every triggering
+event with placeholder values, so a template that only works for one event is reported. Exit code 0 means clean, 1 problems, 2 usage.
 
 ## Check runs
 
@@ -331,9 +386,11 @@ that only works for one event is reported. Exit code 0 means clean, 1 problems, 
   pull request of the owner, Dependabot's included: it must never run the pull request's code. Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
   (`githubToken.repositories: all`), which follows the same rule as `secrets`.
-- Remote Tekton references are refused (`pipelineRef`, `taskRef`, a step's `ref`, any `resolver` or `bundle`), because
-  Octomaton can only check the definitions it can see: a PipelineRun holds its whole `spec.pipelineSpec`, with a
-  `taskSpec` per task.
+- Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`
+  that is not a plain name), because Octomaton can only check the definitions it can see. A reference by name is
+  resolved to a file beside the PipelineRun file, in the same repository at the same commit, and inlined before the
+  checks run ([Pipeline, Task and StepAction files](#pipeline-task-and-stepaction-files)), so the run Octomaton checks
+  and Tekton gets holds its whole `spec.pipelineSpec`, with a `taskSpec` per task and no step `ref`.
 - A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
   must come from the repository's own branches. Only new commits on such a branch, which take write access, run a
   pending request again.

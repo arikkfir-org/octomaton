@@ -3,10 +3,7 @@ kind: Deployment
 metadata:
   name: octomaton-logs
   namespace: octomaton
-  # Octomaton's deploy/ held this until October 2026; a host's Application for deploy/logs/ adopts it by name
-  # (docs/octomaton/designs/host-agnostic.md): never pruned on the way, whichever Application synced last.
   annotations:
-    argocd.argoproj.io/sync-options: Prune=false
     reloader.stakater.com/auto: "true"
   labels:
     app.kubernetes.io/name: octomaton-logs

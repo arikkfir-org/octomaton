@@ -6,6 +6,10 @@ kind: HTTPRoute
 metadata:
   name: octomaton
   namespace: octomaton
+  # Moving to the host's repository (docs/octomaton/designs/host-agnostic.md): never pruned on the way, whichever
+  # Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: octomaton
 spec:

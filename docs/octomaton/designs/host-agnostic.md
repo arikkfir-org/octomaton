@@ -272,7 +272,7 @@ number, so the page says at any time what is in and what is not.
 | 5 | delivered: [delivery#77](https://github.com/arikkfir-org/delivery/pull/77); [octomaton#43](https://github.com/arikkfir-org/octomaton/pull/43) takes `Prune=false` off `deploy/logs/`, the adoption being over |
 | 6 | delivered: [infra#83](https://github.com/arikkfir-org/infra/pull/83) |
 | 7 | delivered: [tooling#51](https://github.com/arikkfir-org/tooling/pull/51), with [delivery#78](https://github.com/arikkfir-org/delivery/pull/78) and [docs#67](https://github.com/arikkfir-org/docs/pull/67) |
-| 8 | pending |
+| 8 | delivered: [octomaton#44](https://github.com/arikkfir-org/octomaton/pull/44); [infra#84](https://github.com/arikkfir-org/infra/pull/84) drops `ci-octomaton-release`'s grant on `images` |
 | 9 | pending |
 
 Rollback is per slice and in reverse: 5 first, then 4 reverts to a `deploy/` that names the objects again, which

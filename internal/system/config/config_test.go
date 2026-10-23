@@ -68,7 +68,7 @@ func TestLoadReference(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	setReferenceEnv(t)
-	for _, name := range []string{"OCTOMATON_GITHUB_ALLOWED_OWNERS", "OCTOMATON_RETENTION_FREE_PVCS_AFTER", "OCTOMATON_POD_NAME", "OCTOMATON_POD_NAMESPACE", "OCTOMATON_ORGANIZATION_REPOSITORY"} {
+	for _, name := range []string{"OCTOMATON_RETENTION_FREE_PVCS_AFTER", "OCTOMATON_POD_NAME", "OCTOMATON_POD_NAMESPACE", "OCTOMATON_ORGANIZATION_REPOSITORY"} {
 		t.Setenv(name, "") // restores the variable after the test
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
@@ -83,9 +83,6 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.Webhook.Workers != 8 || cfg.Webhook.QueueSize != 256 || cfg.Namespaces.Template != "ci-{{ .Repository.Name }}" {
 		t.Errorf("Webhook = %+v, Namespaces.Template = %q", cfg.Webhook, cfg.Namespaces.Template)
-	}
-	if len(cfg.GitHub.AllowedOwners) != 0 {
-		t.Errorf("AllowedOwners = %q, want none (every owner is served)", cfg.GitHub.AllowedOwners)
 	}
 	if cfg.Pod.Name == "" || cfg.Pod.Namespace == "" {
 		t.Errorf("Pod defaults = %+v", cfg.Pod)
@@ -104,6 +101,7 @@ func TestLoadProblems(t *testing.T) {
 		{name: "negative app ID", variable: "OCTOMATON_GITHUB_APP_ID", value: "-1", want: "positive GitHub App ID"},
 		{name: "bad private key", variable: "OCTOMATON_GITHUB_PRIVATE_KEY", value: "not a key", want: "OCTOMATON_GITHUB_PRIVATE_KEY: no PEM data"},
 		{name: "blank webhook secret", variable: "OCTOMATON_GITHUB_WEBHOOK_SECRET", value: " \n", want: "OCTOMATON_GITHUB_WEBHOOK_SECRET is required"},
+		{name: "no owners", variable: "OCTOMATON_GITHUB_ALLOWED_OWNERS", value: "", want: "OCTOMATON_GITHUB_ALLOWED_OWNERS is required"},
 		{name: "repository as owner", variable: "OCTOMATON_GITHUB_ALLOWED_OWNERS", value: "arikkfir-org/docs", want: "not a GitHub user or organization"},
 		{name: "relative dashboard URL", variable: "OCTOMATON_TEKTON_DASHBOARD_URL", value: "tekton.dev.kfirs.com", want: "OCTOMATON_TEKTON_DASHBOARD_URL"},
 		{name: "bad relay URL", variable: "OCTOMATON_RELAY_URLS", value: "ftp://x", want: "OCTOMATON_RELAY_URLS"},
@@ -127,13 +125,13 @@ func TestLoadProblems(t *testing.T) {
 
 func TestLoadListsEveryMissingCredential(t *testing.T) {
 	setReferenceEnv(t)
-	for _, name := range []string{"OCTOMATON_GITHUB_APP_ID", "OCTOMATON_GITHUB_PRIVATE_KEY", "OCTOMATON_GITHUB_WEBHOOK_SECRET"} {
+	for _, name := range []string{"OCTOMATON_GITHUB_APP_ID", "OCTOMATON_GITHUB_PRIVATE_KEY", "OCTOMATON_GITHUB_WEBHOOK_SECRET", "OCTOMATON_GITHUB_ALLOWED_OWNERS"} {
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_, err := Load()
-	for _, want := range []string{"OCTOMATON_GITHUB_APP_ID is required", "OCTOMATON_GITHUB_PRIVATE_KEY is required", "OCTOMATON_GITHUB_WEBHOOK_SECRET is required"} {
+	for _, want := range []string{"OCTOMATON_GITHUB_APP_ID is required", "OCTOMATON_GITHUB_PRIVATE_KEY is required", "OCTOMATON_GITHUB_WEBHOOK_SECRET is required", "OCTOMATON_GITHUB_ALLOWED_OWNERS is required"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Load() error = %v, want it to say %q", err, want)
 		}

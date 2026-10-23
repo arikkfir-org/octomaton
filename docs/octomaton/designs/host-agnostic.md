@@ -41,6 +41,38 @@ the pattern for everything below: the host's decisions live with the host.
 
 ## Design
 
+```mermaid
+flowchart LR
+  subgraph O["arikkfir-org/octomaton: deploy/, applied as written"]
+    NS[Namespace octomaton]
+    SA[ServiceAccounts]
+    RBAC[ClusterRoles, bindings, Role leases]
+    D1[Deployment octomaton x2]
+    D2[Deployment octomaton-logs x1]
+    SVC[Services octomaton, octomaton-logs]
+    PDB[PodDisruptionBudgets]
+  end
+  subgraph H["the host's repository: delivery, or weesp-ai/cluster"]
+    APP[Application: revision, image tags, patches]
+    CM1[ConfigMap octomaton]
+    CM2[ConfigMap octomaton-logs]
+    SEC[Secret octomaton-github, however it is made]
+    RT[Route: webhook URL to Service octomaton]
+    NP[Network admission]
+    IAM[Cloud identities and grants]
+    DASH[Dashboard external logs URL]
+  end
+  GH[GitHub App] -->|POST /github/hooks| RT --> SVC
+  APP -->|applies, tags, labels, places| O
+  CM1 -->|envFrom| D1
+  CM2 -->|envFrom| D2
+  SEC -->|env| D1
+  NP -.->|admits| SVC
+  IAM -.->|binds| SA
+  TD[Tekton Dashboard] -->|GET /logs| SVC
+  DASH -.-> TD
+```
+
 ### `deploy/` after the split
 
 `deploy/` stays a Kustomization that Argo CD (or `kustomize build`) applies as written, and holds the objects every
@@ -55,8 +87,9 @@ installation has, identically:
 | Services `octomaton` and `octomaton-logs`, port 80 → 8080 | The names the host's route and the Dashboard's external logs URL point at |
 
 The Deployments change in one way: both read their settings from a ConfigMap through `envFrom`, `octomaton` from
-ConfigMap `octomaton` (as today) and `octomaton-logs` from ConfigMap `octomaton-logs` (today its `env`), and neither
-ConfigMap is in `deploy/`. The host writes them. A missing one holds the pod in `CreateContainerConfigError`, as the
+ConfigMap `octomaton` (as today) and `octomaton-logs` from ConfigMap `octomaton-logs` (today the three
+`OCTOMATON_LOGS_*` entries of its `env`; the downward API entries and `OTEL_RESOURCE_ATTRIBUTES` stay in `env`, they
+are the pod's, not the host's), and neither ConfigMap is in `deploy/`. The host writes them. A missing one holds the pod in `CreateContainerConfigError`, as the
 missing Secret `octomaton-github` does today, until the host provides it.
 
 Everything else leaves `deploy/` for the host's repository, unchanged in content for the hub:
@@ -99,7 +132,7 @@ nothing is exported, and without `octomaton-logs` the Dashboard shows "Unable to
 | --- | --- | --- |
 | `OCTOMATON_GITHUB_ALLOWED_OWNERS` | Empty serves every installation of the App | Required and non-empty; the server exits at startup listing it among the problems, as it does for the App's ID. A host that forgot it would otherwise run the pipelines of anyone who installs the App, in its cluster, with its tenants' Secrets within reach of nothing but RBAC |
 | `OCTOMATON_TEKTON_DASHBOARD_URL` | Optional; unset, check runs carry no details link | Unchanged: already the graceful fallback |
-| `OCTOMATON_LOGS_*` | `VIEW`, `CLUSTER`, `LOCATION` required | Unchanged; they come from ConfigMap `octomaton-logs` instead of the Deployment's `env` |
+| `OCTOMATON_LOGS_*` | `VIEW`, `CLUSTER`, `LOCATION` required | Unchanged; they come from ConfigMap `octomaton-logs` instead of three entries of the Deployment's `env` |
 | Telemetry | Exported to the Google Telemetry API when a GCP metadata server answers, else nothing | Unchanged: it follows where the server runs, and names no host |
 | Test fixtures | Name `arikkfir-org` and `arikkfir` | Unchanged: fixtures |
 
@@ -163,7 +196,10 @@ it instead of Octomaton's.
 ## Security and failure modes
 
 - Bracket's AppProject already bounds what a pinned `deploy/` may create; the hub's does the same for `main`. After
-  the split, both admit fewer kinds: no ExternalSecret, HTTPRoute or NetworkPolicy from Octomaton's source.
+  the split, both admit fewer kinds: no ConfigMap, ExternalSecret, HTTPRoute or NetworkPolicy from Octomaton's source.
+  The host's own objects never go through that project: in the hub they are `platform/octomaton/manifests`, which
+  the wrapper Application `octomaton-environment` deploys under project `default`, as it deploys the AppProject
+  itself. AppProject `octomaton` is never widened; it narrows, once `deploy/` stops naming the kinds.
 - Moving the Secret's ExternalSecret: `creationPolicy: Owner` means the Secret is deleted with its ExternalSecret. The
   hand-over by name, under `Prune=false`, never deletes it; the slice order below holds that.
 - A host that forgets ConfigMap `octomaton` sees `CreateContainerConfigError` on its pods, not a server that starts
@@ -174,6 +210,29 @@ it instead of Octomaton's.
 - Until `tooling` publishes the reviewer's image, Octomaton's `reviewer-image` keeps moving `main`; the two publish the
   same Dockerfile for the slice or two they overlap.
 
+The hand-over of one of the moving objects, the route, across slices 2 to 5:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant O as octomaton deploy/
+  participant A as Application octomaton
+  participant R as HTTPRoute octomaton
+  participant E as Application octomaton-environment
+  participant D as delivery platform/octomaton
+  Note over O,R: slice 2
+  O->>A: the route carries Prune=false
+  A->>R: sync: annotated, otherwise as before
+  Note over E,D: slice 3
+  D->>E: the same route, by name and content
+  E->>R: sync: adopted; Argo CD warns that two Applications share it
+  Note over O,R: slice 4
+  O->>A: deploy/ no longer names the route
+  A-->>R: not pruned: Prune=false, and E now tracks it
+  Note over E,D: slice 5
+  D->>E: AppProject octomaton no longer admits HTTPRoute
+```
+
 ## Plan
 
 Each slice is one pull request, deployable on its own, and leaves every installation working. The arrows are the
@@ -181,17 +240,18 @@ only ordering constraints; slices on different arrows are independent.
 
 | # | Repository | Slice | Depends on | Done when |
 | --- | --- | --- | --- | --- |
-| 1 | octomaton | `OCTOMATON_GITHUB_ALLOWED_OWNERS` required: config, its tests, the README's table | none | The server refuses to start without it; the hub's and Bracket's ConfigMaps already set it, so nothing restarts differently |
+| 1 | octomaton | This pull request: the design, and `OCTOMATON_GITHUB_ALLOWED_OWNERS` required (config, its tests, the README's table) | none | The server refuses to start without it; the hub's and Bracket's ConfigMaps already set it, so nothing restarts differently |
 | 2 | octomaton | The moving objects (ConfigMap `octomaton`, ExternalSecret `octomaton-github`, HTTPRoute `octomaton`, NetworkPolicies `octomaton` and `octomaton-logs`) get `argocd.argoproj.io/sync-options: Prune=false`; `octomaton-logs` reads ConfigMap `octomaton-logs` through `envFrom` with `optional: true` beside its `env`, so the ConfigMap can arrive first | none | Argo CD shows the annotation; nothing else changes |
-| 3 | delivery | `platform/octomaton/manifests` gains the five objects with today's content plus ConfigMap `octomaton-logs`; the AppProject admits ConfigMaps, ExternalSecrets, HTTPRoutes and NetworkPolicies from `delivery`'s source; `ci` gains the as-deployed render of Octomaton's `deploy/`; `docs/delivery/designs/octomaton.md` is written with the hub's values | 2 | Both Applications name the objects (Argo CD's shared-resource warning, with identical content); the new ConfigMap exists; `delivery`'s `ci` renders `deploy/` with the Application's options |
-| 4 | octomaton | `deploy/` drops the five objects and `octomaton-logs`'s `env` (its `envFrom` becomes required); `manifests.sh`, `Makefile` and `ci` validate `deploy/` as written only; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `delivery`'s owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
-| 5 | infra | `ci-tooling-publish` gets `roles/artifactregistry.writer` on repository `images` | none | Applied on merge; `ci-octomaton-release` keeps its grant until slice 7 |
-| 6 | tooling | `images/reviewer/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 5 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
-| 7 | octomaton | `images/reviewer/`, the two pipelines and their `.tekton/` files go; the reviewer design drops the image; `infra` drops `ci-octomaton-release`'s grant on `images` in the same step or the next | 6 | The next review pulls an image `tooling` published |
-| 8 | weesp-ai/cluster | `manifests/octomaton` gains ConfigMaps `octomaton` and `octomaton-logs`, an ExternalSecret on `gcp-secret-store`, an HTTPRoute on the shared Gateway and its NetworkPolicies; `apps/octomaton.yaml` drops the patches that rewrote them and bumps the pin past slice 4 ([DEV-1605](https://linear.app/weesp-ai/issue/DEV-1605)) | 4 | Bracket's installation adds to `deploy/` and rewrites nothing in it |
+| 3 | delivery | `platform/octomaton/manifests` gains the five objects with today's content plus ConfigMap `octomaton-logs`, deployed by the wrapper `octomaton-environment` under project `default` as the AppProject is; `ci` gains the as-deployed render of Octomaton's `deploy/`; `docs/delivery/designs/octomaton.md` is written with the hub's values | 2 | Both Applications name the objects (Argo CD's shared-resource warning, with identical content); the new ConfigMap exists; `delivery`'s `ci` renders `deploy/` with the Application's options |
+| 4 | octomaton | `deploy/` drops the five objects and the three `OCTOMATON_LOGS_*` entries of `octomaton-logs`'s `env` (its `envFrom` becomes required); `manifests.sh`, `Makefile` and `ci` validate `deploy/` as written only; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
+| 5 | delivery | AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | A `deploy/` that named one of them again would fail to sync |
+| 6 | infra | `ci-tooling-publish` gets `roles/artifactregistry.writer` on repository `images` | none | Applied on merge; `ci-octomaton-release` keeps its grant until slice 8 |
+| 7 | tooling | `images/reviewer/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 6 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
+| 8 | octomaton | `images/reviewer/`, the two pipelines and their `.tekton/` files go; the reviewer design drops the image; `infra` drops `ci-octomaton-release`'s grant on `images` in the same step or the next | 7 | The next review pulls an image `tooling` published |
+| 9 | weesp-ai/cluster | `manifests/octomaton` gains ConfigMaps `octomaton` and `octomaton-logs`, an ExternalSecret on `gcp-secret-store`, an HTTPRoute on the shared Gateway and its NetworkPolicies; `apps/octomaton.yaml` drops the patches that rewrote them and bumps the pin past slice 4; its AppProject narrows like slice 5 ([DEV-1605](https://linear.app/weesp-ai/issue/DEV-1605)) | 4 | Bracket's installation adds to `deploy/` and rewrites nothing in it |
 
-Rollback is per slice and in reverse: 4 reverts to a `deploy/` that names the objects again, which Argo CD adopts
-back; 3 then removes `delivery`'s copies; 7 and 6 revert independently of 1 to 4.
+Rollback is per slice and in reverse: 5 first, then 4 reverts to a `deploy/` that names the objects again, which
+Argo CD adopts back; 3 then removes `delivery`'s copies; 8 and 7 revert independently of 1 to 5.
 
 ## Open questions
 

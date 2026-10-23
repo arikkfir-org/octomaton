@@ -269,7 +269,7 @@ number, so the page says at any time what is in and what is not.
 | 2 | delivered: [octomaton#40](https://github.com/arikkfir-org/octomaton/pull/40) |
 | 3 | delivered: [delivery#76](https://github.com/arikkfir-org/delivery/pull/76) |
 | 4 | delivered: [octomaton#42](https://github.com/arikkfir-org/octomaton/pull/42) |
-| 5 | delivered: [delivery#77](https://github.com/arikkfir-org/delivery/pull/77); this pull request takes `Prune=false` off `deploy/logs/`, the adoption being over |
+| 5 | delivered: [delivery#77](https://github.com/arikkfir-org/delivery/pull/77); [octomaton#43](https://github.com/arikkfir-org/octomaton/pull/43) takes `Prune=false` off `deploy/logs/`, the adoption being over |
 | 6 | pending |
 | 7 | pending |
 | 8 | pending |

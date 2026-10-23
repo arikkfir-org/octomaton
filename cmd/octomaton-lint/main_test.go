@@ -22,6 +22,16 @@ func TestRun(t *testing.T) {
 	write(valid, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineSpec: {tasks: [{name: t, taskSpec: {steps: [{name: s, image: busybox}]}}]}}\n")
 	invalid := t.TempDir()
 	write(invalid, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: [{name: ci}]\n")
+	// A PipelineRun whose pipeline, task and step are files beside it.
+	files := t.TempDir()
+	write(files, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {}}, taskChecks: true}\n")
+	write(files, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: ci}}\n")
+	write(files, "ci.pipeline.yaml", "apiVersion: tekton.dev/v1\nkind: Pipeline\nspec: {tasks: [{name: check, taskRef: {name: check}}]}\n")
+	write(files, "check.task.yaml", "apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: [{name: clone, ref: {name: clone}, params: [{name: url, value: u}]}]}\n")
+	write(files, "clone.step.yaml", "apiVersion: tekton.dev/v1beta1\nkind: StepAction\nspec: {image: git, params: [{name: url}], args: [$(params.url)]}\n")
+	missing := t.TempDir()
+	write(missing, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: run.yaml, on: {push: {}}}\n")
+	write(missing, "run.yaml", "apiVersion: tekton.dev/v1\nkind: PipelineRun\nspec: {pipelineRef: {name: gone}}\n")
 
 	tests := []struct {
 		name       string
@@ -37,6 +47,9 @@ func TestRun(t *testing.T) {
 		{name: "valid configuration", args: []string{valid}, wantCode: 0, wantStdout: "ok (1 pipeline runs rendered)"},
 		{name: "render", args: []string{"-render", valid}, wantCode: 0, wantStdout: "kind: PipelineRun"},
 		{name: "invalid configuration", args: []string{invalid}, wantCode: 1, wantStderr: ".octomaton.yaml"},
+		{name: "files beside the PipelineRun", args: []string{files}, wantCode: 0, wantStdout: "ok (1 pipeline runs rendered)"},
+		{name: "render the files inlined", args: []string{"-render", files}, wantCode: 0, wantStdout: "          - u\n"},
+		{name: "a file that does not exist", args: []string{missing}, wantCode: 1, wantStderr: "run.yaml: spec.pipelineRef names Pipeline `gone`, whose file `gone.pipeline.yaml` beside the PipelineRun file does not exist"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

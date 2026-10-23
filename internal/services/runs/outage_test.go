@@ -162,6 +162,13 @@ func TestHandleSaysWhatFailedCallsLeftUndone(t *testing.T) {
 			}},
 		{name: "an unreadable pipeline definition", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
 			setup: func(h *harness) { h.host.FailFile(repo, sha1, ".tekton/ci.yaml", gitHubDown) }},
+		{name: "an unreadable file the definition references", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
+			setup: func(h *harness) {
+				h.runner.Expander = expandsCheckTask
+				h.host.FailFile(repo, sha1, ".tekton/check.task.yaml", gitHubDown)
+			}},
+		{name: "a missing file the definition references", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")},
+			setup: func(h *harness) { h.runner.Expander = expandsCheckTask }},
 		{name: "a run the runner would not create", event: &ci.TriggerEvent{Trigger: pushTrigger(sha1, "main")}, wantUndone: true,
 			setup: func(h *harness) { h.runner.Fail("Create", kubeDown) }},
 		// As the Tekton runner refuses a run when the cluster would not answer.

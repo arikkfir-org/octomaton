@@ -7,13 +7,16 @@
   specific repositories. The organization repository, whose `.octomaton.yaml` may declare the organization pipelines
   every repository runs, is a server setting (`OCTOMATON_ORGANIZATION_REPOSITORY`), never a name in the code.
 - The only repository files Octomaton reads are the root `.octomaton.yaml` (the repository's own, and its owner's
-  organization repository's) and the PipelineRun files they reference.
+  organization repository's), the PipelineRun files they reference, and the Pipeline, Task and StepAction files a
+  PipelineRun references by name beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`, `<name>.step.yaml`), which
+  it inlines before it checks the run.
 - Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the
   `octomaton.dev/branches` annotation on a tenant ServiceAccount, which the cluster's owner sets to restrict it to
   branches. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
   Octomaton writes on its own objects.
-- PipelineRun files stay plain Tekton YAML: no templating inside them. Context goes in only through `params` (Go
-  templates over the documented context) and the optional `githubToken` workspace.
+- PipelineRun files, and the files they reference, stay plain Tekton YAML, valid against Tekton's schemas: no
+  templating inside them, no syntax of Octomaton's own. Context goes in only through `params` (Go templates over the
+  documented context) and the optional `githubToken` workspace.
 - README.md is the contract for Octomaton's server configuration, `.octomaton.yaml` schema, template context,
   endpoints, App permissions and RBAC. `docs/octomaton/designs/deployment.md` documents `deploy/` as the base any host
   applies, and `host-agnostic.md` the contract a host meets; a host's installation is documented by the host. Change them with the code, in the same pull

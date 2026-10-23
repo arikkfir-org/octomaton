@@ -34,11 +34,21 @@ var (
 )
 
 const (
-	// apiVersion is the only PipelineRun API version Octomaton accepts.
+	// apiVersion is the API version of the PipelineRuns Octomaton creates, and the only one it
+	// accepts in a pipelineRun file.
 	apiVersion = "tekton.dev/v1"
 	// kindPipelineRun is the only kind Octomaton accepts in a pipelineRun file.
 	kindPipelineRun = "PipelineRun"
 )
+
+// apiVersions are the API versions Octomaton accepts for each kind of file: the ones Tekton serves
+// (StepAction has no v1).
+var apiVersions = map[string][]string{
+	kindPipelineRun: {apiVersion},
+	kindPipeline:    {apiVersion},
+	kindTask:        {apiVersion},
+	kindStepAction:  {"tekton.dev/v1beta1", "tekton.dev/v1alpha1"},
+}
 
 // Values of spec.status Octomaton writes: a pending run is held until the
 // field is cleared; a cancelled one stops, running its finally tasks.
@@ -111,6 +121,12 @@ const (
 // parsePipelineRun parses a pipelineRun file: exactly one YAML (or JSON) document
 // holding a tekton.dev/v1 PipelineRun. YAML is interpreted the way kubectl does.
 func parsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
+	return parseDocument(data, kindPipelineRun)
+}
+
+// parseDocument parses a file holding exactly one object of kind, at a version apiVersions lists
+// for it, whose spec, when there is one, is a mapping.
+func parseDocument(data []byte, kind string) (*unstructured.Unstructured, error) {
 	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 	var docs [][]byte
 	for {
@@ -138,11 +154,11 @@ func parsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
 		return nil, fmt.Errorf("the document is not a YAML mapping: %w", err)
 	}
 	pr := &unstructured.Unstructured{Object: obj}
-	if v := pr.GetAPIVersion(); v != apiVersion {
-		return nil, fmt.Errorf("apiVersion must be %q (got %q)", apiVersion, v)
+	if v := pr.GetAPIVersion(); !slices.Contains(apiVersions[kind], v) {
+		return nil, fmt.Errorf("apiVersion must be %s (got %q)", strings.ReplaceAll(quoteAll(apiVersions[kind]), ", ", " or "), v)
 	}
-	if k := pr.GetKind(); k != kindPipelineRun {
-		return nil, fmt.Errorf("kind must be %q (got %q)", kindPipelineRun, k)
+	if k := pr.GetKind(); k != kind {
+		return nil, fmt.Errorf("kind must be %q (got %q)", kind, k)
 	}
 	if spec, found, err := unstructured.NestedFieldNoCopy(obj, "spec"); err != nil || (found && !isMap(spec)) {
 		return nil, errors.New("spec must be a mapping")
@@ -395,8 +411,8 @@ var remoteKeys = map[string]bool{"pipelineRef": true, "taskRef": true, "resolver
 
 // checkRemoteRefs refuses a PipelineRun that fetches any definition from elsewhere: a pipelineRef, a
 // taskRef, a step's ref, a resolver or a bundle. Octomaton checks definitions (their Secrets
-// included) only as the file holds them, so a run must be self-contained. Params and metadata may
-// hold any keys, so they are not searched.
+// included) only as it sees them, so a run must be self-contained once the files it references by
+// name are inlined (expand). Params and metadata may hold any keys, so they are not searched.
 func checkRemoteRefs(obj map[string]any) error {
 	var found string
 	var walk func(path string, v any, inSteps bool)
@@ -424,7 +440,7 @@ func checkRemoteRefs(obj map[string]any) error {
 	}
 	walk("", obj, false)
 	if found != "" {
-		return fmt.Errorf("the PipelineRun fetches a definition through %s; Octomaton runs only self-contained PipelineRuns (spec.pipelineSpec, a taskSpec per task, steps without ref)", strings.TrimPrefix(found, "."))
+		return fmt.Errorf("the PipelineRun fetches a definition through %s; Octomaton runs only self-contained PipelineRuns (spec.pipelineSpec, a taskSpec per task, steps without ref), or references by name to Tekton files beside the PipelineRun file (<name>.pipeline.yaml, <name>.task.yaml, <name>.step.yaml)", strings.TrimPrefix(found, "."))
 	}
 	return nil
 }

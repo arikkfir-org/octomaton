@@ -84,9 +84,18 @@ func (p Permission) CanWrite() bool {
 	return p == "admin" || p == "maintain" || p == "write"
 }
 
+// FileReader reads a file beside a pipeline definition (in its directory, of its repository, at the
+// ref it was read at) by the file's name; it returns ErrNotFound when there is none.
+type FileReader func(ctx context.Context, name string) ([]byte, error)
+
 // Runner is the CI system that runs pipelines: Tekton, on Kubernetes. A run is created held and
 // starts when it is released.
 type Runner interface {
+	// Expand inlines into spec.Definition the definitions it references by name in files beside
+	// it, read with read, and returns the self-contained definition (spec.Definition itself when it
+	// references none). A reference's problem is a *Refusal; a file that does not exist an error
+	// that Is ErrNotFound; a file that could not be read any other error.
+	Expand(ctx context.Context, spec RunSpec, read FileReader) ([]byte, error)
 	// Check reports why spec cannot be run, as a *Refusal, before anything is created.
 	Check(ctx context.Context, spec RunSpec) error
 	// Create creates attempt of spec's run, held. It returns ErrExists, with the run holding the

@@ -154,7 +154,8 @@ type Run struct {
 type RunSpec struct {
 	// Trigger is what the run is for; Trigger.Pipeline names the pipeline.
 	Trigger Trigger
-	// Definition is the pipeline's definition as read from the repository, at Path.
+	// Definition is the pipeline's definition as read from the repository, at Path, self-contained
+	// once Runner.Expand inlined the files it references.
 	Definition []byte
 	Path       string
 	// Params set or override the definition's parameters.

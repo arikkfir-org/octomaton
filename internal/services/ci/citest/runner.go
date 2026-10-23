@@ -14,6 +14,9 @@ import (
 // Runner is an in-memory ci.Runner. Runs are created held in tenant "ci-<repository name>"; tests
 // move them along with Start and Finish.
 type Runner struct {
+	// Expander, when set, is what Expand does with a spec; without it, definitions are returned as
+	// they are.
+	Expander func(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error)
 	// CheckError, when set, is what Check returns for a spec.
 	CheckError func(ci.RunSpec) error
 	// Tasks, when set, lists the tasks of the run a spec creates.
@@ -167,6 +170,17 @@ func copyRun(run *ci.Run) ci.Run {
 	c.TaskReportStates = maps.Clone(run.TaskReportStates)
 	c.Tasks = slices.Clone(run.Tasks)
 	return c
+}
+
+// Expand returns Expander's definition, or the spec's own.
+func (r *Runner) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
+	if err := r.failure("Expand"); err != nil {
+		return nil, err
+	}
+	if r.Expander != nil {
+		return r.Expander(ctx, spec, read)
+	}
+	return spec.Definition, nil
 }
 
 // Check returns CheckError's verdict.

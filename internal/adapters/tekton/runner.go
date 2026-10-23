@@ -68,6 +68,22 @@ func refusal(format string, args ...any) *ci.Refusal {
 	return &ci.Refusal{Title: "Could not start the pipeline", Reason: fmt.Sprintf(format, args...)}
 }
 
+// Expand inlines the Pipeline, Task and StepAction files spec's definition references by name,
+// read with read from the PipelineRun file's directory.
+func (r *Runner) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
+	out, err := expand(ctx, spec.Definition, read)
+	var re *readError
+	switch {
+	case err == nil:
+		return out, nil
+	case errors.Is(err, ci.ErrNotFound):
+		return nil, missing("`%s`: %v", spec.Path, err)
+	case errors.As(err, &re):
+		return nil, fmt.Errorf("`%s`: %w", spec.Path, err)
+	}
+	return nil, refusal("`%s`: %v.", spec.Path, err)
+}
+
 // Check makes sure the repository's namespace exists and the definition is a PipelineRun this
 // repository may run.
 func (r *Runner) Check(ctx context.Context, spec ci.RunSpec) error {

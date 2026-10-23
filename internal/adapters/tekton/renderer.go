@@ -1,6 +1,7 @@
 package tekton
 
 import (
+	"context"
 	"fmt"
 
 	"octomaton.dev/internal/services/ci"
@@ -9,6 +10,11 @@ import (
 // Renderer renders PipelineRuns without a cluster, for octomaton-lint: in the definition's own
 // namespace, without Octomaton's bookkeeping, and not held.
 type Renderer struct{}
+
+// Expand inlines the files spec's definition references by name, read with read.
+func (Renderer) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
+	return expand(ctx, spec.Definition, read)
+}
 
 // CheckDefinition parses a pipeline definition and checks it fits the pipeline's settings.
 func (Renderer) CheckDefinition(spec ci.RunSpec) error {

@@ -1,6 +1,6 @@
-# Review requests and organization pipelines
+# Pull request reviewers
 
-**Decision**: Octomaton runs a pipeline when a review is requested from a user, such as a bot that reviews pull requests, as an ordinary pipeline, through settings that name no repository and no reviewer: the `review_request` trigger; organization pipelines, which the organization repository (server setting `OCTOMATON_ORGANIZATION_REPOSITORY`) declares once for every repository; `secrets` and `githubToken.repositories: all`, only for pipelines whose definitions are read at a default branch; and the refusal of remote Tekton references, so that the Secret guard sees every definition. What the pipeline does, which user it answers to and what it mounts are its owner's. Schema: [`.octomaton.yaml`](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
+**Decision**: Octomaton runs a pull request reviewer, such as a bot whose review an author requests, as an ordinary pipeline, through settings that name no repository and no reviewer: the `review_request` trigger; organization pipelines, which the organization repository (server setting `OCTOMATON_ORGANIZATION_REPOSITORY`) declares once for every repository; `secrets` and `githubToken.repositories: all`, only for pipelines whose definitions are read at a default branch; and the refusal of remote Tekton references, so that the Secret guard sees every definition. What the pipeline does, which user it answers to and what it mounts are its owner's. Schema: [`.octomaton.yaml`](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
 
 ## Context
 

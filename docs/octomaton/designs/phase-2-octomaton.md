@@ -112,8 +112,8 @@ flowchart LR
 | every | `pipeline` | none | nothing | every run that names no other |
 | every | `docs-reader` | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
 | every | `docs-publisher` | `main` | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
-| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([review requests](review-requests.md)) |
-| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` | tooling's `publish` |
+| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
+| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
 | `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `octomaton` | this repository's `release` |
 | `ci-fin` | `ci-fin-release` | `main` | writes repository `images` and Fin's CI cache | fin's `release` |
 | `ci-fin` | `ci-fin-preview` | none | writes repository `previews`, reads the CI cache | fin's `preview` |

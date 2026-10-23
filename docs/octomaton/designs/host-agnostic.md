@@ -168,9 +168,9 @@ every pull request. Bracket's `cluster` does the same in its `Validate` when it 
 `images` repository, so nothing in `tooling`'s reviewer changes but the repository that publishes it. `tooling`'s
 `publish` tenant, `ci-tooling-publish` (`octomaton.dev/branches: main`), gets `roles/artifactregistry.writer` on
 `images` in `infra`, beside `ci-octomaton-release`'s, which then only `octomaton`'s own repository needs. The
-reviewer design here becomes [review requests](review-requests.md): Octomaton's part (the trigger, organization
-pipelines, `secrets`, `githubToken.repositories: all`) without the hub's reviewer, whose use of them, like the image,
-`tooling`'s design describes.
+[reviewer design](pr-reviewer.md) here keeps Octomaton's part (the trigger, organization pipelines, `secrets`,
+`githubToken.repositories: all`) and names no reviewer or repository; the hub's reviewer, its use of them and the
+image are `tooling`'s design's.
 
 ### README and docs
 
@@ -185,7 +185,7 @@ it: they describe one installation.
 | [deployment](deployment.md) | The design of `deploy/` as a base any host applies: what it holds and why, the untagged images and the tag override, the Namespace in the base, the ConfigMaps and Secret the host writes. Its hub tables (objects' hub values, configuration values, endpoints at `kfirs.com`, roles, rollout history) move to `delivery`'s `docs/delivery/designs/octomaton.md`, the hub's installation |
 | [octomaton.dev](octomaton-dev.md) | Keeps the product's identity: `octomaton.dev` as the Go module path, the labels' and configuration's API group. The hub's App, its webhook, the traffic through the hub's gateway and the Go import page move to `delivery`'s page; the [rename runbook](../../delivery/runbooks/octomaton-rename.md), the hub's one-off migration, goes with them |
 | [archived step logs](archived-step-logs.md) | Keeps the design of the server. The hub's view, grants, NetworkPolicy and Dashboard setting move to `delivery`'s page |
-| [review requests](review-requests.md), formerly `pr-reviewer.md` | Keeps Octomaton's settings for a review bot, naming no reviewer or repository; the image and the hub's reviewer go to `tooling`'s [reviewer design](../../tooling/designs/pr-reviewer.md) |
+| [pull request reviewers](pr-reviewer.md) | Keeps Octomaton's settings for a review bot, naming no reviewer or repository; the image and the hub's reviewer go to `tooling`'s [reviewer design](../../tooling/designs/pr-reviewer.md) |
 | [architecture](architecture.md), [principles](phase-2-octomaton.md), [retries](github-retries.md), [redaction](check-run-redaction.md), [Linear check](linear-check.md) | Unchanged: they describe the product |
 
 `delivery`'s new page is where the hub's values live, and other hub pages (`infra`'s IAM, `tooling`'s reviewer) link
@@ -218,8 +218,8 @@ it instead of Octomaton's.
 - `ci` here no longer fails when `delivery` renames something; `delivery`'s does. The bump in `cluster` is checked by
   `cluster`'s `Validate`. A rename in `deploy/` is therefore a breaking change for hosts and says so in its pull
   request.
-- Until `tooling` publishes the reviewer's image, Octomaton's `reviewer-image` keeps moving `main`; the two publish the
-  same Dockerfile for the slice or two they overlap.
+- Between slices 7 and 8 both repositories published the reviewer's image from the same Dockerfile and moved its
+  `main` tag; since slice 8, `tooling` is its only publisher.
 
 The hand-over of one of the moving objects, the route, across slices 2 to 5:
 

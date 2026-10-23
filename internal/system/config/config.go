@@ -60,8 +60,9 @@ type GitHub struct {
 	// PrivateKey is the App's PEM-encoded RSA private key (PKCS#1, as GitHub issues it, or PKCS#8).
 	PrivateKey    string `envconfig:"PRIVATE_KEY"`
 	WebhookSecret string `envconfig:"WEBHOOK_SECRET"`
-	// AllowedOwners are the users and organizations whose installations are served; empty serves
-	// every installation.
+	// AllowedOwners are the users and organizations whose installations are served. At least one is
+	// required: an installation on any other owner is ignored, and a server with none would run the
+	// pipelines of anyone who installs the App.
 	AllowedOwners []string `envconfig:"ALLOWED_OWNERS"`
 
 	key *rsa.PrivateKey
@@ -193,6 +194,9 @@ func (g *GitHub) validate() []string {
 	}
 	if g.WebhookSecret = strings.TrimSpace(g.WebhookSecret); g.WebhookSecret == "" {
 		problems = append(problems, "OCTOMATON_GITHUB_WEBHOOK_SECRET is required")
+	}
+	if len(g.AllowedOwners) == 0 {
+		problems = append(problems, "OCTOMATON_GITHUB_ALLOWED_OWNERS is required")
 	}
 	for _, owner := range g.AllowedOwners {
 		if strings.TrimSpace(owner) == "" || strings.Contains(owner, "/") {

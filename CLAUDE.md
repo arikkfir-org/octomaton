@@ -104,10 +104,6 @@
 - Pods meet the restricted Pod Security Standard, which the namespace enforces.
 - CI renders `deploy/` and `deploy/logs/` as written (`deploy/manifests.sh`) and validates them with kubeconform; run
   `make manifests` before pushing a change there. How a host renders them is the host's CI to check.
-- `images/reviewer/` is the hub's pull request reviewer image, run by `arikkfir-org/tooling`'s reviewer; the code never
-  reads it. `reviewer-image` publishes it from `main` as `ci-octomaton-release`, with a `paths` filter, and moves its
-  `main` tag, which tooling runs: a merge that changes it reaches the next review. `reviewer-image-check` builds it on
-  pull requests. Pin its base image by digest.
 
 ## Tests
 

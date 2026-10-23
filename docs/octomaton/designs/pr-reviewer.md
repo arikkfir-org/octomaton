@@ -1,6 +1,6 @@
 # Pull request reviewer
 
-**Decision**: Octomaton runs the [pull request reviewer](../../tooling/designs/pr-reviewer.md) as an ordinary pipeline, through settings that name no repository and no reviewer: the `review_request` trigger; organization pipelines, which the organization repository (server setting `OCTOMATON_ORGANIZATION_REPOSITORY`, `tooling` in the hub) declares once for every repository; `secrets` and `githubToken.repositories: all`, only for pipelines whose definitions are read at a default branch; and the refusal of remote Tekton references, so that the Secret guard sees every definition. This repository also builds the reviewer's image from `images/reviewer/` and moves its `main` tag, which every review pulls. The reviewer itself (its pipeline, prompt, scripts and review process) is `tooling`'s. Names and wiring: [`tooling`'s design](../../tooling/designs/pr-reviewer.md); schema: [`.octomaton.yaml`](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
+**Decision**: Octomaton runs the [pull request reviewer](../../tooling/designs/pr-reviewer.md) as an ordinary pipeline, through settings that name no repository and no reviewer: the `review_request` trigger; organization pipelines, which the organization repository (server setting `OCTOMATON_ORGANIZATION_REPOSITORY`, `tooling` in the hub) declares once for every repository; `secrets` and `githubToken.repositories: all`, only for pipelines whose definitions are read at a default branch; and the refusal of remote Tekton references, so that the Secret guard sees every definition. The reviewer itself (its pipeline, prompt, scripts, review process and image) is `tooling`'s. Names and wiring: [`tooling`'s design](../../tooling/designs/pr-reviewer.md); schema: [`.octomaton.yaml`](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
 
 ## Context
 
@@ -12,7 +12,7 @@ The reviewer is a pipeline that every repository runs when a review is requested
 | One definition for every repository, which no pull request can change | Organization pipelines, read at the organization repository's default branch, and their PipelineRun with them |
 | Two Secrets, the model's key and the reviewer's token, that no other pipeline can mount | `secrets`, only for pipelines whose definitions are read at a default branch; remote Tekton references refused |
 | A token that reads every repository, internal ones included | `githubToken.repositories: all`, under the same rule as `secrets` |
-| An image with the model's tools | `images/reviewer/`, published by pipeline `reviewer-image` |
+| An image with the model's tools | None: `tooling` builds and publishes it ([the image](../../tooling/designs/pr-reviewer.md#the-image)), as an ordinary pipeline |
 
 Each answer is a setting of `.octomaton.yaml` or of the server, and the PipelineRun stays plain Tekton, so Octomaton's [principles](phase-2-octomaton.md) hold: nothing in the code names `tooling`, `arikkfir-reviewer` or the reviewer.
 
@@ -79,25 +79,6 @@ sequenceDiagram
 
 Once the review is posted, the request is fulfilled: a later push runs nothing until the author requests the review again.
 
-### The reviewer image
-
-| Item | Value |
-| --- | --- |
-| Source | `images/reviewer/Dockerfile`: `ghcr.io/anomalyco/opencode:1.18.33`, pinned by digest, plus Alpine 3.24's `bash`, `coreutils`, `curl`, `diffutils`, `file`, `findutils`, `gawk`, `git`, `grep`, `gzip`, `jq`, `less`, `make`, `patch`, `python3`, `sed`, `tar`, `tree`, `unzip`, `wget`, `xz` and `yq-go` |
-| Image | `me-west1-docker.pkg.dev/arikkfir/images/reviewer`, tagged with the commit's short SHA and `main` ([Artifact Registry](../../infra/terraform/gcp.md#artifact-registry)) |
-| Publication | Pipeline `reviewer-image` (`.tekton/reviewer-image.yaml`), on pushes to `main` that change `images/reviewer/**` or the file itself; only the newest waiting one runs (`latest`); as `ci-octomaton-release`, which only `main` may use; the task retries twice (a lost node kills the build, and pushing the same tags again is harmless) |
-| Check | Pipeline `reviewer-image-check` (check `Reviewer Image`, `.tekton/reviewer-image-check.yaml`), on pull requests that change the image: builds it without pushing, as `pipeline` |
-| Build | Rootless BuildKit (`moby/buildkit:v0.33.1-rootless`) with `--oci-worker-no-process-sandbox`, as UID 1000, its step unconfined by seccomp and AppArmor, its state on an `emptyDir` |
-| Consumer | `tooling`'s `reviewer/pipelinerun.yaml` runs the `main` tag in every step and its sidecar, with `imagePullPolicy: Always`: a merge here that changes the image reaches the next review in every repository |
-
-```mermaid
-flowchart LR
-  PR["pull request changing images/reviewer"] --> CHK["reviewer-image-check: build, no push"]
-  M["push to main changing images/reviewer"] --> PUB["reviewer-image: rootless BuildKit, as ci-octomaton-release"]
-  PUB --> AR[("images/reviewer: short SHA and main")]
-  AR -->|"main, pulled for every pod"| REV["tooling's review pod, in every repository's namespace"]
-```
-
 ## Decisions
 
 | Decision | Why | Rejected |
@@ -112,9 +93,6 @@ flowchart LR
 | A pipeline may mount the Secrets it declares, only if its definitions are read at a default branch: an organization pipeline, or one whose every trigger reads the default branch ([Linear check](linear-check.md)) | Head-commit definitions still can't name a Secret, so a pull request can't reach the reviewer's token | A server-wide allowlist (any pull request's CI could mount the token) |
 | Remote Tekton references are refused (`pipelineRef`, resolvers, bundles) | The guard only sees inline definitions; a remote one would slip past it. No repository uses them | Resolving them first (Octomaton would fetch and trust what Tekton fetches) |
 | `githubToken.repositories: all`, under the rule of `secrets` | Octomaton already mints and refreshes run tokens, and widening their scope is one option, which no pull request's own definitions get | A second fine-grained personal access token (a manual yearly renewal, and a Secret every namespace holds) |
-| The reviewer image is built here, and `tooling` runs its `main` tag, pulled for every pod | `ci-octomaton-release` already pushes to `images`, only from `main`; every merge to `images/reviewer` reaches the next review, with no bump in `tooling` to forget | A digest pinned in `tooling`, bumped by hand after every publish; building it in `tooling` (a second identity that writes `images`) |
-| `reviewer-image` has a `paths` filter, unlike `release` | The image changes only with `images/reviewer`, and each publication moves the `main` tag that every review pulls. `release` runs on every push because Argo CD deploys every commit's images | Publishing on every push |
-| Rootless BuildKit with `--oci-worker-no-process-sandbox`, its step unconfined by seccomp and AppArmor | A plain Dockerfile, built without a privileged container. Kubernetes can't unmask `/proc` as BuildKit's process sandbox needs, and BuildKit's own Kubernetes examples run it so | kaniko (Google archived it); a privileged BuildKit |
 
 ## Security and failure modes
 
@@ -126,8 +104,6 @@ flowchart LR
 - Failed steps' logs, `check-title`, `check-summary` and task messages lose every value of every Secret the run references, the DeepSeek key, `arikkfir-reviewer`'s token and the installation token included, before they reach GitHub ([redaction](check-run-redaction.md)).
 - A broken `review` definition, or a broken `.octomaton.yaml` in the repository, shows on a review request as no `AI Review` check at all, with a warning in Octomaton's log; the repository's own pull request events report its configuration on `octomaton`. GitHub failing to serve a configuration is reported on `octomaton`, and Octomaton retries GitHub's calls and forgets a delivery that left work undone, so a redelivery runs it again ([GitHub outages](github-retries.md)).
 - A new request for the same pull request supersedes the running review, and so do new commits while the review is still requested.
-- The `main` tag of the reviewer image moves with every merge that changes it, so a broken image breaks the next review in every repository. `reviewer-image-check` builds it on pull requests but runs no review. Revert to roll back: the revert publishes the old image as `main`. A failed publication leaves `main` where it was.
-- The image's build step runs unconfined by seccomp and AppArmor, as a non-root user without privileges, and publishes only from `main`.
 
 ## Open questions
 

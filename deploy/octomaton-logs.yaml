@@ -6,6 +6,10 @@ kind: ServiceAccount
 metadata:
   name: octomaton-logs
   namespace: octomaton
+  # Moving to deploy/logs/, under an Application of its own (docs/octomaton/designs/host-agnostic.md): never pruned
+  # on the way, whichever Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: octomaton-logs
 # It calls no Kubernetes API, and Workload Identity needs no token in the pod.
@@ -16,6 +20,10 @@ kind: Deployment
 metadata:
   name: octomaton-logs
   namespace: octomaton
+  # Moving to deploy/logs/, under an Application of its own (docs/octomaton/designs/host-agnostic.md): never pruned
+  # on the way, whichever Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: octomaton-logs
 spec:
@@ -51,7 +59,12 @@ spec:
           # No tag here: Argo CD sets it to the short SHA of the commit it deploys, as for octomaton's, and release
           # publishes both images for every commit on main.
           image: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
-          # Configured by environment variables only; the README lists them.
+          # Configured by environment variables only; the README lists them. Its settings are moving to ConfigMap
+          # octomaton-logs, which the host writes (docs/octomaton/designs/host-agnostic.md): optional until it does.
+          envFrom:
+            - configMapRef:
+                name: octomaton-logs
+                optional: true
           env:
             # The log view read, whose project is the quota project, and the cluster whose containers it serves.
             - name: OCTOMATON_LOGS_VIEW
@@ -103,6 +116,10 @@ kind: Service
 metadata:
   name: octomaton-logs
   namespace: octomaton
+  # Moving to deploy/logs/, under an Application of its own (docs/octomaton/designs/host-agnostic.md): never pruned
+  # on the way, whichever Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: octomaton-logs
 spec:
@@ -120,6 +137,10 @@ kind: NetworkPolicy
 metadata:
   name: octomaton-logs
   namespace: octomaton
+  # Moving to deploy/logs/, under an Application of its own (docs/octomaton/designs/host-agnostic.md): never pruned
+  # on the way, whichever Application synced last.
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: octomaton-logs
 spec:

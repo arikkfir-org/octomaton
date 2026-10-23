@@ -1,6 +1,6 @@
 # The version is the commit's short SHA, as the release pipeline tags it.
 VERSION        ?= $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-7),dev)
-IMAGES         ?= me-west1-docker.pkg.dev/arikkfir/images
+IMAGES         ?= me-west1-docker.pkg.dev/arikkfir/octomaton
 GO             ?= go
 KO             ?= $(GO) run github.com/google/ko@v0.19.1
 K8S_IMAGE      ?= docker.io/alpine/k8s:1.37.1

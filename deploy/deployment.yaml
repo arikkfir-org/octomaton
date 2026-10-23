@@ -47,7 +47,7 @@ spec:
         - name: octomaton
           # No tag here: Argo CD sets it to the short SHA of the commit it deploys (the Application octomaton in
           # arikkfir-org/delivery), and release publishes an image for every commit on main.
-          image: me-west1-docker.pkg.dev/arikkfir/images/octomaton
+          image: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton
           # Configured by environment variables only; the server's README lists them.
           envFrom:
             - configMapRef:

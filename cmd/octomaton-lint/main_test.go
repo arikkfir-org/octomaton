@@ -49,7 +49,7 @@ func TestRun(t *testing.T) {
 		{name: "invalid configuration", args: []string{invalid}, wantCode: 1, wantStderr: ".octomaton.yaml"},
 		{name: "files beside the PipelineRun", args: []string{files}, wantCode: 0, wantStdout: "ok (1 pipeline runs rendered)"},
 		{name: "render the files inlined", args: []string{"-render", files}, wantCode: 0, wantStdout: "          - u\n"},
-		{name: "a file that does not exist", args: []string{missing}, wantCode: 1, wantStderr: "run.yaml: spec.pipelineRef names Pipeline `gone`, whose file `gone.pipeline.yaml` does not exist"},
+		{name: "a file that does not exist", args: []string{missing}, wantCode: 1, wantStderr: "run.yaml: spec.pipelineRef names Pipeline `gone`, whose file `gone.pipeline.yaml` beside the PipelineRun file does not exist"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

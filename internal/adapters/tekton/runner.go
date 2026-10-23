@@ -71,7 +71,7 @@ func refusal(format string, args ...any) *ci.Refusal {
 // Expand inlines the Pipeline, Task and StepAction files spec's definition references by name,
 // read with read from the PipelineRun file's directory.
 func (r *Runner) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
-	out, err := expand(ctx, spec.Definition, spec.Path, read)
+	out, err := expand(ctx, spec.Definition, read)
 	var re *readError
 	switch {
 	case err == nil:

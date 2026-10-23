@@ -42,7 +42,7 @@ func (r *renderer) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileRead
 	if !strings.Contains(string(spec.Definition), "name: check") {
 		return spec.Definition, nil
 	}
-	task, err := read(ctx, ".tekton/check.task.yaml")
+	task, err := read(ctx, "check.task.yaml")
 	if errors.Is(err, ci.ErrNotFound) {
 		return nil, errors.New("task `check` names Task `check`, whose file `.tekton/check.task.yaml` does not exist")
 	}

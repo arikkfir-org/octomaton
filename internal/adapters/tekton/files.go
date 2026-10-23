@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -48,17 +47,17 @@ type readError struct{ err error }
 func (e *readError) Error() string { return e.err.Error() }
 func (e *readError) Unwrap() error { return e.err }
 
-// expand inlines the Pipeline, Task and StepAction files definition (the PipelineRun file at
-// pipelineRunPath) references by name, read with read from its directory, and returns the
-// self-contained definition: definition itself when it references none. The problems of a
-// reference or a file are plain errors (a file that does not exist Is ci.ErrNotFound); a file that
-// could not be read is a *readError.
-func expand(ctx context.Context, definition []byte, pipelineRunPath string, read ci.FileReader) ([]byte, error) {
+// expand inlines the Pipeline, Task and StepAction files definition (a PipelineRun file)
+// references by name, read with read from beside it, and returns the self-contained definition:
+// definition itself when it references none. The problems of a reference or a file are plain
+// errors (a file that does not exist Is ci.ErrNotFound); a file that could not be read is a
+// *readError.
+func expand(ctx context.Context, definition []byte, read ci.FileReader) ([]byte, error) {
 	pr, err := parsePipelineRun(definition)
 	if err != nil {
 		return nil, err
 	}
-	x := &expander{ctx: ctx, dir: path.Dir(pipelineRunPath), read: read, files: map[string]*unstructured.Unstructured{}}
+	x := &expander{ctx: ctx, read: read, files: map[string]*unstructured.Unstructured{}}
 	if err := x.pipelineRun(pr.Object); err != nil {
 		return nil, err
 	}
@@ -74,9 +73,8 @@ func expand(ctx context.Context, definition []byte, pipelineRunPath string, read
 
 type expander struct {
 	ctx  context.Context
-	dir  string
 	read ci.FileReader
-	// files holds each file read, by path, so a file referenced twice is read once.
+	// files holds each file read, by name, so a file referenced twice is read once.
 	files   map[string]*unstructured.Unstructured
 	changed bool
 }
@@ -352,30 +350,30 @@ func (x *expander) name(where string, ref any) (string, error) {
 	return name, nil
 }
 
-// file reads the file a reference names, once per path, and checks it is one object of kind.
+// file reads the file a reference names, once per file, and checks it is one object of kind.
 func (x *expander) file(where, kind, name string) (*unstructured.Unstructured, error) {
-	p := path.Join(x.dir, name+fileSuffix[kind])
+	f := name + fileSuffix[kind]
 	x.changed = true
-	if file, ok := x.files[p]; ok {
+	if file, ok := x.files[f]; ok {
 		return file, nil
 	}
 	if len(x.files) >= maxFiles {
 		return nil, fmt.Errorf("the PipelineRun references more than %d files", maxFiles)
 	}
-	data, err := x.read(x.ctx, p)
+	data, err := x.read(x.ctx, f)
 	if errors.Is(err, ci.ErrNotFound) {
-		return nil, missing("%s names %s `%s`, whose file `%s` does not exist", where, kind, name, p)
+		return nil, missing("%s names %s `%s`, whose file `%s` beside the PipelineRun file does not exist", where, kind, name, f)
 	}
 	if err != nil {
-		return nil, &readError{err: fmt.Errorf("reading `%s`: %w", p, err)}
+		return nil, &readError{err: fmt.Errorf("reading `%s` beside the PipelineRun file: %w", f, err)}
 	}
 	file, err := parseDocument(data, kind)
 	if err == nil && file.Object["spec"] == nil {
 		err = errors.New("it has no spec")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("`%s` is not a valid %s file: %v", p, kind, err)
+		return nil, fmt.Errorf("`%s` beside the PipelineRun file is not a valid %s file: %v", f, kind, err)
 	}
-	x.files[p] = file
+	x.files[f] = file
 	return file, nil
 }

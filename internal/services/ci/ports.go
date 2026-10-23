@@ -84,9 +84,9 @@ func (p Permission) CanWrite() bool {
 	return p == "admin" || p == "maintain" || p == "write"
 }
 
-// FileReader reads a file of a pipeline definition's repository, at the ref the definition was read
-// at, by its repository-relative path; it returns ErrNotFound when there is none.
-type FileReader func(ctx context.Context, path string) ([]byte, error)
+// FileReader reads a file beside a pipeline definition (in its directory, of its repository, at the
+// ref it was read at) by the file's name; it returns ErrNotFound when there is none.
+type FileReader func(ctx context.Context, name string) ([]byte, error)
 
 // Runner is the CI system that runs pipelines: Tekton, on Kubernetes. A run is created held and
 // starts when it is released.

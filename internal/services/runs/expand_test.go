@@ -10,10 +10,10 @@ import (
 	"octomaton.dev/internal/services/ci"
 )
 
-// expandsCheckTask stands in for the runner's Expand: it appends the file `.tekton/check.task.yaml`
-// of the definition's repository to the definition.
+// expandsCheckTask stands in for the runner's Expand: it appends the file `check.task.yaml` beside
+// the definition to the definition.
 func expandsCheckTask(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
-	task, err := read(ctx, ".tekton/check.task.yaml")
+	task, err := read(ctx, "check.task.yaml")
 	if errors.Is(err, ci.ErrNotFound) {
 		return nil, fmt.Errorf("`%s`: task `check` names a file that is %w", spec.Path, err)
 	}
@@ -36,6 +36,25 @@ func TestStartExpandsTheDefinition(t *testing.T) {
 	// The file is read where the definition was: at the pull request's head.
 	want := repo.FullName + "@" + sha1 + ":.tekton/check.task.yaml"
 	if reads := h.host.Reads(); !strings.Contains(strings.Join(reads, "\n"), want) {
+		t.Fatalf("reads = %q, want %q", reads, want)
+	}
+}
+
+// A definition in another repository has its files read beside it, in that repository at its
+// default branch.
+func TestStartExpandsADefinitionInAnotherRepository(t *testing.T) {
+	h := newHarness(t)
+	cfg := "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: {repository: shared, path: review/run.yaml}, on: {review_request: {reviewers: [octo-reviewer]}}}\n"
+	setupReview(h, cfg)
+	h.host.SetFile(shared, "", "review/run.yaml", ciRun)
+	h.host.SetFile(shared, "", "review/check.task.yaml", "kind: Task\n")
+	h.runner.Expander = expandsCheckTask
+	h.requestReview("d-1", "octo-reviewer")
+	runs := h.runner.Runs()
+	if len(runs) != 1 || string(h.runner.Spec(runs[0].ID).Definition) != ciRun+"kind: Task\n" {
+		t.Fatalf("runs = %+v, want one created from the expanded definition", runs)
+	}
+	if want, reads := shared.FullName+"@:review/check.task.yaml", h.host.Reads(); !strings.Contains(strings.Join(reads, "\n"), want) {
 		t.Fatalf("reads = %q, want %q", reads, want)
 	}
 }

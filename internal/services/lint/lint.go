@@ -140,9 +140,9 @@ func (l *Linter) lintPipeline(res *Result, root, kind string, p *pipelines.Pipel
 	}
 	base := ci.RunSpec{Trigger: ci.Trigger{Pipeline: p.Name}, Definition: definition, Path: p.PipelineRun.String(), Timeout: p.TimeoutDuration(), Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks}
 	if definition != nil {
-		// The files the definition references are beside it, under the configuration's directory.
-		read := func(_ context.Context, path string) ([]byte, error) {
-			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		// The files the definition references are beside it.
+		read := func(_ context.Context, name string) ([]byte, error) {
+			data, err := os.ReadFile(filepath.Join(filepath.Dir(file), name))
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil, ci.ErrNotFound
 			}

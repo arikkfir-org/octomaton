@@ -11,9 +11,9 @@ import (
 	"octomaton.dev/internal/services/ci"
 )
 
-// A repository's .tekton/ directory, as expand reads it.
+// The directory of the PipelineRun file, as expand reads it.
 var repoFiles = map[string]string{
-	".tekton/ci.pipeline.yaml": `
+	"ci.pipeline.yaml": `
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata: {name: ci}
@@ -26,7 +26,7 @@ spec:
       params: [{name: root, value: github}]
       taskRef: {name: plan}
 `,
-	".tekton/check.task.yaml": `
+	"check.task.yaml": `
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -43,7 +43,7 @@ spec:
       image: busybox
       script: make check
 `,
-	".tekton/plan.task.yaml": `
+	"plan.task.yaml": `
 apiVersion: tekton.dev/v1
 kind: Task
 spec:
@@ -53,7 +53,7 @@ spec:
       image: terraform
       args: [plan, $(params.root)]
 `,
-	".tekton/clone.step.yaml": `
+	"clone.step.yaml": `
 apiVersion: tekton.dev/v1beta1
 kind: StepAction
 metadata: {name: clone}
@@ -70,7 +70,7 @@ spec:
   args: ["$(params[\"url\"])"]
   results: [{name: sha}]
 `,
-	".tekton/arrays.step.yaml": `
+	"arrays.step.yaml": `
 apiVersion: tekton.dev/v1alpha1
 kind: StepAction
 spec:
@@ -78,10 +78,10 @@ spec:
   params: [{name: flags, type: array}]
   args: ["$(params.flags[*])"]
 `,
-	".tekton/bad.task.yaml":  "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
-	".tekton/v1.step.yaml":   "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
-	".tekton/bare.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nmetadata: {labels: {a: b}}\n",
-	".tekton/chain.step.yaml": `
+	"bad.task.yaml":  "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
+	"v1.step.yaml":   "apiVersion: tekton.dev/v1\nkind: StepAction\nspec: {image: busybox}\n",
+	"bare.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nmetadata: {labels: {a: b}}\n",
+	"chain.step.yaml": `
 apiVersion: tekton.dev/v1beta1
 kind: StepAction
 spec:
@@ -93,9 +93,9 @@ spec:
     - {name: d, default: "$(params.c)/d"}
   args: ["$(params.d)", "$(params.a)"]
 `,
-	".tekton/two.task.yaml":  "apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: []}\n---\napiVersion: tekton.dev/v1\nkind: Task\n",
-	".tekton/dup.step.yaml":  "apiVersion: tekton.dev/v1beta1\nkind: StepAction\nspec: {image: busybox, workingDir: /w}\n",
-	".tekton/none.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nspec:\n  steps:\n    - name: s\n      ref: {name: nowhere}\n",
+	"two.task.yaml":  "apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: []}\n---\napiVersion: tekton.dev/v1\nkind: Task\n",
+	"dup.step.yaml":  "apiVersion: tekton.dev/v1beta1\nkind: StepAction\nspec: {image: busybox, workingDir: /w}\n",
+	"none.task.yaml": "apiVersion: tekton.dev/v1\nkind: Task\nspec:\n  steps:\n    - name: s\n      ref: {name: nowhere}\n",
 }
 
 // reader reads repoFiles, counting the reads, and fails the paths in errs.
@@ -132,7 +132,7 @@ func TestExpand(t *testing.T) {
 		{name: "nothing to expand", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, image: b}]}}]\n"},
 		{name: "a resolver is left for the remote-reference check", spec: "  pipelineRef: {resolver: git, params: [{name: url, value: u}]}\n"},
 		{name: "a pipeline, its tasks and their steps", spec: "  pipelineRef: {name: ci}\n",
-			reads: []string{".tekton/ci.pipeline.yaml", ".tekton/check.task.yaml", ".tekton/clone.step.yaml", ".tekton/plan.task.yaml"},
+			reads: []string{"ci.pipeline.yaml", "check.task.yaml", "clone.step.yaml", "plan.task.yaml"},
 			want: `
   pipelineSpec:
     params: [{name: revision, type: string}]
@@ -163,7 +163,7 @@ func TestExpand(t *testing.T) {
               image: terraform
               args: [plan, $(params.root)]
 `},
-		{name: "a task used twice is read once, and expanded for each use", reads: []string{".tekton/plan.task.yaml"},
+		{name: "a task used twice is read once, and expanded for each use", reads: []string{"plan.task.yaml"},
 			spec: "  pipelineSpec:\n    tasks:\n      - {name: a, params: [{name: root, value: a}], taskRef: {name: plan}}\n    finally:\n      - {name: b, taskRef: {name: plan}}\n",
 			want: `
   pipelineSpec:
@@ -175,7 +175,7 @@ func TestExpand(t *testing.T) {
       - name: b
         taskSpec: {params: [{name: root}], steps: [{name: plan, image: terraform, args: [plan, $(params.root)]}]}
 `},
-		{name: "a step of an inline task", reads: []string{".tekton/clone.step.yaml"},
+		{name: "a step of an inline task", reads: []string{"clone.step.yaml"},
 			spec: "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec:\n          steps:\n            - {name: c, ref: {name: clone}, params: [{name: revision, value: abc}, {name: depth, value: \"5\"}], onError: continue}\n",
 			want: `
   pipelineSpec:
@@ -190,7 +190,7 @@ func TestExpand(t *testing.T) {
               args: ["https://example/abc"]
               results: [{name: sha}]
 `},
-		{name: "a provided value is left for Tekton, defaults resolve through it", reads: []string{".tekton/chain.step.yaml"},
+		{name: "a provided value is left for Tekton, defaults resolve through it", reads: []string{"chain.step.yaml"},
 			spec: "  pipelineSpec:\n    tasks:\n      - name: t\n        taskSpec:\n          steps:\n            - {name: s, ref: {name: chain}, params: [{name: a, value: $(params.b)}]}\n",
 			want: `
   pipelineSpec:
@@ -200,39 +200,39 @@ func TestExpand(t *testing.T) {
           steps:
             - {name: s, image: busybox, args: ["$(params.b)/b/c/d", "$(params.b)"]}
 `},
-		{name: "a StepAction at v1, which Tekton does not serve", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: v1}}]}}]\n", reads: []string{".tekton/v1.step.yaml"},
-			err: "`.tekton/v1.step.yaml` is not a valid StepAction file: apiVersion must be \"tekton.dev/v1beta1\" or \"tekton.dev/v1alpha1\" (got \"tekton.dev/v1\")"},
-		{name: "a Task file without a spec", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: bare}}]\n", reads: []string{".tekton/bare.task.yaml"},
-			err: "`.tekton/bare.task.yaml` is not a valid Task file: it has no spec"},
+		{name: "a StepAction at v1, which Tekton does not serve", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: v1}}]}}]\n", reads: []string{"v1.step.yaml"},
+			err: "`v1.step.yaml` beside the PipelineRun file is not a valid StepAction file: apiVersion must be \"tekton.dev/v1beta1\" or \"tekton.dev/v1alpha1\" (got \"tekton.dev/v1\")"},
+		{name: "a Task file without a spec", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: bare}}]\n", reads: []string{"bare.task.yaml"},
+			err: "`bare.task.yaml` beside the PipelineRun file is not a valid Task file: it has no spec"},
 		{name: "pipelineRef and pipelineSpec", spec: "  pipelineRef: {name: ci}\n  pipelineSpec: {tasks: []}\n", err: "spec holds both pipelineRef and pipelineSpec"},
 		{name: "taskRef and taskSpec", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check}, taskSpec: {steps: []}}]\n", err: "task `t` holds both taskRef and taskSpec"},
 		{name: "a reference with more than a name", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check, kind: Task}}]\n",
 			err: "task `t`'s taskRef names `check`, so it may hold nothing but `name`"},
 		{name: "a name that is not a file's", spec: "  pipelineRef: {name: ../ci}\n", err: "spec.pipelineRef names `../ci`, which is not a file's name"},
-		{name: "a missing file", spec: "  pipelineSpec:\n    finally: [{name: t, taskRef: {name: gone}}]\n", reads: []string{".tekton/gone.task.yaml"},
-			err: "finally task `t`'s taskRef names Task `gone`, whose file `.tekton/gone.task.yaml` does not exist", notFound: true},
-		{name: "a file of another kind", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: bad}}]\n", reads: []string{".tekton/bad.task.yaml"},
-			err: "`.tekton/bad.task.yaml` is not a valid Task file: kind must be \"Task\""},
-		{name: "a file of two documents", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: two}}]\n", reads: []string{".tekton/two.task.yaml"},
-			err: "`.tekton/two.task.yaml` is not a valid Task file: expected exactly one YAML document, found 2"},
-		{name: "a step whose action's file is missing", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: none}}]\n", reads: []string{".tekton/none.task.yaml", ".tekton/nowhere.step.yaml"},
-			err: "step `s` of task `t`'s ref names StepAction `nowhere`, whose file `.tekton/nowhere.step.yaml` does not exist", notFound: true},
-		{name: "an array param", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: arrays}, params: [{name: flags, value: [a]}]}]}}]\n", reads: []string{".tekton/arrays.step.yaml"},
+		{name: "a missing file", spec: "  pipelineSpec:\n    finally: [{name: t, taskRef: {name: gone}}]\n", reads: []string{"gone.task.yaml"},
+			err: "finally task `t`'s taskRef names Task `gone`, whose file `gone.task.yaml` beside the PipelineRun file does not exist", notFound: true},
+		{name: "a file of another kind", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: bad}}]\n", reads: []string{"bad.task.yaml"},
+			err: "`bad.task.yaml` beside the PipelineRun file is not a valid Task file: kind must be \"Task\""},
+		{name: "a file of two documents", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: two}}]\n", reads: []string{"two.task.yaml"},
+			err: "`two.task.yaml` beside the PipelineRun file is not a valid Task file: expected exactly one YAML document, found 2"},
+		{name: "a step whose action's file is missing", spec: "  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: none}}]\n", reads: []string{"none.task.yaml", "nowhere.step.yaml"},
+			err: "step `s` of task `t`'s ref names StepAction `nowhere`, whose file `nowhere.step.yaml` beside the PipelineRun file does not exist", notFound: true},
+		{name: "an array param", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: arrays}, params: [{name: flags, value: [a]}]}]}}]\n", reads: []string{"arrays.step.yaml"},
 			err: "step `s` of task `t` passes a param that is not a named string: StepAction `arrays` inlines string params only"},
-		{name: "an array param with a default", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: arrays}}]}}]\n", reads: []string{".tekton/arrays.step.yaml"},
+		{name: "an array param with a default", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: arrays}}]}}]\n", reads: []string{"arrays.step.yaml"},
 			err: "param `flags` of StepAction `arrays` is an array; step `s` of task `t` inlines string params only"},
-		{name: "a param the action does not declare", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: clone}, params: [{name: revision, value: a}, {name: other, value: b}]}]}}]\n", reads: []string{".tekton/clone.step.yaml"},
+		{name: "a param the action does not declare", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: clone}, params: [{name: revision, value: a}, {name: other, value: b}]}]}}]\n", reads: []string{"clone.step.yaml"},
 			err: "step `s` of task `t` passes param `other`, which StepAction `clone` does not declare"},
-		{name: "a param without a value", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: clone}}]}}]\n", reads: []string{".tekton/clone.step.yaml"},
+		{name: "a param without a value", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: clone}}]}}]\n", reads: []string{"clone.step.yaml"},
 			err: "step `s` of task `t` gives no value to param `revision` of StepAction `clone`, which has no default"},
-		{name: "a field the step and its action both set", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: dup}, workingDir: /x}]}}]\n", reads: []string{".tekton/dup.step.yaml"},
+		{name: "a field the step and its action both set", spec: "  pipelineSpec:\n    tasks: [{name: t, taskSpec: {steps: [{name: s, ref: {name: dup}, workingDir: /x}]}}]\n", reads: []string{"dup.step.yaml"},
 			err: "step `s` of task `t` sets `workingDir`, which StepAction `dup` sets too"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &reader{}
 			definition := []byte(runHead + tt.spec)
-			got, err := expand(context.Background(), definition, ".tekton/ci.yaml", r.read)
+			got, err := expand(context.Background(), definition, r.read)
 			if tt.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.err) {
 					t.Fatalf("Expand = %v, want an error containing %q", err, tt.err)
@@ -268,7 +268,7 @@ func TestExpandBoundsTheFiles(t *testing.T) {
 	read := func(context.Context, string) ([]byte, error) {
 		return []byte("apiVersion: tekton.dev/v1\nkind: Task\nspec: {steps: []}\n"), nil
 	}
-	_, err := expand(context.Background(), []byte(runHead+spec), "ci.yaml", read)
+	_, err := expand(context.Background(), []byte(runHead+spec), read)
 	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("references more than %d files", maxFiles)) {
 		t.Fatalf("Expand = %v, want the bound", err)
 	}
@@ -276,17 +276,17 @@ func TestExpandBoundsTheFiles(t *testing.T) {
 
 func TestExpandReadErrors(t *testing.T) {
 	boom := errors.New("boom")
-	r := &reader{errs: map[string]error{".tekton/check.task.yaml": boom}}
-	_, err := expand(context.Background(), []byte(runHead+"  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check}}]\n"), ".tekton/ci.yaml", r.read)
+	r := &reader{errs: map[string]error{"check.task.yaml": boom}}
+	_, err := expand(context.Background(), []byte(runHead+"  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check}}]\n"), r.read)
 	var re *readError
-	if !errors.As(err, &re) || !errors.Is(err, boom) || !strings.Contains(err.Error(), "reading `.tekton/check.task.yaml`: boom") {
+	if !errors.As(err, &re) || !errors.Is(err, boom) || !strings.Contains(err.Error(), "reading `check.task.yaml` beside the PipelineRun file: boom") {
 		t.Fatalf("Expand = %v, want a readError wrapping boom", err)
 	}
 }
 
 func TestRunnerExpand(t *testing.T) {
-	spec := func(s string) ci.RunSpec { return ci.RunSpec{Definition: []byte(runHead + s), Path: ".tekton/ci.yaml"} }
-	r := &reader{errs: map[string]error{".tekton/plan.task.yaml": errors.New("boom")}}
+	spec := func(s string) ci.RunSpec { return ci.RunSpec{Definition: []byte(runHead + s), Path: "ci.yaml"} }
+	r := &reader{errs: map[string]error{"plan.task.yaml": errors.New("boom")}}
 	runner := &Runner{}
 
 	out, err := runner.Expand(context.Background(), spec("  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: check}}]\n"), r.read)
@@ -295,18 +295,18 @@ func TestRunnerExpand(t *testing.T) {
 	}
 
 	_, err = runner.Expand(context.Background(), spec("  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: gone}}]\n"), r.read)
-	if !errors.Is(err, ci.ErrNotFound) || err.Error() != "`.tekton/ci.yaml`: task `t`'s taskRef names Task `gone`, whose file `.tekton/gone.task.yaml` does not exist" {
+	if !errors.Is(err, ci.ErrNotFound) || err.Error() != "`ci.yaml`: task `t`'s taskRef names Task `gone`, whose file `gone.task.yaml` beside the PipelineRun file does not exist" {
 		t.Fatalf("a missing file = %v", err)
 	}
 
 	_, err = runner.Expand(context.Background(), spec("  pipelineSpec:\n    tasks: [{name: t, taskRef: {name: plan}}]\n"), r.read)
 	var refused *ci.Refusal
-	if errors.As(err, &refused) || err == nil || err.Error() != "`.tekton/ci.yaml`: reading `.tekton/plan.task.yaml`: boom" {
+	if errors.As(err, &refused) || err == nil || err.Error() != "`ci.yaml`: reading `plan.task.yaml` beside the PipelineRun file: boom" {
 		t.Fatalf("a read error = %v, want a plain error", err)
 	}
 
 	_, err = runner.Expand(context.Background(), spec("  pipelineRef: {name: ci}\n  pipelineSpec: {}\n"), r.read)
-	if !errors.As(err, &refused) || refused.Reason != "`.tekton/ci.yaml`: spec holds both pipelineRef and pipelineSpec." {
+	if !errors.As(err, &refused) || refused.Reason != "`ci.yaml`: spec holds both pipelineRef and pipelineSpec." {
 		t.Fatalf("a reference's problem = %v, want a refusal", err)
 	}
 
@@ -318,14 +318,14 @@ func TestRunnerExpand(t *testing.T) {
 
 func TestRendererExpand(t *testing.T) {
 	r := &reader{}
-	out, err := Renderer{}.Expand(context.Background(), ci.RunSpec{Definition: []byte(runHead + "  pipelineRef: {name: ci}\n"), Path: ".tekton/ci.yaml"}, r.read)
+	out, err := Renderer{}.Expand(context.Background(), ci.RunSpec{Definition: []byte(runHead + "  pipelineRef: {name: ci}\n"), Path: "ci.yaml"}, r.read)
 	if err != nil || !strings.Contains(string(out), "script: make check") {
 		t.Fatalf("Expand = %s, %v", out, err)
 	}
 	if err := (Renderer{}).CheckDefinition(ci.RunSpec{Definition: out, TaskReports: true}); err != nil {
 		t.Fatalf("the expanded run must pass the checks: %v", err)
 	}
-	_, err = Renderer{}.Expand(context.Background(), ci.RunSpec{Definition: []byte(runHead + "  pipelineRef: {name: gone}\n"), Path: ".tekton/ci.yaml"}, r.read)
+	_, err = Renderer{}.Expand(context.Background(), ci.RunSpec{Definition: []byte(runHead + "  pipelineRef: {name: gone}\n"), Path: "ci.yaml"}, r.read)
 	if !errors.Is(err, ci.ErrNotFound) {
 		t.Fatalf("a missing file = %v", err)
 	}

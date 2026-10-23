@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"strings"
 	"time"
 
@@ -56,8 +57,11 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
 		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, Concurrency: conc,
 	}
-	// The files the definition references are read where the definition was.
-	read := func(ctx context.Context, path string) ([]byte, error) { return gh.ReadFile(ctx, repo, path, ref) }
+	// The files the definition references are beside it, read where it was.
+	dir := path.Dir(p.PipelineRun.Path)
+	read := func(ctx context.Context, name string) ([]byte, error) {
+		return gh.ReadFile(ctx, repo, path.Join(dir, name), ref)
+	}
 	spec.Definition, err = s.Runner.Expand(ctx, spec, read)
 	if err != nil {
 		var r *ci.Refusal

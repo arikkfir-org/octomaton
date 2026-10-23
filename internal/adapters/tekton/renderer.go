@@ -13,7 +13,7 @@ type Renderer struct{}
 
 // Expand inlines the files spec's definition references by name, read with read.
 func (Renderer) Expand(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error) {
-	return expand(ctx, spec.Definition, spec.Path, read)
+	return expand(ctx, spec.Definition, read)
 }
 
 // CheckDefinition parses a pipeline definition and checks it fits the pipeline's settings.

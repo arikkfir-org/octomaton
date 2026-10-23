@@ -468,7 +468,8 @@ make build     # bin/octomaton, bin/octomaton-logs and bin/octomaton-lint
 Run locally against a cluster (the current `KUBECONFIG` context):
 
 ```bash
-export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pem)" OCTOMATON_GITHUB_WEBHOOK_SECRET=…
+export OCTOMATON_GITHUB_APP_ID=123456 OCTOMATON_GITHUB_PRIVATE_KEY="$(cat app.pem)" OCTOMATON_GITHUB_WEBHOOK_SECRET=… \
+  OCTOMATON_GITHUB_ALLOWED_OWNERS=arikkfir-org
 go run ./cmd/octomaton
 ```
 

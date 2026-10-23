@@ -151,8 +151,8 @@ nothing is exported, and without `octomaton-logs` the Dashboard shows "Unable to
 `deploy/manifests.sh` keeps its first half: `kustomize build deploy`, then kubeconform with the default schemas and
 the CRDs catalog. It loses the clone of `delivery`, the search for Applications, the patch probing and the "no
 Application found" failure. `make manifests` and `ci`'s `manifests` step call it the same way; `DELIVERY=` goes. The
-CRDs catalog stays, since `deploy/` still has no custom resources after the ExternalSecret and HTTPRoute leave; it
-can go when the base is only built-in kinds.
+CRDs catalog goes with them: once the ExternalSecret and the HTTPRoute leave, `deploy/` and `deploy/logs/` hold only
+built-in kinds, which the default schemas cover.
 
 The as-deployed check moves to the host that owns the options. `delivery`'s `ci` gains a step that reads each
 Application whose source is Octomaton's `deploy/`, fetches that repository at the revision the Application names,
@@ -240,7 +240,7 @@ sequenceDiagram
   O->>A: deploy/ no longer names the route
   A-->>R: not pruned: Prune=false, and E now tracks it
   Note over E,D: slice 5
-  D->>E: AppProject octomaton no longer admits HTTPRoute
+  D->>E: the route without Prune=false; AppProject octomaton no longer admits HTTPRoute
 ```
 
 ## Plan
@@ -252,9 +252,9 @@ only ordering constraints; slices on different arrows are independent.
 | --- | --- | --- | --- | --- |
 | 1 | octomaton | This pull request: the design, and `OCTOMATON_GITHUB_ALLOWED_OWNERS` required (config, its tests, the README's table) | none | The server refuses to start without it; the hub's and Bracket's ConfigMaps already set it, so nothing restarts differently |
 | 2 | octomaton | The moving objects (ConfigMap `octomaton`, ExternalSecret `octomaton-github`, HTTPRoute `octomaton`, NetworkPolicies `octomaton` and `octomaton-logs`, and `octomaton-logs`'s ServiceAccount, Deployment, budget and Service) get `argocd.argoproj.io/sync-options: Prune=false`; `octomaton-logs` reads ConfigMap `octomaton-logs` through `envFrom` with `optional: true` beside its `env`, so the ConfigMap can arrive first | none | Argo CD shows the annotation; nothing else changes |
-| 3 | delivery | `platform/octomaton/manifests` gains the five objects with today's content plus ConfigMap `octomaton-logs`, deployed by the wrapper `octomaton-environment` under project `default` as the AppProject is; `ci` gains the as-deployed render of Octomaton's `deploy/`; `docs/delivery/designs/octomaton.md` is written with the hub's values | 2 | Both Applications name the objects (Argo CD's shared-resource warning, with identical content); the new ConfigMap exists; `delivery`'s `ci` renders `deploy/` with the Application's options |
-| 4 | octomaton | `deploy/` drops the five objects; `octomaton-logs` moves to `deploy/logs/`, without the three `OCTOMATON_LOGS_*` entries of its `env` (its `envFrom` becomes required); `manifests.sh`, `Makefile` and `ci` validate `deploy/` and `deploy/logs/` as written only; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
-| 5 | delivery | Application `octomaton-logs` at `deploy/logs/`, same revision and tag override, in project `octomaton`, adopting the objects slice 4 left; AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | `octomaton-logs` is tracked by its own Application; a `deploy/` that named a dropped kind again would fail to sync |
+| 3 | delivery | `platform/octomaton/manifests` gains the five objects with today's content, `Prune=false` included (Argo CD reads the annotation from the live object, so a copy without it would drop the protection), plus ConfigMap `octomaton-logs`, deployed by the wrapper `octomaton-environment` under project `default` as the AppProject is; `ci` gains the as-deployed render of Octomaton's `deploy/`; `docs/delivery/designs/octomaton.md` is written with the hub's values | 2 | Both Applications name the objects (Argo CD's shared-resource warning, with identical content); the new ConfigMap exists; `delivery`'s `ci` renders `deploy/` with the Application's options |
+| 4 | octomaton | `deploy/` drops the five objects; `octomaton-logs` moves to `deploy/logs/`, without the three `OCTOMATON_LOGS_*` entries of its `env` (its `envFrom` becomes required) and without `Prune=false`; `manifests.sh`, `Makefile` and `ci` validate `deploy/` and `deploy/logs/` as written only, with the default schemas; the README gets **Hosting Octomaton** and loses the hub; the designs are rewritten and the hub's parts moved per the table above | 3 | Argo CD's `octomaton` Application no longer lists the objects and `octomaton-environment` owns them; the webhook, the Secret and the Dashboard's archived logs keep working through the merge; `ci` passes without cloning `delivery` |
+| 5 | delivery | Application `octomaton-logs` at `deploy/logs/`, same revision and tag override, in project `octomaton`, adopting the objects slice 4 left; the `Prune=false` annotation comes off the host's copies, the hand-over being over; AppProject `octomaton` drops ConfigMap, ExternalSecret, HTTPRoute and NetworkPolicy from its namespace whitelist | 4 | `octomaton-logs` is tracked by its own Application; the objects are prunable by their new owner again; a `deploy/` that named a dropped kind again would fail to sync |
 | 6 | infra | `ci-tooling-publish` gets `roles/artifactregistry.writer` on repository `images` | none | Applied on merge; `ci-octomaton-release` keeps its grant until slice 8 |
 | 7 | tooling | `images/reviewer/` (the Dockerfile as is) and pipelines `reviewer-image` and `reviewer-image-check` in its `.octomaton.yaml` and `.tekton/`; its reviewer design gains the image | 6 | A push to `tooling`'s `main` touching the image publishes `images/reviewer:main` |
 | 8 | octomaton | `images/reviewer/`, the two pipelines and their `.tekton/` files go; the reviewer design drops the image; `infra` drops `ci-octomaton-release`'s grant on `images` in the same step or the next | 7 | The next review pulls an image `tooling` published |

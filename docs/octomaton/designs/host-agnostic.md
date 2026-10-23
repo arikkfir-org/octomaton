@@ -86,7 +86,7 @@ installation has, identically:
 | Object | Stays, because |
 | --- | --- |
 | Namespace `octomaton`, restricted Pod Security Standard, `Delete=false,Prune=false` | Every installation needs it, and the pods meet the standard wherever they run; a host adds labels with a patch |
-| ServiceAccounts `octomaton` and `octomaton-logs` | The identities the RBAC and the host's cloud grants name; a host adds annotations (a Workload Identity binding) with a patch |
+| ServiceAccount `octomaton` | The identity the RBAC and the host's cloud grants name; a host adds annotations (a Workload Identity binding) with a patch. `octomaton-logs`'s goes to `deploy/logs/` with its workload |
 | ClusterRoles `octomaton` and `octomaton-tenant`, ClusterRoleBinding `octomaton`, Role and RoleBinding `octomaton` (leases) | What the servers do in any cluster, in Kubernetes' terms ([RBAC](deployment.md#rbac)) |
 | Deployment `octomaton` (two replicas, spread) and its PodDisruptionBudget | The server; its image named in Octomaton's public repository, untagged, for the host to tag |
 | Service `octomaton`, port 80 → 8080 | The name the host's route points at |
@@ -148,8 +148,8 @@ nothing is exported, and without `octomaton-logs` the Dashboard shows "Unable to
 
 ### CI
 
-`deploy/manifests.sh` keeps its first half: `kustomize build deploy`, then kubeconform with the default schemas and
-the CRDs catalog. It loses the clone of `delivery`, the search for Applications, the patch probing and the "no
+`deploy/manifests.sh` keeps its first half: `kustomize build` of `deploy/` and `deploy/logs/`, then kubeconform with
+the default schemas. It loses the clone of `delivery`, the search for Applications, the patch probing and the "no
 Application found" failure. `make manifests` and `ci`'s `manifests` step call it the same way; `DELIVERY=` goes. The
 CRDs catalog goes with them: once the ExternalSecret and the HTTPRoute leave, `deploy/` and `deploy/logs/` hold only
 built-in kinds, which the default schemas cover.

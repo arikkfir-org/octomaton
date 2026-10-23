@@ -1,6 +1,5 @@
-# Octomaton's CI: lint its own .octomaton.yaml, render and validate the hub's
-# deployment (deploy/) as written and as delivery deploys it, vet, test (with
-# the race detector) and build. A plain Tekton PipelineRun; Octomaton sets the
+# Octomaton's CI: lint its own .octomaton.yaml, render and validate deploy/
+# and deploy/logs/ as written, vet, test (with the race detector) and build. A plain Tekton PipelineRun; Octomaton sets the
 # params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun

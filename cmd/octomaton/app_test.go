@@ -38,6 +38,7 @@ func testConfig(t *testing.T, address string) *config.Config {
 		"OCTOMATON_GITHUB_APP_ID":         "123",
 		"OCTOMATON_GITHUB_PRIVATE_KEY":    string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})),
 		"OCTOMATON_GITHUB_WEBHOOK_SECRET": "s3cret",
+		"OCTOMATON_GITHUB_ALLOWED_OWNERS": "arikkfir-org",
 		"OCTOMATON_HTTP_ADDRESS":          address,
 		"OCTOMATON_RELAY_URLS":            "http://127.0.0.1:1/hooks",
 		"OCTOMATON_POD_NAME":              "octomaton-0",

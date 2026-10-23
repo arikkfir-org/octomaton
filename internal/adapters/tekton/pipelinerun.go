@@ -124,8 +124,8 @@ func parsePipelineRun(data []byte) (*unstructured.Unstructured, error) {
 	return parseDocument(data, kindPipelineRun)
 }
 
-// parseDocument parses a file holding exactly one tekton.dev/v1 object of kind, whose spec, when
-// there is one, is a mapping.
+// parseDocument parses a file holding exactly one object of kind, at a version apiVersions lists
+// for it, whose spec, when there is one, is a mapping.
 func parseDocument(data []byte, kind string) (*unstructured.Unstructured, error) {
 	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 	var docs [][]byte

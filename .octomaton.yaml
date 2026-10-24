@@ -16,18 +16,22 @@ pipelines:
     timeout: 30m
 
   # Publish the images of every push to main, tagged with the commit's short SHA (also the version the
-  # binaries report) and "main". There are no version tags. A host may deploy every commit on main with the images
-  # of that commit (deploy/), so release runs on every push: never give it a paths filter.
+  # binaries report) and "main", and of every version tag (v1.2.3, which publishing a GitHub release creates),
+  # tagged with the version. A host may deploy every commit on main with the images of that commit (deploy/), so
+  # release runs on every push: never give it a paths filter.
   - name: release
     pipelineRun: .tekton/release.yaml
     on:
       push:
         branches: [main]
+        tags: ["v*"]
     params:
       repo-url: "{{ .Repository.CloneURL }}"
       revision: "{{ .Revision }}"
+      tag: "{{ .Tag }}"
     timeout: 30m
-    # Pushes to main publish the "main" tag: only the newest waiting release may run.
+    # Pushes to main publish the "main" tag: only the newest waiting release may run. A tag's pushes form a group
+    # of their own.
     concurrency:
       group: "release-{{ .Ref }}"
       policy: latest

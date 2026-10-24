@@ -1,10 +1,13 @@
-# Octomaton's release: build and push the images of a commit on main with ko,
-# octomaton and octomaton-logs, each tagged with the commit's short SHA (also
-# the version the binaries report) and main. The pod authenticates to Artifact
-# Registry through Workload Identity
-# (ko's Google keychain uses Application Default Credentials) as
-# ci-octomaton-release, the one ServiceAccount allowed to push, which only main
-# may use (octomaton.dev/branches). Octomaton sets the params.
+# Octomaton's release: build and push the images of a commit with ko, octomaton
+# and octomaton-logs. A push to main publishes them tagged with the commit's
+# short SHA (also the version the binaries report) and main; a version tag
+# (v1.2.3, created by publishing a GitHub release) publishes them tagged with
+# the version, which the binaries then report, once the tagged commit is
+# confirmed to be on main. The pod authenticates to Artifact Registry through
+# Workload Identity (ko's Google keychain uses Application Default Credentials)
+# as ci-octomaton-release, the one ServiceAccount allowed to push, which only
+# main and v* tags may use (octomaton.dev/branches, octomaton.dev/tags).
+# Octomaton sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -33,6 +36,10 @@ spec:
       - name: revision
         type: string
         description: Commit to release.
+      - name: tag
+        type: string
+        description: The version tag pushed (v1.2.3); empty for a push to main.
+        default: ""
     workspaces:
       - name: source
     tasks:
@@ -45,6 +52,8 @@ spec:
             value: $(params.repo-url)
           - name: revision
             value: $(params.revision)
+          - name: tag
+            value: $(params.tag)
         workspaces:
           - name: source
             workspace: source
@@ -53,6 +62,8 @@ spec:
             - name: repo-url
               type: string
             - name: revision
+              type: string
+            - name: tag
               type: string
           workspaces:
             - name: source
@@ -79,39 +90,67 @@ spec:
                   value: $(params.repo-url)
                 - name: REVISION
                   value: $(params.revision)
+                - name: TAG
+                  value: $(params.tag)
+              # A version tag releases a commit of main only: pushing a tag takes write access, but merging a
+              # commit into main takes a review, and a release is the latter's.
               script: |
                 #!/bin/sh
                 set -eu
                 git init --quiet .
                 git remote add origin "$REPO_URL"
-                git fetch --quiet --depth=1 origin "$REVISION"
-                git checkout --quiet --detach FETCH_HEAD
+                if [ -z "$TAG" ]; then
+                  git fetch --quiet --depth=1 origin "$REVISION"
+                else
+                  git fetch --quiet origin "$REVISION" main
+                  if ! git merge-base --is-ancestor "$REVISION" origin/main; then
+                    echo "Tag $TAG points at $REVISION, which is not on main: not releasing it" >&2
+                    exit 1
+                  fi
+                fi
+                git checkout --quiet --detach "$REVISION"
             - name: publish
               image: golang:1.27.1
               env:
                 - name: REVISION
                   value: $(params.revision)
+                - name: TAG
+                  value: $(params.tag)
                 - name: KO_DOCKER_REPO
                   value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton
               script: |
                 #!/bin/sh
                 set -eu
-                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
+                if [ -z "$TAG" ]; then
+                  VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
+                  TAGS="$VERSION,main"
+                else
+                  VERSION="$TAG"
+                  TAGS="$TAG"
+                fi
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton
+                echo "Publishing $KO_DOCKER_REPO with tags $TAGS"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$TAGS" ./cmd/octomaton
             # The step logs server, from the same checkout and Go cache: Argo CD runs both images of every commit.
             - name: publish-logs
               image: golang:1.27.1
               env:
                 - name: REVISION
                   value: $(params.revision)
+                - name: TAG
+                  value: $(params.tag)
                 - name: KO_DOCKER_REPO
                   value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
               script: |
                 #!/bin/sh
                 set -eu
-                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
+                if [ -z "$TAG" ]; then
+                  VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
+                  TAGS="$VERSION,main"
+                else
+                  VERSION="$TAG"
+                  TAGS="$TAG"
+                fi
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton-logs
+                echo "Publishing $KO_DOCKER_REPO with tags $TAGS"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$TAGS" ./cmd/octomaton-logs

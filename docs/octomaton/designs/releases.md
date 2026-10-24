@@ -2,8 +2,9 @@
 
 **Decision**: besides the release of every commit on `main`, which pipeline `main` publishes tagged with the commit's
 short SHA, Octomaton has versions: a [GitHub release](https://github.com/arikkfir-org/octomaton/releases) with tag
-`v<version>` on a commit of `main`, titled `<version>`, whose notes list the pull requests since the previous version
-by kind, with their authors, and link the [installation guide](../installation.md) at that tag. Publishing the release
+`v<version>` on a commit of `main`, titled `<version>`, whose notes are GitHub's generated ones (the pull requests since
+the previous version, with their authors) plus a link to the [installation guide](../installation.md) at that tag.
+Publishing the release
 pushes the tag; pipeline `tag` adds the version to the tagged commit's images, rebuilding nothing: a version is the
 image `main` ran. A draft release has no tag, so it does nothing. `ci-octomaton-release` admits version tags
 through a second annotation, `octomaton.dev/tags`, which Octomaton checks as it checks `octomaton.dev/branches`. A

@@ -620,7 +620,7 @@ a release without a grant. Which release an installation runs is the host's choi
 
 | Release | Trigger | Image tags | Version the binaries report |
 | --- | --- | --- | --- |
-| Every commit on `main` | A push to `main` | The commit's short SHA (for example `afa6953`) and `main` | The short SHA |
+| Every commit on `main` | A push to `main` | The commit's short SHA (for example `afa6953`) | The short SHA |
 | A version, `1.2.3` | The tag `v1.2.3`, which publishing the [GitHub release](https://github.com/arikkfir-org/octomaton/releases) `1.2.3` creates | `v1.2.3` | `v1.2.3` |
 
 A version is a [GitHub release](https://github.com/arikkfir-org/octomaton/releases): tag `v<version>` on a commit of
@@ -633,8 +633,8 @@ tags may use (`octomaton.dev/branches`, `octomaton.dev/tags`). The version is al
 binaries' telemetry.
 
 The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
-commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, except
-for the `main` tag, and refuses uncommitted changes:
+commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, and
+refuses uncommitted changes:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev

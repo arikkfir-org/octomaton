@@ -44,7 +44,7 @@ sequenceDiagram
 | Piece | Where | What |
 | --- | --- | --- |
 | Trigger | `.octomaton.yaml`, pipeline `release` | `on.push` gains `tags: ["v*"]` beside `branches: [main]`; param `tag` is `{{ .Tag }}`, empty for a push to `main`. One pipeline, so a version is built exactly as a commit is |
-| Build | `.tekton/release.yaml` | With a tag: refuse anything but `vX.Y.Z` (ko takes a comma-separated tag list, and a Git tag may hold a comma, so `v1.2.3,main` would move `main`), fetch the commit and `main`, refuse a commit that is not an ancestor of `main`, and tag both images with the tag alone, as `VERSION`. Without: as before, the short SHA and `main` |
+| Build | `.tekton/release.yaml` | With a tag: refuse anything but `vX.Y.Z` (ko takes a comma-separated tag list, and a Git tag may hold a comma, so `v1.2.3,latest` would add a tag), fetch the commit and `main`, refuse a commit that is not an ancestor of `main`, and tag both images with the tag alone, as `VERSION`. Without: the short SHA alone; the floating `main` tag is gone, since a host pins a commit or a version |
 | Identity | `delivery`, `ci-octomaton-release` | `octomaton.dev/tags: v*` beside `octomaton.dev/branches: main` ([CI tenants](../../delivery/platform.md#ci-tenants)) |
 | Definitions | `adapters/github/events.go` | A tag push reads `.octomaton.yaml` and the PipelineRun at the default branch, like a comment command or a schedule, and runs the tagged commit. So a tag runs only reviewed definitions, in every repository |
 | Check | `adapters/tekton/serviceaccounts.go` | A ServiceAccount with either annotation is restricted: a branch's run must match a branch glob, a tag push a tag glob. Branches alone still refuse every tag push, as before; tags alone refuse every branch's run |

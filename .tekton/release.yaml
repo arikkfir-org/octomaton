@@ -128,7 +128,7 @@ spec:
                 set -eu
                 if [ -z "$TAG" ]; then
                   VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
-                  TAGS="$VERSION,main"
+                  TAGS="$VERSION"
                 else
                   VERSION="$TAG"
                   TAGS="$TAG"
@@ -151,7 +151,7 @@ spec:
                 set -eu
                 if [ -z "$TAG" ]; then
                   VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
-                  TAGS="$VERSION,main"
+                  TAGS="$VERSION"
                 else
                   VERSION="$TAG"
                   TAGS="$TAG"

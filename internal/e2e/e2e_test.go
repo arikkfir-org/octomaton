@@ -253,7 +253,7 @@ func TestEndToEnd(t *testing.T) {
 	if check.Status != "completed" || check.Conclusion != "success" || check.Title != "Succeeded in 2m0s" {
 		t.Fatalf("reported check = %+v", check)
 	}
-	if c, found, _ := github.DecodeMarker(check.Text); !found || c.PullRequest == nil || c.PullRequest.Number != 12 {
+	if c, found, _ := github.DecodeMarker(check.Summary); !found || c.PullRequest == nil || c.PullRequest.Number != 12 {
 		t.Fatalf("the completed check keeps its trigger context: %+v", c)
 	}
 

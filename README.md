@@ -356,7 +356,9 @@ event with placeholder values, so a template that only works for one event is re
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;
-  `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log.
+  `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log
+  (ANSI colour codes stripped: GitHub shows them as bytes; the Dashboard keeps them). A check without logs has no
+  details section.
 - Nothing from a run reaches GitHub with its secrets: failed steps' logs, `check-title`/`check-summary` and task
   failure messages lose every value of every Secret the PipelineRun references (its token Secret included), raw or
   base64-encoded, alone or inside a longer value, and anything shaped like a well-known credential (GitHub tokens,
@@ -367,7 +369,7 @@ event with placeholder values, so a template that only works for one event is re
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
 - Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
   refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's check otherwise.
-- Every check stores its trigger context in a hidden marker in its output, so **Re-run** works even after the
+- Every check stores its trigger context in a hidden marker in its summary, so **Re-run** works even after the
   PipelineRun was pruned. Re-running a pipeline's check always runs it (path filters are not re-applied; the requester
   needs write access); re-running `octomaton` re-evaluates the whole event.
 - Comment commands get a 👀 reaction when started, a 👎 and a reply when declined, and a reply with the result when done.

@@ -96,7 +96,7 @@ func TestDecodeMarkerUsesTheLastMarker(t *testing.T) {
 
 func TestWithMarkerKeepsTheMarkerWithinTheLimit(t *testing.T) {
 	trigger := sampleTrigger()
-	text := WithMarker(strings.Repeat("log line ✓\n", 20000), trigger)
+	text := WithMarker(strings.Repeat("log line ✓\n", 20000), MaxOutputLength, trigger)
 	if len(text) > MaxOutputLength {
 		t.Fatalf("text is %d bytes, over the limit", len(text))
 	}
@@ -107,7 +107,7 @@ func TestWithMarkerKeepsTheMarkerWithinTheLimit(t *testing.T) {
 	if !found || err != nil || got.Pipeline != "ci" {
 		t.Fatalf("marker lost in truncated text: %v %v", found, err)
 	}
-	if m, _ := Marker(trigger); WithMarker("", trigger) != m {
+	if m, _ := Marker(trigger); WithMarker("", MaxOutputLength, trigger) != m {
 		t.Fatalf("an empty text is just the marker")
 	}
 }

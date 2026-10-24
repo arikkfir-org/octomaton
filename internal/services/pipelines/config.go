@@ -627,7 +627,7 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 		case "":
 		case AllRepositories:
 			if headDefinitions {
-				add("githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository: a push, pull_request or merge_group trigger reads its definitions at the commit under test")
+				add("githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository: a push, pull_request or merge_group trigger may run definitions read at the commit under test")
 			}
 		default:
 			add("githubToken.repositories %q must be %s (or omitted for the run's repository)", gt.Repositories, AllRepositories)
@@ -635,7 +635,7 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 	}
 
 	if len(p.Secrets) > 0 && headDefinitions {
-		add("secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets: a push, pull_request or merge_group trigger reads its definitions at the commit under test")
+		add("secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets: a push, pull_request or merge_group trigger may run definitions read at the commit under test")
 	}
 	seenSecrets := map[string]bool{}
 	for i, name := range p.Secrets {

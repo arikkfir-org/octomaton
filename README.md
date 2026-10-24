@@ -193,7 +193,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
-| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
+| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -326,7 +326,7 @@ pipelines:
     params:
       number: "{{ .PullRequest.Number }}"
       revision: "{{ .Revision }}"
-    secrets: [model-api-key]                 # every trigger reads the default branch, so it may mount a Secret
+    secrets: [model-api-key]                 # every trigger is comment, review_request or schedule, so it may mount a Secret
 ```
 
 In the organization repository (`OCTOMATON_ORGANIZATION_REPOSITORY`), a pipeline every repository runs:

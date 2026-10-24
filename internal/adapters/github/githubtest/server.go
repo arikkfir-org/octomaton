@@ -116,6 +116,8 @@ type Server struct {
 	Comparisons map[string][]string
 	// Permissions maps "owner/repo:login" to a permission level.
 	Permissions map[string]string
+	// TeamMembers maps "org/team-slug" to the logins of its active members.
+	TeamMembers map[string][]string
 	failFiles   bool
 	failTokens  func(TokenRequest) bool
 
@@ -160,6 +162,7 @@ func NewServer(t testing.TB, appID int64) *Server {
 	mux.HandleFunc("GET /repos/{owner}/{repo}/check-runs/{id}", s.auth(s.getCheckRun))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/check-suites/{id}/check-runs", s.auth(s.listSuiteCheckRuns))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/collaborators/{user}/permission", s.auth(s.permission))
+	mux.HandleFunc("GET /orgs/{org}/teams/{team}/memberships/{user}", s.auth(s.teamMembership))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls/{number}", s.auth(s.getPullRequest))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", s.auth(s.getRef))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", s.auth(s.listRefCheckRuns))
@@ -636,6 +639,19 @@ func (s *Server) permission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"permission": level, "user": map[string]any{"login": r.PathValue("user")}})
+}
+
+func (s *Server) teamMembership(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	members := s.TeamMembers[r.PathValue("org")+"/"+r.PathValue("team")]
+	s.mu.Unlock()
+	for _, m := range members {
+		if strings.EqualFold(m, r.PathValue("user")) {
+			writeJSON(w, http.StatusOK, map[string]any{"state": "active", "role": "member"})
+			return
+		}
+	}
+	notFound(w)
 }
 
 func (s *Server) getPullRequest(w http.ResponseWriter, r *http.Request) {

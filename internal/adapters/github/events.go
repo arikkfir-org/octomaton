@@ -308,10 +308,12 @@ func commandEvent(ev *github.IssueCommentEvent, delivery string) (*ci.CommandEve
 	return c, ""
 }
 
-// firstLine returns the first line of a comment, trimmed.
+// firstLine returns the first line of a comment, trimmed, without the middle dots (U+00B7) a
+// proxy in front of some commenters' clients inserts into slash commands ("·/·t·est" for
+// "/test"), so that they can invoke commands: who may is the command's allow-list's decision.
 func firstLine(body string) string {
 	line, _, _ := strings.Cut(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
-	return strings.TrimSpace(line)
+	return strings.TrimSpace(strings.ReplaceAll(line, "\u00b7", ""))
 }
 
 // checkRunRerun accepts a re-run of one of the App's check runs.

@@ -42,7 +42,7 @@ organization:
     - name: format
       pipelineRun: .tekton/format.yaml
       on:
-        comment: {pattern: "^/format\\b"}
+        comment: {pattern: "^/format\\b", allow: {users: [maintainer]}}
 `
 
 // The organization pipelines' definitions, each told apart from the others and from ciRun.

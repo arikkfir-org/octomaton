@@ -35,7 +35,10 @@ pipelines:
         tags: ["v*"]                   # tag globs
         paths: []                      # optional
       comment:                         # pull request comment command, e.g. "/deploy staging"
-        pattern: "^/deploy\\b"         # regexp on the comment's first line; commenter needs write access
+        pattern: "^/deploy\\b"         # regexp on the comment's first line
+        allow:                         # required: who may invoke it
+          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request
         reviewers: [arikkfir-reviewer] # GitHub logins, case-insensitive; required
@@ -218,6 +221,16 @@ func TestParseProblems(t *testing.T) {
 		{name: "null comment", yaml: head + "  - name: ci\n    pipelineRun: a.yaml\n    on:\n      comment:\n", want: "on.comment.pattern is required"},
 		{name: "unanchored comment pattern", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: deploy}}}\n", want: "must start with ^/"},
 		{name: "invalid comment pattern", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/(deploy\"}}}\n", want: "on.comment.pattern"},
+		{name: "comment without an allow-list", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/x\"}}}\n", want: "on.comment.allow is required: name at least one user or team that may invoke the command"},
+		{name: "comment with an empty allow-list", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/x\", allow: {users: [], teams: []}}}}\n", want: "on.comment.allow is required"},
+		{name: "comment pattern matching the built-in /rerun with arguments", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/rerun\\\\s\", allow: {users: [octocat]}}}}\n", want: `on.comment.pattern "^/rerun\\s" matches /rerun, a built-in command`},
+		{name: "comment pattern matching the built-in /rerun", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/re\", allow: {users: [octocat]}}}}\n", want: `on.comment.pattern "^/re" matches /rerun, a built-in command`},
+		{name: "allowed user with a space", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/x\", allow: {users: [\"octo cat\"]}}}}\n", want: `on.comment.allow.users: "octo cat" is not a GitHub login`},
+		{name: "allowed team with its organization", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {comment: {pattern: \"^/x\", allow: {teams: [octo-org/deployers]}}}}\n", want: `on.comment.allow.teams: "octo-org/deployers" is not a team slug`},
+		{name: "rerun without an allow-list", yaml: "apiVersion: octomaton.dev/v1\npipelines: []\ncommands: {rerun: {}}\n", want: "commands.rerun.allow is required"},
+		{name: "rerun with an empty allow-list", yaml: "apiVersion: octomaton.dev/v1\npipelines: []\ncommands: {rerun: {allow: {}}}\n", want: "commands.rerun.allow is required"},
+		{name: "organization rerun without an allow-list", yaml: "apiVersion: octomaton.dev/v1\npipelines: []\norganization: {pipelines: [], commands: {rerun: {}}}\n", want: "organization.commands.rerun.allow is required"},
+		{name: "unknown command", yaml: "apiVersion: octomaton.dev/v1\npipelines: []\ncommands: {deploy: {allow: {users: [octocat]}}}\n", want: "field deploy not found in commands"},
 		{name: "bad cron", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"61 * * * *\"}]}}\n", want: "not a valid 5-field cron"},
 		{name: "cron with time zone", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"TZ=UTC 0 3 * * *\"}]}}\n", want: "time zones are not supported"},
 		{name: "empty cron", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {schedule: [{cron: \"\"}]}}\n", want: "cron is required"},
@@ -405,10 +418,10 @@ func TestDefaultBranchTriggers(t *testing.T) {
 	tests := []struct {
 		name, on string
 	}{
-		{"comment", `{comment: {pattern: "^/deploy"}}`},
+		{"comment", `{comment: {pattern: "^/deploy", allow: {users: [octocat]}}}`},
 		{"review_request", "{review_request: {reviewers: [octo-reviewer]}}"},
 		{"schedule", `{schedule: [{cron: "0 3 * * *"}]}`},
-		{"all three", `{comment: {pattern: "^/review"}, review_request: {reviewers: [octo-reviewer]}, schedule: [{cron: "0 3 * * *"}]}`},
+		{"all three", `{comment: {pattern: "^/review", allow: {users: [octocat]}}, review_request: {reviewers: [octo-reviewer]}, schedule: [{cron: "0 3 * * *"}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -456,7 +469,7 @@ func TestReviewRequestConcurrency(t *testing.T) {
 apiVersion: octomaton.dev/v1
 pipelines:
   - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-reviewer]}}}
-  - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy"}}}
+  - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy", allow: {users: [octocat]}}}}
 `)
 	tests := []struct {
 		pipeline, event string
@@ -565,6 +578,72 @@ organization:
 						t.Fatalf("ForRepository changed org's pipeline: %+v", p.PipelineRun)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestAllowsUser(t *testing.T) {
+	var none *Allow
+	allow := &Allow{Users: []string{"OctoCat", "deploy-bot"}, Teams: []string{"deployers"}}
+	tests := []struct {
+		name  string
+		allow *Allow
+		login string
+		want  bool
+	}{
+		{"a named user", allow, "octocat", true},
+		{"a bot", allow, "deploy-bot", true},
+		{"a user not named", allow, "mallory", false},
+		{"a team is not a user", allow, "deployers", false},
+		{"no allow-list", none, "octocat", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.allow.AllowsUser(tt.login); got != tt.want {
+				t.Fatalf("AllowsUser(%q) = %v, want %v", tt.login, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestForRepositoryCommands: a repository's own commands win; without them, the organization
+// repository's organization.commands apply to every repository, its own included.
+func TestForRepositoryCommands(t *testing.T) {
+	const own = "apiVersion: octomaton.dev/v1\npipelines: []\ncommands: {rerun: {allow: {users: [alice]}}}\n"
+	const plain = "apiVersion: octomaton.dev/v1\npipelines: []\n"
+	const org = "apiVersion: octomaton.dev/v1\npipelines: []\norganization: {pipelines: [], commands: {rerun: {allow: {teams: [maintainers]}}}}\n"
+	tests := []struct {
+		name       string
+		repository string
+		own, org   string
+		want       *Allow
+	}{
+		{name: "own commands", repository: "demo", own: own, org: org, want: &Allow{Users: []string{"alice"}}},
+		{name: "the organization's commands", repository: "demo", own: plain, org: org, want: &Allow{Teams: []string{"maintainers"}}},
+		{name: "the organization's commands without a file of its own", repository: "demo", org: org, want: &Allow{Teams: []string{"maintainers"}}},
+		{name: "the organization repository itself", repository: "tooling", own: org, org: org, want: &Allow{Teams: []string{"maintainers"}}},
+		{name: "no commands anywhere", repository: "demo", own: plain, org: plain},
+		{name: "no organization repository", repository: "demo", own: plain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse := func(doc string) *Config {
+				if doc == "" {
+					return nil
+				}
+				return mustParse(t, doc)
+			}
+			organization := "tooling"
+			if tt.org == "" {
+				organization = ""
+			}
+			cfg, err := ForRepository(tt.repository, organization, parse(tt.own), parse(tt.org))
+			if err != nil {
+				t.Fatalf("ForRepository: %v", err)
+			}
+			if got := cfg.RerunAllow(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("RerunAllow = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

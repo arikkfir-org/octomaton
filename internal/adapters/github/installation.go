@@ -162,6 +162,19 @@ func (c *installation) Permission(ctx context.Context, repo ci.Repository, user 
 	return ci.Permission(level.GetPermission()), nil
 }
 
+// TeamMember reads a user's membership of an organization's team; a team or membership GitHub
+// does not know is not a membership.
+func (c *installation) TeamMember(ctx context.Context, owner, team, user string) (bool, error) {
+	m, resp, err := c.gh.Teams.GetTeamMembershipBySlug(ctx, owner, team, user)
+	if err != nil {
+		if isNotFound(resp) {
+			return false, nil
+		}
+		return false, fmt.Errorf("fetching %s's membership of team %s/%s: %w", user, owner, team, err)
+	}
+	return m.GetState() == "active", nil
+}
+
 func (c *installation) React(ctx context.Context, repo ci.Repository, commentID int64, reaction string) error {
 	if _, _, err := c.gh.Reactions.CreateIssueCommentReaction(ctx, repo.Owner, repo.Name, commentID, reaction); err != nil {
 		return fmt.Errorf("reacting %s to comment %d: %w", reaction, commentID, err)

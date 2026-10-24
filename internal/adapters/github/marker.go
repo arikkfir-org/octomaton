@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/go-github/v92/github"
 	"octomaton.dev/internal/services/ci"
 )
 
@@ -61,18 +62,27 @@ func DecodeMarker(text string) (t ci.Trigger, found bool, err error) {
 	return t, true, nil
 }
 
-// WithMarker appends the trigger's marker to text, truncating text first so the result stays
-// within MaxOutputLength.
-func WithMarker(text string, t ci.Trigger) string {
+// WithMarker appends the trigger's marker to s, truncating s first so the result stays within
+// limit bytes.
+func WithMarker(s string, limit int, t ci.Trigger) string {
 	m, err := Marker(t)
 	if err != nil {
-		return Truncate(text, MaxOutputLength)
+		return Truncate(s, limit)
 	}
 	sep := "\n\n"
-	if text == "" {
+	if s == "" {
 		sep = ""
 	}
-	return Truncate(text, MaxOutputLength-len(m)-len(sep)) + sep + m
+	return Truncate(s, limit-len(m)-len(sep)) + sep + m
+}
+
+// outputMarker reads the trigger stored in a check run's output: in its summary, or, for check runs
+// written before the marker moved there, in its text.
+func outputMarker(out *github.CheckRunOutput) (t ci.Trigger, found bool, err error) {
+	if t, found, err = DecodeMarker(out.GetSummary()); found {
+		return t, found, err
+	}
+	return DecodeMarker(out.GetText())
 }
 
 // Truncate shortens s to at most limit bytes, never splitting a UTF-8 sequence, and ends it with a

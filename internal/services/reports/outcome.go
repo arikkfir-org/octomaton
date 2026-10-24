@@ -3,6 +3,7 @@ package reports
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -159,12 +160,25 @@ func (s *Service) failureLogs(ctx context.Context, run ci.Run, tasks []ci.Task) 
 				fmt.Fprintf(&b, "_Logs unavailable: %s._\n\n", strings.TrimSuffix(oneLine(err.Error()), "."))
 				continue
 			}
-			logs = truncateHead(logs, logLimitBytes)
+			logs = truncateHead(stripANSI(logs), logLimitBytes)
 			fence := codeFence(logs)
 			fmt.Fprintf(&b, "%stext\n%s\n%s\n\n", fence, strings.TrimRight(logs, "\n"), fence)
 		}
 	}
 	return b.String()
+}
+
+// ansiSequence matches ANSI CSI sequences (colours and cursor movement), which GitHub renders as
+// their bytes.
+var ansiSequence = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// stripANSI removes ANSI escape sequences from logs: a check run shows them verbatim, while the
+// logs the Dashboard shows keep them.
+func stripANSI(s string) string {
+	if !strings.Contains(s, "\x1b") {
+		return s
+	}
+	return ansiSequence.ReplaceAllString(s, "")
 }
 
 // elapsed is the time between start and end, or now when end is zero; zero without a start.

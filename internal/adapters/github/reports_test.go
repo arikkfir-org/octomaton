@@ -37,9 +37,10 @@ func TestReportLifecycle(t *testing.T) {
 		{
 			name: "opened",
 			check: func(cr githubtest.CheckRun) bool {
-				got, found, err := DecodeMarker(cr.Text)
+				got, found, err := DecodeMarker(cr.Summary)
 				return cr.Name == "ci" && cr.HeadSHA == "abc" && cr.Status == "queued" && cr.Title == "Queued" && cr.ExternalID == "ns/run" &&
-					cr.DetailsURL == "https://tekton.example/run" && found && err == nil && reflect.DeepEqual(got, trigger)
+					cr.DetailsURL == "https://tekton.example/run" && found && err == nil && reflect.DeepEqual(got, trigger) &&
+					strings.HasPrefix(cr.Summary, "**PipelineRun:** `ns/run`\n\n<!-- ") && cr.Text == ""
 			},
 		},
 		{
@@ -52,17 +53,17 @@ func TestReportLifecycle(t *testing.T) {
 		{
 			name:   "a status alone leaves the output",
 			update: ci.Report{Status: ci.StatusInProgress},
-			check:  func(cr githubtest.CheckRun) bool { return cr.Title == "Running" && cr.Summary == "s" },
+			check:  func(cr githubtest.CheckRun) bool { return cr.Title == "Running" && strings.HasPrefix(cr.Summary, "s\n\n<!-- ") },
 		},
 		{
 			name: "completed",
 			update: ci.Report{Status: ci.StatusCompleted, Conclusion: ci.Failure, Completed: completed, Title: "Failed", Summary: strings.Repeat("s", MaxOutputLength),
 				Text: strings.Repeat("l", MaxOutputLength), Trigger: &trigger},
 			check: func(cr githubtest.CheckRun) bool {
-				got, found, err := DecodeMarker(cr.Text)
+				got, found, err := DecodeMarker(cr.Summary)
 				return cr.Status == "completed" && cr.Conclusion == "failure" && cr.CompletedAt == "2026-01-02T03:05:05Z" &&
-					len(cr.Summary) <= MaxSummaryLength && strings.HasSuffix(cr.Summary, "_(truncated)_") &&
-					len(cr.Text) <= MaxOutputLength && found && err == nil && got.Pipeline == "ci"
+					len(cr.Summary) <= MaxOutputLength && strings.Contains(cr.Summary, "_(truncated)_\n\n<!-- ") &&
+					len(cr.Text) == MaxOutputLength && found && err == nil && got.Pipeline == "ci"
 			},
 		},
 	}
@@ -119,7 +120,8 @@ func TestReportTriggerAndSuiteReports(t *testing.T) {
 	app, srv := newApp(t)
 	trigger := sampleTrigger()
 	marker, _ := Marker(trigger)
-	withTrigger := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "ci", HeadSHA: "abc", Conclusion: "failure", Text: "logs\n\n" + marker})
+	withTrigger := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "ci", HeadSHA: "abc", Conclusion: "failure", Summary: "s\n\n" + marker})
+	inText := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "old", HeadSHA: "abc", Conclusion: "failure", Summary: "s", Text: "logs\n\n" + marker})
 	plain := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "other", HeadSHA: "abc", Text: "no marker"})
 	broken := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "broken", HeadSHA: "abc", Text: "<!-- octomaton:context:!!! -->"})
 	gh := app.Installation(installationID)
@@ -132,6 +134,7 @@ func TestReportTriggerAndSuiteReports(t *testing.T) {
 		wantErr bool
 	}{
 		{"a marker", withTrigger, &trigger, false},
+		{"a marker in the text, from before it moved to the summary", inText, &trigger, false},
 		{"no marker", plain, nil, false},
 		{"an unreadable marker", broken, nil, true},
 	}
@@ -145,7 +148,7 @@ func TestReportTriggerAndSuiteReports(t *testing.T) {
 	}
 
 	refs, err := gh.SuiteReports(ctx, repo, srv.SuiteID(fullName, "abc"))
-	if err != nil || len(refs) != 3 {
+	if err != nil || len(refs) != 4 {
 		t.Fatalf("SuiteReports = %+v, %v", refs, err)
 	}
 	byName := map[string]ci.ReportRef{}
@@ -155,7 +158,7 @@ func TestReportTriggerAndSuiteReports(t *testing.T) {
 	if ref := byName["ci"]; ref.ID != ci.ReportID(withTrigger) || ref.Revision != "abc" || ref.Conclusion != ci.Failure || !reflect.DeepEqual(ref.Trigger, &trigger) {
 		t.Fatalf("report ci = %+v", ref)
 	}
-	if byName["other"].Trigger != nil || byName["broken"].Trigger != nil {
+	if byName["other"].Trigger != nil || byName["broken"].Trigger != nil || !reflect.DeepEqual(byName["old"].Trigger, &trigger) {
 		t.Fatalf("reports without a readable marker must have no trigger: %+v", refs)
 	}
 }

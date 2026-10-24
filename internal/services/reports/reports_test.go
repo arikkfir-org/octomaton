@@ -237,7 +237,7 @@ func TestFinishFailureIncludesLogs(t *testing.T) {
 			FailedSteps: []ci.Step{{Name: "compile", ExitCode: 2, Logs: "pod/step-compile"}, {Name: "lint", ExitCode: 1}}},
 		{Name: "test", State: ci.TaskPending},
 	}})
-	h.runner.SetLogs("pod/step-compile", "fake logs\n")
+	h.runner.SetLogs("pod/step-compile", "\x1b[31m\x1b[0mfake \x1b[1;32mlogs\x1b[0m\n")
 
 	h.reconcile(run.ID)
 	r := h.report(id)

@@ -105,7 +105,7 @@ func (c *installation) ReportTrigger(ctx context.Context, repo ci.Repository, id
 		}
 		return nil, fmt.Errorf("fetching check run %d: %w", id, err)
 	}
-	t, found, err := DecodeMarker(cr.GetOutput().GetText())
+	t, found, err := outputMarker(cr.GetOutput())
 	if err != nil || !found {
 		return nil, err
 	}
@@ -140,26 +140,28 @@ func reportRef(cr *github.CheckRun) ci.ReportRef {
 		Revision:   cr.GetHeadSHA(),
 		Conclusion: ci.Conclusion(cr.GetConclusion()),
 	}
-	if t, found, err := DecodeMarker(cr.GetOutput().GetText()); found && err == nil {
+	if t, found, err := outputMarker(cr.GetOutput()); found && err == nil {
 		ref.Trigger = &t
 	}
 	return ref
 }
 
-// output is a report's check-run output: the summary within MaxSummaryLength, the text ending with
-// the trigger's marker. A report without any output sets none.
+// output is a report's check-run output: the summary within MaxSummaryLength, ending with the
+// trigger's marker, and the text within MaxOutputLength. The marker is in the summary, which every
+// report has, so a report without text sets none and GitHub shows no empty details section. A
+// report without any output sets none.
 func output(r ci.Report) *github.CheckRunOutput {
 	if r.Title == "" && r.Summary == "" && r.Text == "" && r.Trigger == nil {
 		return nil
 	}
-	text := Truncate(r.Text, MaxOutputLength)
+	summary := Truncate(r.Summary, MaxSummaryLength)
 	if r.Trigger != nil {
-		text = WithMarker(r.Text, *r.Trigger)
+		summary = WithMarker(summary, MaxOutputLength, *r.Trigger)
 	}
 	return &github.CheckRunOutput{
 		Title:   new(r.Title),
-		Summary: new(Truncate(r.Summary, MaxSummaryLength)),
-		Text:    new(text),
+		Summary: new(summary),
+		Text:    optional(Truncate(r.Text, MaxOutputLength)),
 	}
 }
 

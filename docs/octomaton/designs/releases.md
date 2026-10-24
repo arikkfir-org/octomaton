@@ -77,7 +77,9 @@ sequenceDiagram
 
 ## Rollout
 
-1. This pull request: the check, pipelines `main` and `tag`, the guide and this page (`octomaton`).
-2. `delivery`: `octomaton.dev/tags: v*` on `ci-octomaton-release`. Until it merges, a `v*` tag's run is refused,
-   and nothing is built.
-3. The first version is drafted on GitHub with generated notes, read, then published.
+1. arikkfir-org/octomaton#50 (merged, `59cf68d`): the check, pipelines `main` and `tag`, the guide and this page.
+2. arikkfir-org/delivery#81 (merged): `octomaton.dev/tags: v*` on `ci-octomaton-release`; before it, a `v*` tag's run
+   was refused.
+3. arikkfir-org/octomaton#55: the notes are GitHub's generated ones; the skill that drafted them is gone
+   (arikkfir-org/tooling#56).
+4. Still to do: the first version, drafted on GitHub with generated notes, read, then published.

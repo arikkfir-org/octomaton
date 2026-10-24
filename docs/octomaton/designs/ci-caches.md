@@ -6,7 +6,8 @@ builds what `ci` compiles, then saves `main`'s cache. `ci` restores its pull req
 pull request has none, and saves the pull request's own, under `pull-requests/<number>/`; a merge group's run restores
 `main`'s and saves nothing. Only `main` writes `main`'s cache, so no branch can change what `main` builds the images
 from, and a pull request's next run starts from what its last one compiled. Tracked in
-[ENG-184](https://linear.app/arikkfir/issue/ENG-184). Fin's CI cache works the same way, except that its pull requests
+[ENG-184](https://linear.app/arikkfir/issue/ENG-184), delivered by
+[octomaton#54](https://github.com/arikkfir-org/octomaton/pull/54). Fin's CI cache works the same way, except that its pull requests
 save nothing ([Fin's CI cache](../../fin/designs/ci-caches.md)).
 
 ```mermaid
@@ -62,19 +63,25 @@ through `curlimages/curl`; no key and no Secret.
 
 ## Trust
 
-A pull request's run can write any pull request's archive, its own and others', since one principal runs them all, and
-a build output planted there could change what another pull request's `ci` runs. What it writes reaches only pull
-requests' runs, never a merge group's, which restores `main`'s: the check that admits a change to `main` builds from
-`main`'s cache. `main` and the images it publishes read only `main`'s archive, which only `ci-octomaton-release`, on
-`main`, writes. `ci` runs every test (`-count=1`), so no archive holds a passing result it
-reuses. The caches hold nothing secret: Go's
-build outputs and the modules `go.sum` names, which Go checks against `go.sum` when it unpacks them.
+What protects `main` is that only `main`'s own pipeline writes `main`'s archive: `ci-octomaton-release`, which only
+`main` (and `v*` tags) may use, running definitions read at `main`, which a pull request reaches only through review
+and the merge queue. `main` and the images it publishes read only that archive.
+
+Every run of `ci` is a pull request's code: the merge queue's too, since Octomaton reads `.octomaton.yaml` and
+`.tekton/ci.yaml` at the commit under test, the merge result. A pull request can therefore point any of its runs, its
+merge group's included, at any archive `ci-octomaton-ci` may read, or change its pipeline in any other way; reading
+`main`'s archive in merge groups is the pipeline's default, not a boundary. One principal runs every pull request's
+`ci`, so a pull request's run can also write another pull request's archive, and a build output planted there could
+change what that pull request's `ci` runs. Both are no more than what a pull request can already do to its own checks,
+which review covers. `ci` runs every test (`-count=1`), so no archive holds a passing result it reuses. The caches hold
+nothing secret: Go's build outputs and the modules `go.sum` names, which Go checks against `go.sum` when it unpacks
+them.
 
 ## Rollout
 
 1. `infra`: the bucket, with its lifecycle, and its grants. Applied on merge. Until then, restore and save log that
    they can't reach it, and the runs pass.
-2. `delivery`: ServiceAccount `ci-octomaton-ci` in tenant `ci-octomaton`. Until Argo CD syncs it, Octomaton can't
-   create a run that names it.
+2. `delivery`: ServiceAccount `ci-octomaton-ci` in tenant `ci-octomaton`. Until Argo CD syncs it, a run that names it
+   is created and Tekton fails it before any step.
 3. `octomaton`: this design, `ci` as `ci-octomaton-ci` with `restore` and `save`, `main` with `restore`, ko's binary,
    `warm` and `save`. Its own `ci` needs step 2 first. `main`'s first run after the merge saves `main`'s cache.

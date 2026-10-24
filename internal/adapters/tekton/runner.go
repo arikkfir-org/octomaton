@@ -122,8 +122,8 @@ func (r *Runner) checkSecretSource(ctx context.Context, spec ci.RunSpec) error {
 	}
 	name := runName(spec.Trigger.Repository.Name, spec.Trigger.Pipeline, spec.Trigger.Revision, 1)
 	for _, secret := range src.Names {
-		if len(copySecretName(name, secret)) > maxSecretNameLength {
-			return refusal("Secret `%s` cannot be copied for the run: `%s` is longer than %d characters.", secret, copySecretName(name, secret), maxSecretNameLength)
+		if copy := copySecretName(name, secret, newNonce()); len(copy) > maxSecretNameLength {
+			return refusal("Secret `%s` cannot be copied for the run: its copy's name (`%s`) is longer than %d characters.", secret, copy, maxSecretNameLength)
 		}
 		s, err := r.client().Secret(ctx, ns, secret)
 		if err != nil {
@@ -169,7 +169,11 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 		return ci.Run{}, err
 	}
 	name := runName(t.Repository.Name, t.Pipeline, t.Revision, attempt)
-	in := renderInput{Namespace: ns, Name: name, Params: spec.Params, Timeout: spec.Timeout, Labels: runLabels(spec), Annotations: runAnnotations(spec, attempt), Held: true}
+	copied := spec.SecretSource()
+	if copied != nil {
+		copied.Nonce = newNonce()
+	}
+	in := renderInput{Namespace: ns, Name: name, Params: spec.Params, Timeout: spec.Timeout, Labels: runLabels(spec), Annotations: runAnnotations(spec, attempt, copied), Held: true}
 	token := ""
 	if spec.Token != nil {
 		in.TokenWorkspace, token = spec.Token.Workspace, tokenSecretName(name)
@@ -178,10 +182,10 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 	if err != nil {
 		return ci.Run{}, refusal("%v", err)
 	}
-	// A run mounts copies of the Secrets of another namespace, named after it.
+	// A run mounts copies of the Secrets of another namespace, named after it and the nonce.
 	declared := spec.Secrets
-	if spec.SecretSource() != nil {
-		copies := copySecretNames(name, spec.Secrets)
+	if copied != nil {
+		copies := copySecretNames(name, *copied)
 		renameSecrets(pr.Object, copies)
 		declared = slices.Sorted(maps.Values(copies))
 	}
@@ -231,8 +235,9 @@ func runLabels(spec ci.RunSpec) map[string]string {
 
 func slotLabel(slot time.Time) string { return strconv.FormatInt(slot.Unix(), 10) }
 
-// runAnnotations record the rest of what a run is.
-func runAnnotations(spec ci.RunSpec, attempt int) map[string]string {
+// runAnnotations record the rest of what a run is; secrets is the source of its copied Secrets,
+// with their nonce, or nil.
+func runAnnotations(spec ci.RunSpec, attempt int, secrets *ci.SecretSource) map[string]string {
 	t := spec.Trigger
 	if t.Version == 0 {
 		t.Version = ci.TriggerVersion
@@ -260,8 +265,8 @@ func runAnnotations(spec ci.RunSpec, attempt int) map[string]string {
 	if spec.TaskReports {
 		a[annotationTaskChecks] = "true"
 	}
-	if src := spec.SecretSource(); src != nil {
-		if data, err := json.Marshal(src); err == nil {
+	if secrets != nil {
+		if data, err := json.Marshal(secrets); err == nil {
 			a[annotationSecrets] = string(data)
 		}
 	}

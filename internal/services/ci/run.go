@@ -186,13 +186,17 @@ func (s RunSpec) SecretSource() *SecretSource {
 }
 
 // SecretSource is where a run's Secrets come from when they are not its own namespace's: the runner
-// copies each into the run's namespace as a Secret owned by the run, named after the run and the
-// Secret, and the run mounts the copies.
+// copies each into the run's namespace as a Secret owned by the run, named after the run, the
+// Secret and Nonce, and the run mounts the copies.
 type SecretSource struct {
 	// Repository is the repository whose runs' namespace holds the Secrets.
 	Repository Repository `json:"repository"`
 	// Names are the Secrets.
 	Names []string `json:"names"`
+	// Nonce is a random string in the copies' names, set by the runner when it creates the run, so
+	// that no other pipeline of the namespace can name the copies: a run's name is public, and
+	// a copy lives as long as its run.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 // RunQuery selects runs. Zero fields select everything.

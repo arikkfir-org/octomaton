@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
+	"octomaton.dev/internal/services/ci"
 	"sigs.k8s.io/yaml"
 )
 
@@ -316,8 +317,8 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	renameSecrets(pr.Object, copySecretNames("run", []string{"registry-creds", "volume-secret", "projected-secret", "env-secret", "envfrom-secret", "unused"}))
-	want := []string{"run-env-secret", "run-envfrom-secret", "run-github-token", "run-projected-secret", "run-registry-creds", "run-volume-secret"}
+	renameSecrets(pr.Object, copySecretNames("run", ci.SecretSource{Names: []string{"registry-creds", "volume-secret", "projected-secret", "env-secret", "envfrom-secret", "unused"}, Nonce: "n"}))
+	want := []string{"run-env-secret-n", "run-envfrom-secret-n", "run-github-token", "run-projected-secret-n", "run-registry-creds-n", "run-volume-secret-n"}
 	if got := secrets(pr.Object); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Secrets after the rename = %v, want %v", got, want)
 	}

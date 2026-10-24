@@ -8,6 +8,7 @@ package tekton
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"octomaton.dev/internal/services/ci"
 	"sigs.k8s.io/yaml"
 )
 
@@ -225,16 +227,28 @@ func tokenSecretName(pipelineRunName string) string {
 // maxSecretNameLength bounds a Secret's name (a DNS subdomain).
 const maxSecretNameLength = 253
 
-// copySecretName is the name of a run's copy of a Secret of another namespace.
-func copySecretName(pipelineRunName, secret string) string {
-	return pipelineRunName + "-" + secret
+// nonceBytes is the length of the random part of a copied Secret's name, before hex encoding.
+const nonceBytes = 8
+
+// newNonce returns the random part of a run's copied Secrets' names: 16 hex characters.
+func newNonce() string {
+	b := make([]byte, nonceBytes)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-// copySecretNames maps each Secret a run gets a copy of to the copy's name.
-func copySecretNames(pipelineRunName string, secrets []string) map[string]string {
-	copies := make(map[string]string, len(secrets))
-	for _, name := range secrets {
-		copies[name] = copySecretName(pipelineRunName, name)
+// copySecretName is the name of a run's copy of a Secret of another namespace:
+// <run>-<secret>-<nonce>. The nonce keeps the name from being guessed from the run's, which is
+// public, so no other pipeline of the namespace can list the copy in its secrets.
+func copySecretName(pipelineRunName, secret, nonce string) string {
+	return pipelineRunName + "-" + secret + "-" + nonce
+}
+
+// copySecretNames maps each Secret of src to the name of the run's copy.
+func copySecretNames(pipelineRunName string, src ci.SecretSource) map[string]string {
+	copies := make(map[string]string, len(src.Names))
+	for _, name := range src.Names {
+		copies[name] = copySecretName(pipelineRunName, name, src.Nonce)
 	}
 	return copies
 }

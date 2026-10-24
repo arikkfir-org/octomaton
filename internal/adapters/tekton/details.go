@@ -244,8 +244,8 @@ func (r *Runner) SetToken(ctx context.Context, run ci.Run, t ci.Token) error {
 }
 
 // CopySecrets copies the Secrets of another namespace a run mounts into the run's namespace, each
-// owned by the run and named after it (copySecretName): a point-in-time copy, which lives as long as
-// the run. A copy that exists already is kept.
+// owned by the run and named after it and the run's nonce (copySecretName): a point-in-time copy,
+// which lives as long as the run. A copy that exists already is kept.
 func (r *Runner) CopySecrets(ctx context.Context, run ci.Run) error {
 	if run.Secrets == nil {
 		return nil
@@ -255,9 +255,13 @@ func (r *Runner) CopySecrets(ctx context.Context, run ci.Run) error {
 	if err != nil {
 		return fmt.Errorf("determining the namespace of %s: %w", run.Secrets.Repository.FullName, err)
 	}
+	if run.Secrets.Nonce == "" {
+		return fmt.Errorf("run %s does not know the names of its copied Secrets", run.ID)
+	}
 	var pr *unstructured.Unstructured
 	for _, name := range run.Secrets.Names {
-		existing, err := c.Secret(ctx, run.ID.Tenant, copySecretName(run.ID.Name, name))
+		copy := copySecretName(run.ID.Name, name, run.Secrets.Nonce)
+		existing, err := c.Secret(ctx, run.ID.Tenant, copy)
 		if err != nil {
 			return err
 		}
@@ -279,7 +283,7 @@ func (r *Runner) CopySecrets(ctx context.Context, run ci.Run) error {
 				return ci.ErrNotFound
 			}
 		}
-		if err := c.CreateSecretCopy(ctx, pr, src); err != nil && !apierrors.IsAlreadyExists(err) {
+		if err := c.CreateSecretCopy(ctx, pr, copy, src); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
 		}
 	}

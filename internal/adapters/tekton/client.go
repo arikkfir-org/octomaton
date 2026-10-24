@@ -201,13 +201,13 @@ func (c *kubeClient) Secret(ctx context.Context, namespace, name string) (*corev
 	return s, nil
 }
 
-// CreateSecretCopy creates a run's copy of src in the run's namespace: the same type and data, owned
-// by the run so it is deleted with it. The error is the API's, so an existing copy reads as
-// AlreadyExists.
-func (c *kubeClient) CreateSecretCopy(ctx context.Context, run *unstructured.Unstructured, src *corev1.Secret) error {
+// CreateSecretCopy creates a run's copy of src in the run's namespace, named name: the same type
+// and data, owned by the run so it is deleted with it. The error is the API's, so an existing copy
+// reads as AlreadyExists.
+func (c *kubeClient) CreateSecretCopy(ctx context.Context, run *unstructured.Unstructured, name string, src *corev1.Secret) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        copySecretName(run.GetName(), src.Name),
+			Name:        name,
 			Namespace:   run.GetNamespace(),
 			Labels:      map[string]string{labelManagedBy: managedByValue, labelPipeline: run.GetLabels()[labelPipeline], labelRepositoryID: run.GetLabels()[labelRepositoryID]},
 			Annotations: map[string]string{annotationRepository: run.GetAnnotations()[annotationRepository], annotationSecretSource: src.Namespace + "/" + src.Name},

@@ -502,7 +502,7 @@ func TestSecretCopies(t *testing.T) {
 	t.Run("too long a copy name", func(t *testing.T) {
 		h := newRunnerHarness(t)
 		long := spec
-		long.Secrets = []string{strings.Repeat("k", 250)}
+		long.Secrets = []string{strings.Repeat("k", 220)}
 		var refusal *ci.Refusal
 		if err := h.r.Check(ctx, long); !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, "longer than 253 characters") {
 			t.Fatalf("Check = %v, want a refusal for the name", err)
@@ -517,17 +517,27 @@ func TestSecretCopies(t *testing.T) {
 			t.Fatalf("Check: %v", err)
 		}
 		run := h.create(spec, 1)
-		want := &ci.SecretSource{Repository: tooling, Names: []string{"api-key"}}
+		// The copy's name holds a nonce no other pipeline can guess from the run's name, which is
+		// public; the run records it, and the PipelineRun references the copy.
+		nonce := run.Secrets.Nonce
+		if len(nonce) != 2*nonceBytes || h.get(run.ID).Secrets.Nonce != nonce {
+			t.Fatalf("nonce = %q, want %d hex characters recorded on the run", nonce, 2*nonceBytes)
+		}
+		want := &ci.SecretSource{Repository: tooling, Names: []string{"api-key"}, Nonce: nonce}
 		if !reflect.DeepEqual(run.Secrets, want) || !reflect.DeepEqual(h.get(run.ID).Secrets, want) {
 			t.Fatalf("run.Secrets = %+v, want %+v", run.Secrets, want)
 		}
-		if got, want := secrets(h.object(run.ID).Object), []string{"demo-ci-1111111-1-api-key", "demo-ci-1111111-1-github-token"}; !reflect.DeepEqual(got, want) {
+		copy := "demo-ci-1111111-1-api-key-" + nonce
+		if got, want := secrets(h.object(run.ID).Object), []string{copy, "demo-ci-1111111-1-github-token"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("the PipelineRun references %v, want %v", got, want)
+		}
+		if other := h.create(spec, 2); other.Secrets.Nonce == nonce {
+			t.Fatalf("two runs got the same nonce %q", nonce)
 		}
 		if err := h.r.CopySecrets(ctx, run); err != nil {
 			t.Fatalf("CopySecrets: %v", err)
 		}
-		secret, err := h.kube.CoreV1().Secrets(demoNS).Get(ctx, "demo-ci-1111111-1-api-key", metav1.GetOptions{})
+		secret, err := h.kube.CoreV1().Secrets(demoNS).Get(ctx, copy, metav1.GetOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -544,7 +554,7 @@ func TestSecretCopies(t *testing.T) {
 		if err := h.r.CopySecrets(ctx, run); err != nil {
 			t.Fatalf("CopySecrets again: %v", err)
 		}
-		secret, _ = h.kube.CoreV1().Secrets(demoNS).Get(ctx, "demo-ci-1111111-1-api-key", metav1.GetOptions{})
+		secret, _ = h.kube.CoreV1().Secrets(demoNS).Get(ctx, copy, metav1.GetOptions{})
 		if string(secret.Data["key"]) != "k1" {
 			t.Fatalf("the copy was replaced: %q", secret.Data["key"])
 		}
@@ -556,6 +566,41 @@ func TestSecretCopies(t *testing.T) {
 		}
 		if err := h.r.CopySecrets(ctx, run); err == nil || !strings.Contains(err.Error(), "Secret api-key is not in namespace ci-tooling") {
 			t.Fatalf("CopySecrets without the source = %v, want an error", err)
+		}
+		forgotten := run
+		forgotten.Secrets = &ci.SecretSource{Repository: tooling, Names: []string{"api-key"}}
+		if err := h.r.CopySecrets(ctx, forgotten); err == nil || !strings.Contains(err.Error(), "does not know the names") {
+			t.Fatalf("CopySecrets without the nonce = %v, want an error", err)
+		}
+	})
+	t.Run("a repository pipeline cannot name a copy", func(t *testing.T) {
+		// A copy's name is the run's, the Secret's and a nonce; a pipeline that lists a name
+		// guessed from a run's name finds no Secret, so its pods never start, and a name that
+		// exists was not guessable: every copy is created after its run, with a fresh nonce.
+		h := newRunnerHarness(t)
+		if _, err := h.kube.CoreV1().Secrets("ci-tooling").Create(ctx, source, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		run := h.create(spec, 1)
+		if err := h.r.CopySecrets(ctx, run); err != nil {
+			t.Fatalf("CopySecrets: %v", err)
+		}
+		guessed := spec
+		guessed.SecretsFrom = nil
+		guessed.Secrets = []string{"demo-ci-1111111-1-api-key"}
+		guessed.Definition = []byte(demoDef + "  workspaces:\n    - {name: key, secret: {secretName: demo-ci-1111111-1-api-key}}\n")
+		other := h.create(guessed, 2)
+		if names := secrets(h.object(other.ID).Object); slices.ContainsFunc(names, func(n string) bool { return strings.HasSuffix(n, run.Secrets.Nonce) }) {
+			t.Fatalf("the guessing run references a copy: %v", names)
+		}
+		list, err := h.kube.CoreV1().Secrets(demoNS).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range list.Items {
+			if s.Name == "demo-ci-1111111-1-api-key" {
+				t.Fatalf("a Secret with the guessed name exists: %+v", s)
+			}
 		}
 	})
 	t.Run("a repository pipeline's Secrets are its own namespace's", func(t *testing.T) {

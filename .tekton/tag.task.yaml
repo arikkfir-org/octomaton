@@ -5,74 +5,74 @@ kind: Task
 metadata:
   name: tag
 spec:
-    params:
-      - name: repo-url
-        type: string
-      - name: revision
-        type: string
-      - name: tag
-        type: string
-    workspaces:
-      - name: source
-    stepTemplate:
-      workingDir: $(workspaces.source.path)
-      computeResources:
-        requests:
-          cpu: 100m
-          memory: 128Mi
-        limits:
-          memory: 512Mi
-    steps:
-      # A version names a commit of main only: pushing a tag takes write access, but merging a commit into
-      # main takes a review, and a version is the latter's.
-      - name: check
-        image: alpine/git:2.54.0
-        env:
-          - name: REPO_URL
-            value: $(params.repo-url)
-          - name: REVISION
-            value: $(params.revision)
-          - name: TAG
-            value: $(params.tag)
-        script: |
-          #!/bin/sh
-          set -eu
-          case "$TAG" in
-            v[0-9]*.[0-9]*.[0-9]*) echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Tag $TAG is not a version (vX.Y.Z): ignoring it" >&2; exit 1; } ;;
-            *) echo "Tag $TAG is not a version (vX.Y.Z): ignoring it" >&2; exit 1 ;;
-          esac
-          git init --quiet .
-          git remote add origin "$REPO_URL"
-          git fetch --quiet origin "$REVISION" main
-          if ! git merge-base --is-ancestor "$REVISION" origin/main; then
-            echo "Tag $TAG points at $REVISION, which is not on main: not a version" >&2
-            exit 1
-          fi
-      # The commit's images may still be building when its tag arrives: wait for them, then add the tag.
-      - name: retag
-        image: gcr.io/google.com/cloudsdktool/google-cloud-cli:587.0.0-slim
-        env:
-          - name: REVISION
-            value: $(params.revision)
-          - name: TAG
-            value: $(params.tag)
-          - name: REGISTRY
-            value: me-west1-docker.pkg.dev/arikkfir/octomaton
-        script: |
-          #!/bin/sh
-          set -eu
-          SHA=$(printf '%s' "$REVISION" | cut -c1-7)
-          for image in octomaton octomaton-logs; do
-            tries=0
-            until gcloud artifacts docker images describe "$REGISTRY/$image:$SHA" --quiet >/dev/null 2>&1; do
-              tries=$((tries + 1))
-              if [ "$tries" -gt 60 ]; then
-                echo "$REGISTRY/$image:$SHA is not published after 15 minutes: did main's build fail?" >&2
-                exit 1
-              fi
-              echo "Waiting for $REGISTRY/$image:$SHA"
-              sleep 15
-            done
-            echo "Tagging $REGISTRY/$image:$SHA as $TAG"
-            gcloud artifacts docker tags add "$REGISTRY/$image:$SHA" "$REGISTRY/$image:$TAG" --quiet
+  params:
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+    - name: tag
+      type: string
+  workspaces:
+    - name: source
+  stepTemplate:
+    workingDir: $(workspaces.source.path)
+    computeResources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  steps:
+    # A version names a commit of main only: pushing a tag takes write access, but merging a commit into
+    # main takes a review, and a version is the latter's.
+    - name: check
+      image: alpine/git:2.54.0
+      env:
+        - name: REPO_URL
+          value: $(params.repo-url)
+        - name: REVISION
+          value: $(params.revision)
+        - name: TAG
+          value: $(params.tag)
+      script: |
+        #!/bin/sh
+        set -eu
+        case "$TAG" in
+          v[0-9]*.[0-9]*.[0-9]*) echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Tag $TAG is not a version (vX.Y.Z): ignoring it" >&2; exit 1; } ;;
+          *) echo "Tag $TAG is not a version (vX.Y.Z): ignoring it" >&2; exit 1 ;;
+        esac
+        git init --quiet .
+        git remote add origin "$REPO_URL"
+        git fetch --quiet origin "$REVISION" main
+        if ! git merge-base --is-ancestor "$REVISION" origin/main; then
+          echo "Tag $TAG points at $REVISION, which is not on main: not a version" >&2
+          exit 1
+        fi
+    # The commit's images may still be building when its tag arrives: wait for them, then add the tag.
+    - name: retag
+      image: gcr.io/google.com/cloudsdktool/google-cloud-cli:587.0.0-slim
+      env:
+        - name: REVISION
+          value: $(params.revision)
+        - name: TAG
+          value: $(params.tag)
+        - name: REGISTRY
+          value: me-west1-docker.pkg.dev/arikkfir/octomaton
+      script: |
+        #!/bin/sh
+        set -eu
+        SHA=$(printf '%s' "$REVISION" | cut -c1-7)
+        for image in octomaton octomaton-logs; do
+          tries=0
+          until gcloud artifacts docker images describe "$REGISTRY/$image:$SHA" --quiet >/dev/null 2>&1; do
+            tries=$((tries + 1))
+            if [ "$tries" -gt 60 ]; then
+              echo "$REGISTRY/$image:$SHA is not published after 15 minutes: did main's build fail?" >&2
+              exit 1
+            fi
+            echo "Waiting for $REGISTRY/$image:$SHA"
+            sleep 15
           done
+          echo "Tagging $REGISTRY/$image:$SHA as $TAG"
+          gcloud artifacts docker tags add "$REGISTRY/$image:$SHA" "$REGISTRY/$image:$TAG" --quiet
+        done

@@ -44,7 +44,7 @@ sequenceDiagram
 | Piece | Where | What |
 | --- | --- | --- |
 | Trigger | `.octomaton.yaml`, pipeline `release` | `on.push` gains `tags: ["v*"]` beside `branches: [main]`; param `tag` is `{{ .Tag }}`, empty for a push to `main`. One pipeline, so a version is built exactly as a commit is |
-| Build | `.tekton/release.yaml` | With a tag: fetch the commit and `main`, refuse a commit that is not an ancestor of `main`, and tag both images with the tag alone, as `VERSION`. Without: as before, the short SHA and `main` |
+| Build | `.tekton/release.yaml` | With a tag: refuse anything but `vX.Y.Z` (ko takes a comma-separated tag list, and a Git tag may hold a comma, so `v1.2.3,main` would move `main`), fetch the commit and `main`, refuse a commit that is not an ancestor of `main`, and tag both images with the tag alone, as `VERSION`. Without: as before, the short SHA and `main` |
 | Identity | `delivery`, `ci-octomaton-release` | `octomaton.dev/tags: v*` beside `octomaton.dev/branches: main` ([CI tenants](../../delivery/platform.md#ci-tenants)) |
 | Check | `adapters/tekton/serviceaccounts.go` | A ServiceAccount with either annotation is restricted: a branch's run must match a branch glob, a tag push a tag glob. Branches alone still refuse every tag push, as before; tags alone refuse every branch's run |
 | Release | GitHub releases | Tag `v<version>`, title `<version>`, notes from the skill's template: a section per kind of change with an emoji, each pull request as its title, link and `@author`, the compare link to the previous version, the images, and the installation guide at the tag |

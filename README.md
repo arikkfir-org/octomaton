@@ -411,7 +411,7 @@ event with placeholder values, so a template that only works for one event is re
   refuses every tag push, and one annotated with tags alone every branch's run. Without either annotation, every run
   may use the ServiceAccount; an empty or invalid one lets none. The check fails closed: a named ServiceAccount
   Octomaton can't read (other than one that doesn't exist, which Tekton fails) refuses the run too. A run that names no
-  ServiceAccount runs as Tekton's default, which is never checked. These are the one setting outside
+  ServiceAccount runs as Tekton's default, which is never checked. These are the only settings outside
   `.octomaton.yaml`: they sit on the identity, where the repository can't change them.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service accounts, except those restricted to other branches.
@@ -625,7 +625,7 @@ A version is a [GitHub release](https://github.com/arikkfir-org/octomaton/releas
 [installing Octomaton](docs/octomaton/installation.md) at that tag. The hub's `octomaton-release` skill drafts them
 ([tooling](https://github.com/arikkfir-org/tooling)). GitHub creates the tag when the release is published, not when
 it is drafted, so a draft release builds nothing; publishing it pushes the tag, and `release` publishes the images.
-`release` refuses a tag whose commit is not on `main`, and runs as `ci-octomaton-release`, which only `main` and `v*`
+`release` refuses a tag that is not a version (`vX.Y.Z` exactly) or whose commit is not on `main`, and runs as `ci-octomaton-release`, which only `main` and `v*`
 tags may use (`octomaton.dev/branches`, `octomaton.dev/tags`). The version is also the `service.version` of the
 binaries' telemetry.
 

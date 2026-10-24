@@ -10,9 +10,9 @@
   organization repository's), the PipelineRun files they reference, and the Pipeline, Task and StepAction files a
   PipelineRun references by name beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`, `<name>.step.yaml`), which
   it inlines before it checks the run.
-- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the
-  `octomaton.dev/branches` annotation on a tenant ServiceAccount, which the cluster's owner sets to restrict it to
-  branches. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
+- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the pair
+  of annotations `octomaton.dev/branches` and `octomaton.dev/tags` on a tenant ServiceAccount, which the cluster's
+  owner sets to restrict it to branches and to tags. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
   Octomaton writes on its own objects.
 - PipelineRun files, and the files they reference, stay plain Tekton YAML, valid against Tekton's schemas: no
   templating inside them, no syntax of Octomaton's own. Context goes in only through `params` (Go templates over the
@@ -119,7 +119,8 @@
 ## Commands
 
 - `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
-- Releases have no version tags: every push to `main` publishes the images tagged with the commit's short SHA, which is
-  also the version the binaries report.
+- Every push to `main` publishes the images tagged with the commit's short SHA, which is also the version the binaries
+  report. A version is a GitHub release whose tag `vX.Y.Z` runs the same `release` pipeline, publishing the images
+  tagged `vX.Y.Z` (`docs/octomaton/designs/releases.md`); the pipeline refuses any other tag or a commit not on `main`.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

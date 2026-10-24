@@ -85,7 +85,7 @@ The full schema and template context are in the
 
 ## Tenancy and identity
 
-**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it. The annotation sits on the identity, in `delivery`, where a pull request can't change it, and it is the one Octomaton setting outside `.octomaton.yaml`.
+**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it (and `octomaton.dev/tags: v*` where it also releases versions, [versioned releases](releases.md)). The annotations sit on the identity, in `delivery`, where a pull request can't change them, and they are the only Octomaton settings outside `.octomaton.yaml`.
 
 ```mermaid
 flowchart LR

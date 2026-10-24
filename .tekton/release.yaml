@@ -2,8 +2,8 @@
 # and octomaton-logs. A push to main publishes them tagged with the commit's
 # short SHA (also the version the binaries report) and main; a version tag
 # (v1.2.3, created by publishing a GitHub release) publishes them tagged with
-# the version, which the binaries then report, once the tagged commit is
-# confirmed to be on main. The pod authenticates to Artifact Registry through
+# the version, which the binaries then report, once the tag is confirmed to
+# be a version (vX.Y.Z, nothing else) and the tagged commit to be on main. The pod authenticates to Artifact Registry through
 # Workload Identity (ko's Google keychain uses Application Default Credentials)
 # as ci-octomaton-release, the one ServiceAccount allowed to push, which only
 # main and v* tags may use (octomaton.dev/branches, octomaton.dev/tags).
@@ -102,6 +102,11 @@ spec:
                 if [ -z "$TAG" ]; then
                   git fetch --quiet --depth=1 origin "$REVISION"
                 else
+                  # ko takes a comma-separated tag list, and a Git tag may hold a comma: only a version is built.
+                  case "$TAG" in
+                    v[0-9]*.[0-9]*.[0-9]*) echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Tag $TAG is not a version (vX.Y.Z): not releasing it" >&2; exit 1; } ;;
+                    *) echo "Tag $TAG is not a version (vX.Y.Z): not releasing it" >&2; exit 1 ;;
+                  esac
                   git fetch --quiet origin "$REVISION" main
                   if ! git merge-base --is-ancestor "$REVISION" origin/main; then
                     echo "Tag $TAG points at $REVISION, which is not on main: not releasing it" >&2

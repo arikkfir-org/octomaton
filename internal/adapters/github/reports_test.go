@@ -53,7 +53,9 @@ func TestReportLifecycle(t *testing.T) {
 		{
 			name:   "a status alone leaves the output",
 			update: ci.Report{Status: ci.StatusInProgress},
-			check:  func(cr githubtest.CheckRun) bool { return cr.Title == "Running" && strings.HasPrefix(cr.Summary, "s\n\n<!-- ") },
+			check: func(cr githubtest.CheckRun) bool {
+				return cr.Title == "Running" && strings.HasPrefix(cr.Summary, "s\n\n<!-- ")
+			},
 		},
 		{
 			name: "completed",

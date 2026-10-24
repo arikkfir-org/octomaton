@@ -72,13 +72,15 @@ servers read their settings from objects the host writes, by name. A host provid
 | A [GitHub App](#github-app), installed on the owners it serves, its webhook at `https://<host>/github/hooks` | Created by hand, once |
 | Secret `octomaton-github` in namespace `octomaton`, keys `app-id`, `private-key` and `webhook-secret` | However the host makes Secrets: an ExternalSecret, a sealed Secret, `kubectl create secret` |
 | ConfigMap `octomaton` in namespace `octomaton`: the [server's settings](#server-configuration) as environment variables; `OCTOMATON_GITHUB_ALLOWED_OWNERS` is required | Plain YAML in the host's repository |
-| `deploy/` applied as written, at a commit of its choosing, the image `me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton` tagged with that commit's short SHA ([releases](#releases)) | An Argo CD Application with `kustomize.images`, or `kustomize edit set image` and `kubectl apply -k` |
+| `deploy/` applied as written, at a release of its choosing (a version tag, or a commit of `main`), the image `me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton` tagged with that version or that commit's short SHA ([releases](#releases)) | An Argo CD Application with `kustomize.images`, or `kustomize edit set image` and `kubectl apply -k` |
 | A route from the webhook's URL to Service `octomaton`, port 80, path `/github/hooks` | An HTTPRoute, an Ingress; whatever fronts the cluster |
 | Network admission to the pods labelled `app.kubernetes.io/name: octomaton`, port 8080, from the route's proxy, if the cluster has NetworkPolicies | A NetworkPolicy in namespace `octomaton` |
 | RoleBinding `octomaton` of ClusterRole `octomaton-tenant` to ServiceAccount `octomaton/octomaton` in every namespace runs are created in ([RBAC](#deployment)) | With the tenant namespaces |
 | Optionally `deploy/logs/`, applied the same way at the same commit, the image `…/octomaton-logs` tagged the same; ConfigMap `octomaton-logs` with the [step logs server's settings](#archived-step-logs-octomaton-logs); a cloud identity for ServiceAccount `octomaton/octomaton-logs` that reads the log view; admission from the Dashboard's pods to the pods labelled `app.kubernetes.io/name: octomaton-logs`, port 8080; and the Dashboard's external logs URL, `http://octomaton-logs.octomaton.svc.cluster.local/logs` | A second Application, a ConfigMap, a Workload Identity binding, a NetworkPolicy, a Dashboard setting |
 | Additions to `deploy/`'s objects: labels on the Namespace, annotations on the ServiceAccounts (a Workload Identity binding), node selectors and tolerations on the Deployments | Kustomize patches, in the Application's `kustomize.patches` or an overlay |
 | Validation of `deploy/` as the host renders it | The host's CI renders `deploy/` with its options; this repository's validates `deploy/` as written only |
+
+Step by step, with the commands: [installing Octomaton](docs/octomaton/installation.md).
 
 Both Deployments restart when their ConfigMap or Secret changes (Reloader's `reloader.stakater.com/auto`), where the
 host runs Reloader. A missing ConfigMap or Secret holds the pod in `CreateContainerConfigError` until the host provides
@@ -133,12 +135,11 @@ pipelines:
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
-                                       # one; only when every trigger reads definitions from a default branch, or in
+                                       # one; only when every trigger is comment, review_request or schedule, or in
                                        # an organization pipeline
     secrets: []                        # optional: Secrets it may mount, of the run's namespace (of the organization
-                                       # repository's in an organization pipeline); only when every trigger reads
-                                       # definitions from a default branch (comment, review_request, schedule), or
-                                       # in an organization pipeline
+                                       # repository's in an organization pipeline); only when every trigger is
+                                       # comment, review_request or schedule, or in an organization pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
     concurrency:                       # optional; default for pull_request and review_request:
                                        # group "pr-<number>", policy supersede
@@ -171,10 +172,10 @@ comparison `before...after` for pushes; `base...head` for merge groups). A file 
 changed files cannot be determined (a new branch or tag, an API error, more files than GitHub lists), the filters are
 ignored and the pipeline runs.
 
-**Where definitions are read:** pull requests, merge groups and pushes read `.octomaton.yaml` and the PipelineRun file
-at the commit under test. Comment commands, review requests and schedules read them from the default branch (comment
-commands and review requests still run against the pull request's head commit, so a pull request cannot change what
-they run). A `pipelineRun` in another repository is always read at that repository's default branch. The files a
+**Where definitions are read:** pull requests, merge groups and pushes to branches read `.octomaton.yaml` and the
+PipelineRun file at the commit under test. Tag pushes, comment commands, review requests and schedules read them from
+the default branch (a tag's run and a comment command's still run against the tagged commit or the pull request's head
+commit, so neither a tag nor a pull request can change what runs: a tag names any commit, reviewed or not). A `pipelineRun` in another repository is always read at that repository's default branch. The files a
 PipelineRun references by name ([below](#pipeline-task-and-stepaction-files)) are read where it was.
 
 **Organization pipelines:** the organization repository, which `OCTOMATON_ORGANIZATION_REPOSITORY` names (`tooling` in
@@ -200,7 +201,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
-| `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
+| `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -333,7 +334,7 @@ pipelines:
     params:
       number: "{{ .PullRequest.Number }}"
       revision: "{{ .Revision }}"
-    secrets: [model-api-key]                 # every trigger reads the default branch, so it may mount a Secret
+    secrets: [model-api-key]                 # every trigger is comment, review_request or schedule, so it may mount a Secret
 ```
 
 In the organization repository (`OCTOMATON_ORGANIZATION_REPOSITORY`), a pipeline every repository runs:
@@ -416,7 +417,7 @@ from forks get no answer at all ([Security](#security)).
   from the repository's own branches run automatically: pushing a branch there takes write access.
 - A run may mount no Secret other than the token Octomaton binds and those its pipeline lists in `secrets` (volumes,
   workspaces, projected sources, `env` and `envFrom` are checked). Only an organization pipeline, or a pipeline whose
-  every trigger reads its definitions from the default branch, may list any, so definitions at a pull request's head
+  every trigger is `comment`, `review_request` or `schedule`, may list any, so definitions at a pull request's head
   never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
   pull request of the owner, Dependabot's included: it must never run the pull request's code. An organization
   pipeline's Secrets are read from the organization repository's namespace, so a host needs them in no other
@@ -441,15 +442,20 @@ from forks get no answer at all ([Security](#security)).
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
   name. Their runs get the repository's namespace and token, like its own, and copies of the Secrets they list.
-- A ServiceAccount in a tenant namespace may carry the annotation `octomaton.dev/branches`: comma-separated branch
-  globs, as in `on.push.branches`. A run that names it (`spec.taskRunTemplate.serviceAccountName` or
-  `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch matches one. The run's branch is the branch
-  whose code runs: the pushed branch, a pull request's head branch (also for comment commands and review requests),
-  the merge group's branch, or the default branch for schedules; a tag push has none and matches nothing. Without the
-  annotation, every branch may use the ServiceAccount; an empty or invalid one lets none. The check fails closed: a
-  named ServiceAccount Octomaton can't read (other than one that doesn't exist, which Tekton fails) refuses the run
-  too. A run that names no ServiceAccount runs as Tekton's default, which is never checked. This is the one setting
-  outside `.octomaton.yaml`: it sits on the identity, where the repository can't change it.
+- A tag push runs the definitions of the default branch, never the tagged commit's: pushing a tag takes only write
+  access and can name any commit, so a tag could otherwise run an unreviewed pipeline, with the identities the
+  tenant's ServiceAccounts admit for tags.
+- A ServiceAccount in a tenant namespace may carry the annotations `octomaton.dev/branches` and `octomaton.dev/tags`:
+  comma-separated branch globs, as in `on.push.branches`, and tag globs, as in `on.push.tags`. A run that names it
+  (`spec.taskRunTemplate.serviceAccountName` or `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch
+  matches a branch glob or, for a tag push, its tag matches a tag glob. The run's branch is the branch whose code runs:
+  the pushed branch, a pull request's head branch (also for comment commands and review requests), the merge group's
+  branch, or the default branch for schedules; a tag push has none, so a ServiceAccount annotated with branches alone
+  refuses every tag push, and one annotated with tags alone every branch's run. Without either annotation, every run
+  may use the ServiceAccount; an empty or invalid one lets none. The check fails closed: a named ServiceAccount
+  Octomaton can't read (other than one that doesn't exist, which Tekton fails) refuses the run too. A run that names no
+  ServiceAccount runs as Tekton's default, which is never checked. These are the only settings outside
+  `.octomaton.yaml`: they sit on the identity, where the repository can't change them.
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service accounts, except those restricted to other branches.
 
@@ -583,7 +589,7 @@ repository (served by `delivery`'s `go-import`, which answers for every hub modu
 go install octomaton.dev/cmd/octomaton-lint@latest
 ```
 
-Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as the release pipeline does.
+Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as pipeline `main` does.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
@@ -645,17 +651,34 @@ services. The layering itself is tested by `internal/architecture`, which fails 
 
 ## Releases
 
-Every commit on `main` is a release, named by its short SHA; there are no version tags. Octomaton builds itself:
-`.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated, vet, race tests, build) on pull requests and in
-the merge queue, and `release` on pushes to `main`. `release` publishes the images `octomaton` and `octomaton-logs` to
-`me-west1-docker.pkg.dev/arikkfir/octomaton/`, a public repository of Octomaton's own
-([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), each tagged with the
-commit's short SHA (for example `afa6953`) and `main`, so any installation pulls a release without a grant. The same short SHA is the version the binaries report and the `service.version` of their telemetry. Which tag an
-installation runs is the host's choice ([Hosting Octomaton](#hosting-octomaton)).
+Octomaton is released two ways, both from `main` and both by Octomaton itself
+([design](docs/octomaton/designs/releases.md)). `.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated,
+vet, race tests, build) on pull requests and in the merge queue, `main` on pushes to `main` and `tag` on version tags.
+`main` publishes the images `octomaton` and `octomaton-logs` to `me-west1-docker.pkg.dev/arikkfir/octomaton/`, a
+public repository of Octomaton's own
+([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), so any installation pulls
+a release without a grant. Which release an installation runs is the host's choice
+([installing Octomaton](docs/octomaton/installation.md)).
+
+| Release | Trigger | Pipeline | Image tags |
+| --- | --- | --- | --- |
+| Every commit on `main` | A push to `main` | `main` builds and pushes the images | The commit's short SHA (for example `afa6953`), also the version the binaries report |
+| A version, `1.2.3` | The tag `v1.2.3`, which publishing the [GitHub release](https://github.com/arikkfir-org/octomaton/releases) `1.2.3` creates | `tag` adds the tag to the tagged commit's images; nothing is rebuilt | `v1.2.3`, on the same images as the commit's short SHA |
+
+A version is a [GitHub release](https://github.com/arikkfir-org/octomaton/releases): tag `v<version>` on a commit of
+`main`, titled `<version>`, with notes that list the pull requests since the previous version by kind and link
+[installing Octomaton](docs/octomaton/installation.md) at that tag. The hub's `octomaton-release` skill drafts them
+([tooling](https://github.com/arikkfir-org/tooling)). GitHub creates the tag when the release is published, not when
+it is drafted, so a draft release does nothing; publishing it pushes the tag, and `tag` waits for the commit's images
+(`main` may still be building them) and tags them with the version. A version is therefore the very image `main`
+ran, and the binaries keep reporting the commit's short SHA (`service.version` in their telemetry): the version is a
+name in the registry and on GitHub. `tag` refuses a tag that is not a version (`vX.Y.Z` exactly) or whose commit is
+not on `main`. Both pipelines run as `ci-octomaton-release`, which only `main` and `v*` tags may use
+(`octomaton.dev/branches`, `octomaton.dev/tags`).
 
 The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
-commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, except
-for the `main` tag, and refuses uncommitted changes:
+commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way `main` would, and
+refuses uncommitted changes:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev

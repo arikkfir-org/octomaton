@@ -96,6 +96,8 @@ func TestDecodeReasons(t *testing.T) {
 	forkReviewRequest.PullRequest.Head.Repo = ghRepo("stranger")
 	noDefaultBranch := reviewRequest("octo-reviewer", "", "open")
 	noDefaultBranch.Repo.DefaultBranch = nil
+	tagNoDefaultBranch := pushEvent("refs/tags/v1", sha1, false)
+	tagNoDefaultBranch.Repo.DefaultBranch = nil
 	mergeGroup := func(action string) *github.MergeGroupEvent {
 		return &github.MergeGroupEvent{Action: new(action), Reason: new("dequeued"), Repo: ghRepo(owner), Installation: installation,
 			MergeGroup: &github.MergeGroup{HeadSHA: new(sha1), HeadRef: new("refs/heads/gh-readonly-queue/main/x"), BaseRef: new("refs/heads/main")}}
@@ -109,6 +111,7 @@ func TestDecodeReasons(t *testing.T) {
 	}{
 		{"push to a branch", "push", pushEvent("refs/heads/main", sha1, false), "", "push octo-org/demo@1111111"},
 		{"push of a tag", "push", pushEvent("refs/tags/v1", sha1, false), "", "push octo-org/demo@1111111"},
+		{"push of a tag without a default branch", "push", tagNoDefaultBranch, "no default branch in payload", ""},
 		{"deleted branch", "push", pushEvent("refs/heads/main", "0000000000000000000000000000000000000000", true), "ref was deleted", ""},
 		{"merge queue branch", "push", pushEvent("refs/heads/gh-readonly-queue/main/pr-1-abc", sha1, false), "push to a merge queue branch (merge_group events cover it)", ""},
 		{"notes ref", "push", pushEvent("refs/notes/x", sha1, false), "ref is neither a branch nor a tag", ""},
@@ -209,12 +212,13 @@ func TestDecodeEvents(t *testing.T) {
 		want    ci.Event
 	}{
 		{
-			name: "a tag push runs the tagged commit", event: "push", payload: tag,
+			name: "a tag push runs the tagged commit with the default branch's configuration", event: "push", payload: tag,
 			want: &ci.TriggerEvent{Trigger: ci.Trigger{
 				Version: ci.TriggerVersion, Event: ci.EventPush, DeliveryID: "d", InstallationID: installationID,
 				Repository: ci.Repository{ID: repoID, Owner: owner, Name: repoName, FullName: owner + "/" + repoName, DefaultBranch: "main"},
 				Revision:   sha1, Ref: "refs/tags/v1.0.0", Tag: "v1.0.0", Sender: "alice",
-				Push: &ci.Push{Before: baseSHA, After: "7777777777777777777777777777777777777777", Created: true},
+				Push:      &ci.Push{Before: baseSHA, After: "7777777777777777777777777777777777777777", Created: true},
+				ConfigRef: "main",
 			}},
 		},
 		{

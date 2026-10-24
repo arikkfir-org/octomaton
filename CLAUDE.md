@@ -10,9 +10,9 @@
   organization repository's), the PipelineRun files they reference, and the Pipeline, Task and StepAction files a
   PipelineRun references by name beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`, `<name>.step.yaml`), which
   it inlines before it checks the run.
-- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the
-  `octomaton.dev/branches` annotation on a tenant ServiceAccount, which the cluster's owner sets to restrict it to
-  branches. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
+- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the pair
+  of annotations `octomaton.dev/branches` and `octomaton.dev/tags` on a tenant ServiceAccount, which the cluster's
+  owner sets to restrict it to branches and to tags. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
   Octomaton writes on its own objects.
 - PipelineRun files, and the files they reference, stay plain Tekton YAML, valid against Tekton's schemas: no
   templating inside them, no syntax of Octomaton's own. Context goes in only through `params` (Go templates over the
@@ -90,7 +90,7 @@
   node pool; AppProject `octomaton` admits only namespace `octomaton`, Octomaton's own ClusterRoles and
   ClusterRoleBinding, and the namespaced kinds `deploy/` holds, so a new kind or cluster-scoped object needs `delivery`
   changed first. Secrets only through the host; a NetworkPolicy is the host's too.
-- `release` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
+- `main` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
   images of whatever commit `main` is at.
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
   single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
@@ -115,7 +115,9 @@
 ## Commands
 
 - `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
-- Releases have no version tags: every push to `main` publishes the images tagged with the commit's short SHA, which is
-  also the version the binaries report.
+- Every push to `main` publishes the images tagged with the commit's short SHA, which is also the version the binaries
+  report (pipeline `main`). A version is a GitHub release whose tag `vX.Y.Z` runs pipeline `tag`, which adds the tag
+  to the commit's images without rebuilding (`docs/octomaton/designs/releases.md`); a tag push runs the default
+  branch's definitions, and `tag` refuses any other tag or a commit not on `main`.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

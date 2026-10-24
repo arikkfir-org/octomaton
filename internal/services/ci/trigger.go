@@ -116,7 +116,7 @@ type Trigger struct {
 	ReviewRequest  *ReviewRequest `json:"reviewRequest,omitempty"`
 	Schedule       *Schedule      `json:"schedule,omitempty"`
 	// ConfigRef is the ref .octomaton.yaml and pipeline definitions are read at: the default branch
-	// for comment commands and review requests, the revision otherwise.
+	// for tag pushes, comment commands and review requests, the revision otherwise.
 	ConfigRef string `json:"configRef,omitempty"`
 	RerunBy   string `json:"rerunBy,omitempty"`
 }

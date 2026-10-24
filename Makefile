@@ -1,4 +1,4 @@
-# The version is the commit's short SHA, as the release pipeline tags it.
+# The version is the commit's short SHA, as pipeline main tags it.
 VERSION        ?= $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-7),dev)
 IMAGES         ?= me-west1-docker.pkg.dev/arikkfir/octomaton
 GO             ?= go

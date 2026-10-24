@@ -1,21 +1,22 @@
-# Octomaton's release: build and push the images of a commit on main with ko,
-# octomaton and octomaton-logs, each tagged with the commit's short SHA (also
-# the version the binaries report) and main. The pod authenticates to Artifact
-# Registry through Workload Identity
-# (ko's Google keychain uses Application Default Credentials) as
-# ci-octomaton-release, the one ServiceAccount allowed to push, which only main
-# may use (octomaton.dev/branches). Octomaton sets the params.
+# Octomaton's build of main: build and push the images of a commit with ko,
+# octomaton and octomaton-logs, tagged with the commit's short SHA (also the
+# version the binaries report). A version (a v* tag) adds its tag to these
+# images: .tekton/tag.yaml. The pod authenticates to Artifact Registry through
+# Workload Identity (ko's Google keychain uses Application Default Credentials)
+# as ci-octomaton-release, the one ServiceAccount allowed to push, which only
+# main and v* tags may use (octomaton.dev/branches, octomaton.dev/tags).
+# Octomaton sets the params.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: octomaton-release-
+  generateName: octomaton-main-
 spec:
   taskRunTemplate:
     serviceAccountName: ci-octomaton-release
   # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
   # ko's build peaked at 2.5Gi and 3.7 cores.
   taskRunSpecs:
-    - pipelineTaskName: release
+    - pipelineTaskName: build
       computeResources:
         requests:
           cpu: "3"
@@ -36,7 +37,7 @@ spec:
     workspaces:
       - name: source
     tasks:
-      - name: release
+      - name: build
         # A lost node (an upgrade or a repair) kills the build. Argo CD runs the images of every commit on main, so try
         # again: pushing the same tags twice is harmless.
         retries: 2
@@ -85,7 +86,7 @@ spec:
                 git init --quiet .
                 git remote add origin "$REPO_URL"
                 git fetch --quiet --depth=1 origin "$REVISION"
-                git checkout --quiet --detach FETCH_HEAD
+                git checkout --quiet --detach "$REVISION"
             - name: publish
               image: golang:1.27.1
               env:
@@ -98,8 +99,8 @@ spec:
                 set -eu
                 VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton
+                echo "Publishing $KO_DOCKER_REPO:$VERSION"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION" ./cmd/octomaton
             # The step logs server, from the same checkout and Go cache: Argo CD runs both images of every commit.
             - name: publish-logs
               image: golang:1.27.1
@@ -113,5 +114,5 @@ spec:
                 set -eu
                 VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $VERSION and main"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION,main" ./cmd/octomaton-logs
+                echo "Publishing $KO_DOCKER_REPO:$VERSION"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION" ./cmd/octomaton-logs

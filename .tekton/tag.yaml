@@ -1,0 +1,54 @@
+# Octomaton's version: a v* tag (v1.2.3, created by publishing a GitHub
+# release) adds its name to the images of the tagged commit, which
+# .tekton/main.yaml published under the commit's short SHA; nothing is
+# rebuilt, so a version is the very image main ran. The tag must be a
+# version (vX.Y.Z, nothing else) and the commit on main. The pod
+# authenticates to Artifact Registry through Workload Identity as
+# ci-octomaton-release, which only main and v* tags may use
+# (octomaton.dev/branches, octomaton.dev/tags). Octomaton sets the params
+# and inlines the task from tag.task.yaml.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: octomaton-tag-
+spec:
+  taskRunTemplate:
+    serviceAccountName: ci-octomaton-release
+  taskRunSpecs:
+    - pipelineTaskName: tag
+      computeResources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+  workspaces:
+    - name: source
+      emptyDir: {}
+  pipelineSpec:
+    params:
+      - name: repo-url
+        type: string
+        description: Git URL of the repository.
+      - name: revision
+        type: string
+        description: The tagged commit.
+      - name: tag
+        type: string
+        description: The version tag pushed (v1.2.3).
+    workspaces:
+      - name: source
+    tasks:
+      - name: tag
+        params:
+          - name: repo-url
+            value: $(params.repo-url)
+          - name: revision
+            value: $(params.revision)
+          - name: tag
+            value: $(params.tag)
+        workspaces:
+          - name: source
+            workspace: source
+        taskRef:
+          name: tag

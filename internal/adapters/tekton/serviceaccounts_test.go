@@ -26,6 +26,18 @@ func TestServiceAccountBranches(t *testing.T) {
 	annotated := func(value string) *corev1.ServiceAccount {
 		return &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "deployer", Namespace: demoNS, Annotations: map[string]string{annotationBranches: value}}}
 	}
+	withTags := func(branches, tags string) *corev1.ServiceAccount {
+		sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "deployer", Namespace: demoNS, Annotations: map[string]string{annotationTags: tags}}}
+		if branches != "" {
+			sa.Annotations[annotationBranches] = branches
+		}
+		return sa
+	}
+	onTag := func(tag string) ci.Trigger {
+		tr := pushTrigger(shaA)
+		tr.Ref, tr.Branch, tr.Tag = "refs/tags/"+tag, "", tag
+		return tr
+	}
 	plain := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "deployer", Namespace: demoNS}}
 	tests := []struct {
 		name     string
@@ -47,7 +59,20 @@ func TestServiceAccountBranches(t *testing.T) {
 		{name: "a matching glob among several", def: asTemplate, trigger: onBranch("release/1.2"), sa: annotated("main, release/*")},
 		{name: "a glob does not cross a slash", def: asTemplate, trigger: onBranch("release/1/2"), sa: annotated("main,release/*"),
 			wantText: "branches matching \"main\", \"release/*\""},
-		{name: "a tag push", def: asTemplate, trigger: tagPush, sa: annotated("*"), wantText: "this run has no branch"},
+		{name: "a tag push", def: asTemplate, trigger: tagPush, sa: annotated("*"), wantText: "this run is of tag \"v1\""},
+		{name: "a tag push on a ServiceAccount restricted to branches", def: asTemplate, trigger: onTag("v1.2.0"), sa: annotated("main"),
+			wantText: "names ServiceAccount `deployer`, which only runs on branches matching \"main\" may use (its `octomaton.dev/branches` annotation), and this run is of tag \"v1.2.0\""},
+		{name: "a matching tag", def: asTemplate, trigger: onTag("v1.2.0"), sa: withTags("", "v*")},
+		{name: "a matching tag beside branches", def: asTemplate, trigger: onTag("v1.2.0"), sa: withTags("main", "v*")},
+		{name: "main beside tags", def: asTemplate, trigger: onBranch("main"), sa: withTags("main", "v*")},
+		{name: "a tag that matches no glob", def: asTemplate, trigger: onTag("nightly"), sa: withTags("main", "v*"),
+			wantText: "which only runs on branches matching \"main\" or of tags matching \"v*\" may use (its `octomaton.dev/branches` and `octomaton.dev/tags` annotations), and this run is of tag \"nightly\""},
+		{name: "a branch on a ServiceAccount restricted to tags", def: asTemplate, trigger: onBranch("main"), sa: withTags("", "v*"),
+			wantText: "which only runs of tags matching \"v*\" may use (its `octomaton.dev/tags` annotation), and this run is on branch \"main\""},
+		{name: "a tag glob does not cross a slash", def: asTemplate, trigger: onTag("v1/2"), sa: withTags("", "v*"), wantText: "this run is of tag \"v1/2\""},
+		{name: "an empty tags annotation", def: asTemplate, trigger: onTag("v1.0.0"), sa: withTags("", " "), wantText: "`octomaton.dev/tags` annotation lists no tag, so no run may use it"},
+		{name: "empty branches and tags annotations", def: asTemplate, trigger: onTag("v1.0.0"), sa: withTags(" ", ""), wantText: "`octomaton.dev/branches` and `octomaton.dev/tags` annotations list no branch or tag, so no run may use it"},
+		{name: "an invalid tag glob", def: asTemplate, trigger: onTag("v1.0.0"), sa: withTags("", "v["), wantText: "has an invalid `octomaton.dev/tags` annotation"},
 		{name: "an empty annotation", def: asTemplate, trigger: onBranch("main"), sa: annotated(" , "), wantText: "annotation lists no branch, so no run may use it"},
 		{name: "an invalid glob", def: asTemplate, trigger: onBranch("main"), sa: annotated("main,["), wantText: "has an invalid `octomaton.dev/branches` annotation"},
 		{name: "a ServiceAccount that cannot be read", def: asTemplate, trigger: onBranch("main"), failGet: true, wantText: "Could not read ServiceAccount `ci-demo/deployer`"},

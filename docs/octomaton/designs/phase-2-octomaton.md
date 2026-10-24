@@ -85,7 +85,7 @@ The full schema and template context are in the
 
 ## Tenancy and identity
 
-**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it. The annotation sits on the identity, in `delivery`, where a pull request can't change it, and it is the one Octomaton setting outside `.octomaton.yaml`.
+**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it (and `octomaton.dev/tags: v*` where it also releases versions, [versioned releases](releases.md)). The annotations sit on the identity, in `delivery`, where a pull request can't change them, and they are the only Octomaton settings outside `.octomaton.yaml`.
 
 ```mermaid
 flowchart LR
@@ -107,19 +107,19 @@ flowchart LR
 
 ### ServiceAccounts
 
-| Tenant | ServiceAccount | `octomaton.dev/branches` | Google Cloud | Named by |
-| --- | --- | --- | --- | --- |
-| every | `pipeline` | none | nothing | every run that names no other |
-| every | `docs-reader` | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
-| every | `docs-publisher` | `main` | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
-| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
-| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
-| `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `octomaton` | this repository's `release` |
-| `ci-fin` | `ci-fin-release` | `main` | writes repository `images` and Fin's CI cache | fin's `release` |
-| `ci-fin` | `ci-fin-preview` | none | writes repository `previews`, reads the CI cache | fin's `preview` |
-| `ci-fin` | `ci-fin-ci` | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
-| `ci-infra` | `ci-infra-plan` | none | reads the project, the state and the plan's credentials | infra's `ci` |
-| `ci-infra` | `ci-infra-apply` | `main` | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
+| Tenant | ServiceAccount | `octomaton.dev/branches` | `octomaton.dev/tags` | Google Cloud | Named by |
+| --- | --- | --- | --- | --- | --- |
+| every | `pipeline` | none | none | nothing | every run that names no other |
+| every | `docs-reader` | none | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
+| every | `docs-publisher` | `main` | none | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
+| every | `reviewer` | none | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
+| `ci-tooling` | `ci-tooling-publish` | `main` | none | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
+| `ci-octomaton` | `ci-octomaton-release` | `main` | `v*` | writes repository `octomaton` | this repository's `main` and `tag` ([versioned releases](releases.md)) |
+| `ci-fin` | `ci-fin-release` | `main` | none | writes repository `images` and Fin's CI cache | fin's `release` |
+| `ci-fin` | `ci-fin-preview` | none | none | writes repository `previews`, reads the CI cache | fin's `preview` |
+| `ci-fin` | `ci-fin-ci` | none | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
+| `ci-infra` | `ci-infra-plan` | none | none | reads the project, the state and the plan's credentials | infra's `ci` |
+| `ci-infra` | `ci-infra-apply` | `main` | none | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
 
 Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests' runs need them: what they write reaches only pull requests' environments and the tests site, behind the hub's sign-in. Every grant: `infra`'s [IAM](../../infra/terraform/gcp.md#iam); what Octomaton may do in a tenant: ClusterRole [`octomaton-tenant`](deployment.md#rbac).
 
@@ -127,10 +127,10 @@ Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests'
 
 | Item | Value |
 | --- | --- |
-| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none |
+| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none. `octomaton.dev/tags` does the same for tag pushes, added with [versioned releases](releases.md) |
 | Check | Before creating a run, Octomaton reads each ServiceAccount its PipelineRun names: `spec.taskRunTemplate.serviceAccountName` and `spec.taskRunSpecs[].serviceAccountName`, the only fields that name one in a `tekton.dev/v1` PipelineRun, the one version Octomaton accepts. When one carries the annotation and the run's branch matches none of its globs, the run is refused: no PipelineRun, and its check fails with the reason |
 | Fails closed | A named ServiceAccount Octomaton can't read (a missing permission, an API error), an empty or invalid annotation, and a name that isn't a string refuse the run the same way. A run goes through only when every named ServiceAccount was read and is unannotated or matches |
-| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch and matches nothing |
+| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch: it matches a glob of `octomaton.dev/tags` or nothing |
 | Not checked | A PipelineRun that names no ServiceAccount: it runs as Tekton's default, which must never carry the annotation or a role. A ServiceAccount that doesn't exist: Tekton fails the run |
 | Permission | ClusterRole `octomaton-tenant` gets `get` on `serviceaccounts` |
 

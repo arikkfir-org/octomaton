@@ -132,11 +132,11 @@ pipelines:
       workspace: github-token          # bound as a Secret workspace (key: token)
       permissions: {contents: read}    # default
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
-                                       # one; only when every trigger reads definitions from a default branch, or in
+                                       # one; only when every trigger is comment, review_request or schedule, or in
                                        # an organization pipeline
     secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
-                                       # trigger reads definitions from a default branch (comment, review_request,
-                                       # schedule), or in an organization pipeline
+                                       # trigger is comment, review_request or schedule, or in an organization
+                                       # pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
     concurrency:                       # optional; default for pull_request and review_request:
                                        # group "pr-<number>", policy supersede

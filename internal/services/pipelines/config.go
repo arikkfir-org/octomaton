@@ -610,8 +610,9 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 		}
 	}
 
-	// Pull requests, merge groups and pushes read a repository's own definitions at the commit under
-	// test. Organization pipelines are always read at the organization repository's default branch.
+	// Pull requests, merge groups and pushes to branches read a repository's own definitions at the
+	// commit under test (a tag push reads the default branch's, but a push trigger admits branches too).
+	// Organization pipelines are always read at the organization repository's default branch.
 	headDefinitions := !organization && (on.PullRequest != nil || on.MergeGroup != nil || on.Push != nil)
 	if gt := p.GitHubToken; gt != nil {
 		if strings.TrimSpace(gt.Workspace) == "" {
@@ -626,7 +627,7 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 		case "":
 		case AllRepositories:
 			if headDefinitions {
-				add("githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository, because only they read their definitions from a default branch")
+				add("githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository: a push, pull_request or merge_group trigger reads its definitions at the commit under test")
 			}
 		default:
 			add("githubToken.repositories %q must be %s (or omitted for the run's repository)", gt.Repositories, AllRepositories)
@@ -634,7 +635,7 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 	}
 
 	if len(p.Secrets) > 0 && headDefinitions {
-		add("secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets, because only they read their definitions from a default branch")
+		add("secrets: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may mount Secrets: a push, pull_request or merge_group trigger reads its definitions at the commit under test")
 	}
 	seenSecrets := map[string]bool{}
 	for i, name := range p.Secrets {

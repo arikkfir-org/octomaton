@@ -389,10 +389,11 @@ event with placeholder values, so a template that only works for one event is re
   every trigger reads its definitions from the default branch, may list any, so definitions at a pull request's head
   never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
   pull request of the owner, Dependabot's included: it must never run the pull request's code. An organization
-  pipeline's Secrets live only in the organization repository's namespace, so a repository's own default-branch
-  pipelines cannot mount them; each run gets copies owned by it, named with a random nonce so that no other pipeline
-  can list them, which the guard allows in place of the names listed (and redaction covers, like every Secret the run
-  references). Tokens are scoped to the
+  pipeline's Secrets are read from the organization repository's namespace, so a host needs them in no other
+  namespace: once it keeps them there alone, no repository's own default-branch pipelines can mount them (the
+  organization repository's own pipelines, which run in that namespace, still can). Each run gets copies owned by it,
+  named with a random nonce so that no other pipeline can list them, which the guard allows in place of the names
+  listed (and redaction covers, like every Secret the run references). Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
   (`githubToken.repositories: all`), which follows the same rule as `secrets`.
 - Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`

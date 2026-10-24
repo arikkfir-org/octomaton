@@ -127,10 +127,10 @@ Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests'
 
 | Item | Value |
 | --- | --- |
-| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none |
+| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none. `octomaton.dev/tags` does the same for tag pushes, added with [versioned releases](releases.md) |
 | Check | Before creating a run, Octomaton reads each ServiceAccount its PipelineRun names: `spec.taskRunTemplate.serviceAccountName` and `spec.taskRunSpecs[].serviceAccountName`, the only fields that name one in a `tekton.dev/v1` PipelineRun, the one version Octomaton accepts. When one carries the annotation and the run's branch matches none of its globs, the run is refused: no PipelineRun, and its check fails with the reason |
 | Fails closed | A named ServiceAccount Octomaton can't read (a missing permission, an API error), an empty or invalid annotation, and a name that isn't a string refuse the run the same way. A run goes through only when every named ServiceAccount was read and is unannotated or matches |
-| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch and matches nothing |
+| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch: it matches a glob of `octomaton.dev/tags` or nothing |
 | Not checked | A PipelineRun that names no ServiceAccount: it runs as Tekton's default, which must never carry the annotation or a role. A ServiceAccount that doesn't exist: Tekton fails the run |
 | Permission | ClusterRole `octomaton-tenant` gets `get` on `serviceaccounts` |
 

@@ -1,0 +1,19 @@
+# Trims Go's caches in /go-cache and saves them as the archive named in save; an empty one saves nothing
+# (scripts/go-cache-save.sh, docs/octomaton/designs/ci-caches.md). Octomaton inlines it into each step that
+# references it by name.
+apiVersion: tekton.dev/v1beta1
+kind: StepAction
+metadata:
+  name: go-cache-save
+spec:
+  params:
+    - name: save
+      type: string
+      description: The archive to save (main, pull-requests/<number>), or empty to save none.
+  image: docker.io/curlimages/curl:8.22.0
+  securityContext:
+    runAsUser: 0
+  env:
+    - name: SAVE
+      value: $(params.save)
+  command: [sh, .tekton/scripts/go-cache-save.sh]

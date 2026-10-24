@@ -24,6 +24,7 @@ flowchart LR
 
 | Concern | How |
 | --- | --- |
+| Files | Each PipelineRun (`.tekton/ci.yaml`, `.tekton/main.yaml`) references its task by name (`ci.task.yaml`, `main.task.yaml`), which Octomaton inlines ([Tekton files](tekton-files.md)). Both tasks share the StepActions `clone`, `go-cache-restore` and `go-cache-save` (`<name>.step.yaml`); the two cache steps and `main`'s `ko`, `publish` and `warm` run scripts from the checkout, `.tekton/scripts/`. The steps that only run a command (lint, vet, test, build) name it, with no script |
 | What's cached | `/go-cache`, Go's build cache (`GOCACHE=/go-cache/build`) and module cache (`GOMODCACHE=/go-cache/mod`), as one gzipped tar: `main/go.tar.gz` or `pull-requests/<number>/go.tar.gz` |
 | Restore | Each run's step after the clone, `restore`, streams the first archive of its list that exists into `/go-cache`: a pull request's `pull-requests/<number>` then `main`; a merge group's and `main`'s, `main`. A missing or unreadable archive is logged, and the run downloads and compiles what it lacks |
 | Save | The task's last step, `save`, trims the caches, then replaces the run's archive with what it restored and added to. A run that fails saves nothing (Tekton skips the steps after a failing one); a trim or save that fails is logged and passes. `ci` saves to `pull-requests/<number>`, its param `cache`, which `.octomaton.yaml` sets only for a pull request's run, so a merge group's saves nothing |
@@ -68,7 +69,7 @@ What protects `main` is that only `main`'s own pipeline writes `main`'s archive:
 and the merge queue. `main` and the images it publishes read only that archive.
 
 Every run of `ci` is a pull request's code: the merge queue's too, since Octomaton reads `.octomaton.yaml` and
-`.tekton/ci.yaml` at the commit under test, the merge result. A pull request can therefore point any of its runs, its
+`.tekton/` at the commit under test, the merge result. A pull request can therefore point any of its runs, its
 merge group's included, at any archive `ci-octomaton-ci` may read, or change its pipeline in any other way; reading
 `main`'s archive in merge groups is the pipeline's default, not a boundary. One principal runs every pull request's
 `ci`, so a pull request's run can also write another pull request's archive, and a build output planted there could

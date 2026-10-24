@@ -121,7 +121,7 @@ failure a host sees for a forgotten object, rather than a server running on defa
 | `octomaton-logs` is `deploy/logs/` | Its own workload on purpose, which a host may not want; a second Application needs no overlay | Part of the base, scaled to zero; a Kustomize component |
 | Plain Kustomize, not a Helm chart | Argo CD's image override and patches reach a Kustomization directly, and a host without Argo CD has `kustomize edit set image` | A chart |
 | `deploy/` holds the Namespace, with the restricted Pod Security Standard | Octomaton's pods meet it, and the deployment states it with the code; a host adds labels with a patch | `CreateNamespace` with `managedNamespaceMetadata` in the host (a Namespace in the source overwrites it) |
-| The hub's Application stays in `delivery`, with a project of its own | The host decides what runs in its cluster and where; the octomaton repository decides how. The hub's project keeps a merge to `main` in namespace `octomaton` and Octomaton's own cluster objects | Moving the Application here; project `default` |
+| The hub's Application stays in `delivery`, with a project of its own | The host decides what runs in its cluster and where; the octomaton repository decides how. The hub's project keeps the version it pins in namespace `octomaton` and Octomaton's own cluster objects | Moving the Application here; project `default` |
 
 ## Security and failure modes
 
@@ -139,8 +139,8 @@ failure a host sees for a forgotten object, rather than a server running on defa
   `ImagePullBackOff` while the old ones keep serving: the rollout surges, so it starts a new pod before it stops an old
   one. The Application shows `Progressing`, and `Degraded` once the Deployment's 10-minute progress deadline passes,
   until the images arrive. If `main` fails, re-run it or merge a fix.
-- A commit that breaks Octomaton breaks CI for every repository its host serves, its own fix included. The hub merges
-  the revert with the admin bypass; Argo CD deploys it like any other commit.
+- A version that breaks Octomaton breaks CI for every repository its host serves, its own fix included. The hub
+  reverts its bump in `delivery` with the admin bypass, and Argo CD rolls back to the previous version.
 
 ## Rollout
 

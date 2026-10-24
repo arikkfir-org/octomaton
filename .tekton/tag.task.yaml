@@ -16,12 +16,6 @@ spec:
     - name: source
   stepTemplate:
     workingDir: $(workspaces.source.path)
-    computeResources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        memory: 512Mi
   steps:
     # A version names a commit of main only: pushing a tag takes write access, but merging a commit into
     # main takes a review, and a version is the latter's.
@@ -62,9 +56,18 @@ spec:
         #!/bin/sh
         set -eu
         SHA=$(printf '%s' "$REVISION" | cut -c1-7)
+        # Only "not found" means the build is still running: any other error (permission, auth, network) is
+        # a real failure and ends the run at once.
         for image in octomaton octomaton-logs; do
           tries=0
-          until gcloud artifacts docker images describe "$REGISTRY/$image:$SHA" --quiet >/dev/null 2>&1; do
+          while :; do
+            if out=$(gcloud artifacts docker images describe "$REGISTRY/$image:$SHA" --quiet 2>&1); then
+              break
+            fi
+            if ! printf '%s' "$out" | grep -Eiq 'not[ _]found'; then
+              echo "$out" >&2
+              exit 1
+            fi
             tries=$((tries + 1))
             if [ "$tries" -gt 60 ]; then
               echo "$REGISTRY/$image:$SHA is not published after 15 minutes: did main's build fail?" >&2

@@ -107,17 +107,17 @@ flowchart LR
 
 ### ServiceAccounts
 
-| Tenant | ServiceAccount | `octomaton.dev/branches` | Google Cloud | Named by |
-| --- | --- | --- | --- | --- |
-| every | `pipeline` | none | nothing | every run that names no other |
-| every | `docs-reader` | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
-| every | `docs-publisher` | `main` | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
-| every | `reviewer` | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
-| `ci-tooling` | `ci-tooling-publish` | `main` | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
-| `ci-octomaton` | `ci-octomaton-release` | `main` | writes repository `octomaton` | this repository's `release` |
-| `ci-fin` | `ci-fin-release` | `main` | writes repository `images` and Fin's CI cache | fin's `release` |
-| `ci-fin` | `ci-fin-preview` | none | writes repository `previews`, reads the CI cache | fin's `preview` |
-| `ci-fin` | `ci-fin-ci` | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
+| Tenant | ServiceAccount | `octomaton.dev/branches` | `octomaton.dev/tags` | Google Cloud | Named by |
+| --- | --- | --- | --- | --- | --- |
+| every | `pipeline` | none | none | nothing | every run that names no other |
+| every | `docs-reader` | none | none | lists bucket `arikkfir-docs` | the organization pipeline `docs` (check `Docs`) |
+| every | `docs-publisher` | `main` | none | writes its repository's layer of `arikkfir-docs` | the organization pipeline `docs-publish` |
+| every | `reviewer` | none | none | nothing, and it mounts no token | the organization pipeline `review` ([pull request reviewers](pr-reviewer.md)) |
+| `ci-tooling` | `ci-tooling-publish` | `main` | none | writes bucket `arikkfir-claude` and repository `images` | tooling's `publish` and `reviewer-image` |
+| `ci-octomaton` | `ci-octomaton-release` | `main` | `v*` | writes repository `octomaton` | this repository's `main` and `tag` ([versioned releases](releases.md)) |
+| `ci-fin` | `ci-fin-release` | `main` | none | writes repository `images` and Fin's CI cache | fin's `release` |
+| `ci-fin` | `ci-fin-preview` | none | none | writes repository `previews`, reads the CI cache | fin's `preview` |
+| `ci-fin` | `ci-fin-ci` | none | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
 | `ci-infra` | `ci-infra-plan` | none | reads the project, the state and the plan's credentials | infra's `ci` |
 | `ci-infra` | `ci-infra-apply` | `main` | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
 

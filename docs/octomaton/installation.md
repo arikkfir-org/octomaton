@@ -213,7 +213,8 @@ spec:
                 echo "run your tests here"
 ```
 
-Validate both before pushing, with `octomaton-lint` from the release's checkout (`go run ./cmd/octomaton-lint .`),
+Validate both before pushing, in your repository's checkout, with `octomaton-lint .` (installed with
+`go install octomaton.dev/cmd/octomaton-lint@vX.Y.Z`, or run as `go run octomaton.dev/cmd/octomaton-lint@vX.Y.Z .`),
 then open a pull request: a check named `Continuous Integration` appears on it, queued, then in progress with a table of
 the run's tasks, then concluded, with the logs of any failed step. Make it a required check of the branch's protection
 or ruleset once it passes.

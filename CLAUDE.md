@@ -32,6 +32,12 @@
   person and create it once they agree; one issue per slice, however many pull requests it takes; slices preferably
   self-contained and deployable on their own; keep the project's status current, with an update at each milestone or
   significant change.
+- Tekton files stay short and composed (https://docs.dev.kfirs.com/CONTRIBUTING.md, "Continuous integration"): a
+  PipelineRun references its Pipeline (`pipelineRef`), or its inline `pipelineSpec` its Tasks (`taskRef`), by name,
+  each in a file beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`), steps that Tasks share are StepActions
+  (`<name>.step.yaml`), and a step names its command or runs a script file (`.tekton/scripts/`) rather than an inline
+  script of more than a few lines, as `ci` and `main` do (`docs/octomaton/designs/ci-caches.md`). A change to a long,
+  inlined file splits what it touches.
 
 ## Docs
 

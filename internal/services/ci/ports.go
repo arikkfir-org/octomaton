@@ -42,6 +42,9 @@ type Installation interface {
 	BranchHead(ctx context.Context, repo Repository, branch string) (string, error)
 	// Permission returns a user's permission on a repository.
 	Permission(ctx context.Context, repo Repository, user string) (Permission, error)
+	// TeamMember reports whether a user is an active member of a team (by slug) of an owner that
+	// is an organization; false for a team that does not exist.
+	TeamMember(ctx context.Context, owner, team, user string) (bool, error)
 
 	// OpenReport creates a report.
 	OpenReport(ctx context.Context, repo Repository, r Report) (ReportID, error)
@@ -54,6 +57,8 @@ type Installation interface {
 	ReportTrigger(ctx context.Context, repo Repository, id ReportID) (*Trigger, error)
 	// SuiteReports lists the latest report of each name in a suite of reports.
 	SuiteReports(ctx context.Context, repo Repository, suiteID int64) ([]ReportRef, error)
+	// RevisionReports lists the latest of the App's reports of each name on a commit.
+	RevisionReports(ctx context.Context, repo Repository, revision string) ([]ReportRef, error)
 
 	// React adds a reaction ("eyes", "-1", …) to a pull request comment.
 	React(ctx context.Context, repo Repository, commentID int64, reaction string) error

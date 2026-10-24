@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,7 @@ type Host struct {
 	pulls       map[string]ci.PullRequestState
 	branches    map[string]string
 	permissions map[string]ci.Permission
+	teams       map[string][]string
 	reports     map[ci.ReportID]*Report
 	suites      map[string]int64
 	nextID      int64
@@ -169,6 +171,16 @@ func (h *Host) SetPermission(repo ci.Repository, user string, p ci.Permission) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.permissions[repo.FullName+":"+user] = p
+}
+
+// SetTeam sets the members of an owner's team.
+func (h *Host) SetTeam(owner, team string, members ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.teams == nil {
+		h.teams = map[string][]string{}
+	}
+	h.teams[owner+"/"+team] = members
 }
 
 // SetPullRequestFiles sets the files a pull request changes.
@@ -403,6 +415,15 @@ func (c *installation) Permission(_ context.Context, repo ci.Repository, user st
 	return "none", nil
 }
 
+func (c *installation) TeamMember(_ context.Context, owner, team, user string) (bool, error) {
+	if err := c.h.failure("TeamMember"); err != nil {
+		return false, err
+	}
+	c.h.mu.Lock()
+	defer c.h.mu.Unlock()
+	return slices.ContainsFunc(c.h.teams[owner+"/"+team], func(m string) bool { return strings.EqualFold(m, user) }), nil
+}
+
 func (c *installation) OpenReport(ctx context.Context, repo ci.Repository, r ci.Report) (ci.ReportID, error) {
 	// As GitHub's client does, a report fails with its context.
 	if err := ctx.Err(); err != nil {
@@ -507,6 +528,27 @@ func (c *installation) SuiteReports(_ context.Context, repo ci.Repository, suite
 	latest := map[string]*Report{}
 	for _, r := range c.h.reports {
 		if r.SuiteID == suiteID && r.Repository == repo.FullName && (latest[r.Name] == nil || r.ID > latest[r.Name].ID) {
+			latest[r.Name] = r
+		}
+	}
+	var refs []ci.ReportRef
+	for _, r := range latest {
+		refs = append(refs, ci.ReportRef{ID: r.ID, Name: r.Name, Revision: r.Revision, Conclusion: r.Conclusion})
+	}
+	slices.SortFunc(refs, func(a, b ci.ReportRef) int { return int(a.ID - b.ID) })
+	return refs, nil
+}
+
+// RevisionReports lists the latest report of each name on a commit, without their triggers.
+func (c *installation) RevisionReports(_ context.Context, repo ci.Repository, revision string) ([]ci.ReportRef, error) {
+	if err := c.h.failure("RevisionReports"); err != nil {
+		return nil, err
+	}
+	c.h.mu.Lock()
+	defer c.h.mu.Unlock()
+	latest := map[string]*Report{}
+	for _, r := range c.h.reports {
+		if r.Revision == revision && r.Repository == repo.FullName && (latest[r.Name] == nil || r.ID > latest[r.Name].ID) {
 			latest[r.Name] = r
 		}
 	}

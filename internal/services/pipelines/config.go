@@ -62,15 +62,57 @@ const maxSecretNameLength = 253
 type Config struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Pipelines  []Pipeline `yaml:"pipelines"`
-	// Organization lists the pipelines every repository of the owner runs. Only the owner's
+	// Commands enables Octomaton's built-in comment commands for the repository.
+	Commands *Commands `yaml:"commands"`
+	// Organization lists the pipelines every repository of the owner runs, and the built-in commands
+	// enabled in every repository of the owner that enables none itself. Only the owner's
 	// organization repository, a server setting, may declare it.
 	Organization *Organization `yaml:"organization"`
 }
 
-// Organization holds an owner's organization pipelines.
+// Organization holds an owner's organization pipelines and commands.
 type Organization struct {
 	Pipelines []Pipeline `yaml:"pipelines"`
+	Commands  *Commands  `yaml:"commands"`
 }
+
+// Commands are Octomaton's built-in comment commands, each enabled by naming who may invoke it.
+type Commands struct {
+	// Rerun is "/rerun [check...]": re-run the failed checks at the pull request's head, or the
+	// named ones.
+	Rerun *Command `yaml:"rerun"`
+}
+
+// Command is a built-in command's settings.
+type Command struct {
+	Allow *Allow `yaml:"allow"`
+}
+
+// Allow names who may invoke a comment command: GitHub logins (people and bots) and teams of the
+// repository's owner. Whoever is in neither is declined, whatever their permission.
+type Allow struct {
+	Users []string `yaml:"users"`
+	Teams []string `yaml:"teams"`
+}
+
+// AllowsUser reports whether the login is named (case-insensitive).
+func (a *Allow) AllowsUser(login string) bool {
+	if a == nil {
+		return false
+	}
+	return slices.ContainsFunc(a.Users, func(u string) bool { return strings.EqualFold(u, login) })
+}
+
+// RerunAllow returns who may invoke /rerun, or nil when the command is not enabled.
+func (c *Config) RerunAllow() *Allow {
+	if c == nil || c.Commands == nil || c.Commands.Rerun == nil {
+		return nil
+	}
+	return c.Commands.Rerun.Allow
+}
+
+// RerunCommand is the built-in re-run command's first word.
+const RerunCommand = "/rerun"
 
 // Pipeline binds events to a PipelineRun file.
 type Pipeline struct {
@@ -171,12 +213,14 @@ type PushTrigger struct {
 	PathsIgnore []string `yaml:"pathsIgnore"`
 }
 
-// CommentTrigger runs a pipeline when someone with write access comments a
+// CommentTrigger runs a pipeline when someone its allow-list names comments a
 // matching command on an open, non-draft pull request.
 type CommentTrigger struct {
 	// Pattern is a regular expression anchored with "^/" matched against the
 	// comment's first line.
 	Pattern string `yaml:"pattern"`
+	// Allow names who may invoke the command; required.
+	Allow *Allow `yaml:"allow"`
 	// Branches are globs the pull request's base branch must match (omitted = all).
 	Branches []string `yaml:"branches"`
 
@@ -273,6 +317,9 @@ var typeNames = strings.NewReplacer(
 	"in type pipelines.MergeGroupTrigger", "in on.merge_group",
 	"in type pipelines.PushTrigger", "in on.push",
 	"in type pipelines.CommentTrigger", "in on.comment",
+	"in type pipelines.Allow", "in allow",
+	"in type pipelines.Commands", "in commands",
+	"in type pipelines.Command", "in commands.rerun",
 	"in type pipelines.ReviewRequestTrigger", "in on.review_request",
 	"in type pipelines.ScheduleTrigger", "in on.schedule",
 	"in type pipelines.Concurrency", "in concurrency",
@@ -357,12 +404,42 @@ func (c *Config) validate(check PermissionCheck) []string {
 	// Names and check names are unique across both lists: the organization repository runs both.
 	names := newNames()
 	problems = append(problems, names.validate("pipelines", c.Pipelines, check, false)...)
+	problems = append(problems, validateCommands("commands", c.Commands)...)
 	if c.Organization != nil {
+		problems = append(problems, validateCommands("organization.commands", c.Organization.Commands)...)
 		problems = append(problems, names.validate("organization.pipelines", c.Organization.Pipelines, check, true)...)
 		for i, p := range c.Organization.Pipelines {
 			if len(p.On.Schedule) > 0 {
 				problems = append(problems, fmt.Sprintf("%s: organization pipelines can't use on.schedule", label("organization.pipelines", i, p.Name)))
 			}
+		}
+	}
+	return problems
+}
+
+// validateCommands checks the built-in commands a configuration enables.
+func validateCommands(field string, c *Commands) []string {
+	if c == nil || c.Rerun == nil {
+		return nil
+	}
+	return validateAllow(field+".rerun.allow", c.Rerun.Allow)
+}
+
+// validateAllow checks an allow-list: required, naming at least one user or team, each a non-empty
+// login or team slug.
+func validateAllow(field string, a *Allow) []string {
+	if a == nil || len(a.Users)+len(a.Teams) == 0 {
+		return []string{field + " is required: name at least one user or team that may invoke the command"}
+	}
+	var problems []string
+	for _, u := range a.Users {
+		if strings.TrimSpace(u) == "" || strings.ContainsAny(u, " \t/") {
+			problems = append(problems, fmt.Sprintf("%s.users: %q is not a GitHub login", field, u))
+		}
+	}
+	for _, t := range a.Teams {
+		if strings.TrimSpace(t) == "" || strings.ContainsAny(t, " \t/") {
+			problems = append(problems, fmt.Sprintf("%s.teams: %q is not a team slug (the team's slug, without its organization)", field, t))
 		}
 	}
 	return problems
@@ -430,7 +507,7 @@ func ForRepository(repository, organization string, own, org *Config) (*Config, 
 		shared = org.Organization.Pipelines
 	}
 	if own == nil {
-		if len(shared) == 0 {
+		if len(shared) == 0 && (org == nil || org.Organization == nil || org.Organization.Commands == nil) {
 			return nil, nil
 		}
 		own = &Config{APIVersion: APIVersion}
@@ -459,7 +536,10 @@ func ForRepository(repository, organization string, own, org *Config) (*Config, 
 	if len(problems) > 0 {
 		return nil, &Error{Problems: problems}
 	}
-	merged := &Config{APIVersion: own.APIVersion, Pipelines: slices.Clone(own.Pipelines)}
+	merged := &Config{APIVersion: own.APIVersion, Pipelines: slices.Clone(own.Pipelines), Commands: own.Commands}
+	if merged.Commands == nil && org != nil && org.Organization != nil {
+		merged.Commands = org.Organization.Commands
+	}
 	for _, p := range shared {
 		if p.PipelineRun.Repository == "" {
 			p.PipelineRun.Repository = organization
@@ -541,12 +621,16 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 			add("on.comment.pattern %q must start with ^/ (it matches the comment's first line from its start)", t.Pattern)
 		default:
 			re, err := regexp.Compile(t.Pattern)
-			if err != nil {
+			switch {
+			case err != nil:
 				add("on.comment.pattern: %v", err)
-			} else {
+			case re.MatchString(RerunCommand), re.MatchString(RerunCommand + " x"):
+				add("on.comment.pattern %q matches %s, a built-in command", t.Pattern, RerunCommand)
+			default:
 				t.pattern = re
 			}
 		}
+		problems = append(problems, validateAllow("on.comment.allow", t.Allow)...)
 		problems = append(problems, validateGlobs("on.comment.branches", t.Branches)...)
 	}
 	if t := on.ReviewRequest; t != nil {

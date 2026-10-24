@@ -122,7 +122,7 @@ What an installation provides, in the order a new host meets it. This is the REA
 | A GitHub App with the [permissions and events the README lists](https://github.com/arikkfir-org/octomaton#github-app), installed where Octomaton serves, its webhook at `https://<host>/github/hooks` | App `octomaton-dev`, created by hand ([the hub's installation](../../delivery/designs/octomaton.md#the-github-app)) | App `bracket-octomaton` |
 | Secret `octomaton-github` in namespace `octomaton`, keys `app-id`, `private-key`, `webhook-secret` | An ExternalSecret on `gcp-secret-manager`, values in Secret Manager | An ExternalSecret on `gcp-secret-store`, values in Secret Manager |
 | ConfigMap `octomaton`: the [server's settings](https://github.com/arikkfir-org/octomaton#server-configuration); `OCTOMATON_GITHUB_ALLOWED_OWNERS` required | `arikkfir-org`, `https://tekton.dev.kfirs.com`, Argo CD's webhook, `tooling` | `weesp-ai`, `https://tekton.dev.getbracket.io`, Argo CD's webhook, `tooling` |
-| `deploy/` applied as written, at a commit of its choosing, the image tagged | Application `octomaton`, `targetRevision: main`, tag `${ARGOCD_APP_REVISION_SHORT}` | Application `octomaton`, a pinned commit, the same tag expression |
+| `deploy/` applied as written, at a commit of its choosing, the image tagged | Application `octomaton`, a version's tag (`targetRevision: v0.0.1`), the same tag on the image | Application `octomaton`, a pinned commit, the same tag expression |
 | Optionally `deploy/logs/` the same way, with ConfigMap `octomaton-logs`: the [step logs server's settings](https://github.com/arikkfir-org/octomaton#archived-step-logs-octomaton-logs) | Application `octomaton-logs`; view `_Default` of project `arikkfir`, cluster `hub`, `me-west1-a` | Application `octomaton-logs`; its view, `primary-v2`, its region |
 | Additions through kustomize options: labels, annotations, node placement | `kfirs.com/public-ingress`, node pool `system` | ServiceAccount annotations, node selectors |
 | A route from the webhook's URL to Service `octomaton` port 80, `POST /github/hooks` only | HTTPRoute on `traefik/public`, listener `octomaton-dev` | HTTPRoute on the shared Gateway |
@@ -206,7 +206,7 @@ it instead of Octomaton's.
 
 ## Security and failure modes
 
-- Bracket's AppProject already bounds what a pinned `deploy/` may create; the hub's does the same for `main`. After
+- Bracket's AppProject already bounds what a pinned `deploy/` may create; the hub's does the same for the version it pins. After
   the split, both admit fewer kinds: no ConfigMap, ExternalSecret, HTTPRoute or NetworkPolicy from Octomaton's source.
   The host's own objects never go through that project: in the hub they are `platform/octomaton/manifests`, which
   the wrapper Application `octomaton-environment` deploys under project `default`, as it deploys the AppProject

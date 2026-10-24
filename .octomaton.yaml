@@ -2,7 +2,7 @@
 apiVersion: octomaton.dev/v1
 pipelines:
   # Lint, vet, test and build every pull request and every merge queue group, and validate deploy/ and
-  # deploy/logs/ as written.
+  # deploy/logs/ as written, with Go's caches from main's last run or the pull request's own.
   - name: ci
     displayName: Continuous Integration
     pipelineRun: .tekton/ci.yaml
@@ -13,6 +13,9 @@ pipelines:
     params:
       repo-url: "{{ .Repository.CloneURL }}"
       revision: "{{ .Revision }}"
+      # A pull request's run saves Go's caches for its next runs; a merge group's saves none
+      # (docs/octomaton/designs/ci-caches.md).
+      cache: "{{ if .PullRequest }}pull-requests/{{ .PullRequest.Number }}{{ end }}"
     timeout: 30m
 
   # Publish the images of every push to main, tagged with the commit's short SHA (also the version the

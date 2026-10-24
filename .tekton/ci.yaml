@@ -1,13 +1,15 @@
 # Octomaton's CI: lint its own .octomaton.yaml, render and validate deploy/
 # and deploy/logs/ as written, vet, test (with the race detector) and build. A plain Tekton PipelineRun; Octomaton sets the
-# params.
+# params. Go's caches come from bucket arikkfir-octomaton-ci-cache (docs/octomaton/designs/ci-caches.md): a pull
+# request's run restores its own, or main's, and saves its own; a merge group's restores main's and saves none. As
+# ci-octomaton-ci, which any branch may use and which may write only pull requests' caches, never main's.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: octomaton-ci-
 spec:
   taskRunTemplate:
-    serviceAccountName: pipeline
+    serviceAccountName: ci-octomaton-ci
   # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
   # Lint, vet, race tests and build peaked at 2.1Gi and 3.6 cores: a run gets a 4-vCPU CI node to itself.
   taskRunSpecs:
@@ -29,6 +31,9 @@ spec:
       - name: revision
         type: string
         description: Commit to test.
+      - name: cache
+        type: string
+        description: Where this run saves Go's caches, pull-requests/<number>; empty saves none.
     workspaces:
       - name: source
     tasks:
@@ -38,6 +43,8 @@ spec:
             value: $(params.repo-url)
           - name: revision
             value: $(params.revision)
+          - name: cache
+            value: $(params.cache)
         workspaces:
           - name: source
             workspace: source
@@ -46,6 +53,8 @@ spec:
             - name: repo-url
               type: string
             - name: revision
+              type: string
+            - name: cache
               type: string
           workspaces:
             - name: source
@@ -82,6 +91,44 @@ spec:
                 git fetch --quiet --depth=1 origin "$REVISION"
                 git checkout --quiet --detach FETCH_HEAD
                 git log -1 --format='Testing %H: %s'
+            # Go's caches (docs/octomaton/designs/ci-caches.md): the first of RESTORE's archives that exists, streamed
+            # into /go-cache. Without one, the run downloads and compiles everything. Go marks a build-cache entry it
+            # uses by its modification time, at most once an hour: dated two hours back here, each entry this run uses
+            # shows it, and save keeps only those.
+            - name: restore
+              image: docker.io/curlimages/curl:8.22.0
+              securityContext:
+                runAsUser: 0
+              env:
+                - name: RESTORE
+                  value: $(params.cache) main
+              script: |
+                #!/bin/sh
+                set -eu
+                token="$(curl -fsS -H 'Metadata-Flavor: Google' \
+                  http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token |
+                  sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')"
+                bucket=https://storage.googleapis.com/storage/v1/b/arikkfir-octomaton-ci-cache
+                for cache in ${RESTORE}; do
+                  object="$(printf '%s/go.tar.gz' "${cache}" | sed 's|/|%2F|g')"
+                  if (set -o pipefail; curl -sf -w '%{stderr}%{http_code}' -H "Authorization: Bearer ${token}" \
+                    "${bucket}/o/${object}?alt=media" 2>/tmp/status | tar -xzf - -C /go-cache); then
+                    echo "Restored ${cache}/go.tar.gz"
+                    break
+                  fi
+                  rm -rf /go-cache/build /go-cache/mod
+                  case "$(cat /tmp/status)" in
+                    404) echo "No ${cache}/go.tar.gz yet" ;;
+                    200) echo "${cache}/go.tar.gz didn't unpack" ;;
+                    *) echo "${cache}/go.tar.gz unreadable (HTTP $(cat /tmp/status))" ;;
+                  esac
+                done
+                restored="$(( $(date +%s) - 7200 ))"
+                if [ -d /go-cache/build ]; then
+                  find /go-cache/build -path '/go-cache/build/??/*' -type f -exec touch -d "@${restored}" {} + ||
+                    echo "Couldn't date /go-cache/build: save may drop entries this run uses"
+                fi
+                touch /go-cache/.restored
             - name: lint
               image: golang:1.27.1
               script: |
@@ -106,7 +153,9 @@ spec:
               script: |
                 #!/bin/sh
                 set -eu
-                go test -race ./...
+                # Every test, every time: the restored cache may hold a passing result
+                # (docs/octomaton/designs/ci-caches.md).
+                go test -race -count=1 ./...
             - name: build
               image: golang:1.27.1
               env:
@@ -117,3 +166,56 @@ spec:
                 set -eu
                 go build -trimpath -o /tmp/bin/ ./cmd/...
                 /tmp/bin/octomaton-lint -version
+            # Go's caches as this run restored and added to them, for the next runs
+            # (docs/octomaton/designs/ci-caches.md), trimmed to what Octomaton builds with: the build-cache entries this
+            # run used (restore dated the rest two hours back), and the modules go.sum names, unpacked, without their
+            # zips, which Go doesn't read once a module is unpacked, or their test data. A cache it can't trim or save
+            # costs later runs time, never this run its result.
+            - name: save
+              image: docker.io/curlimages/curl:8.22.0
+              securityContext:
+                runAsUser: 0
+              env:
+                - name: SAVE
+                  value: $(params.cache)
+              script: |
+                #!/bin/sh
+                set -eu
+                if [ -z "${SAVE}" ]; then
+                  echo "Nothing to save: a merge group's run reads main's caches only"
+                  exit 0
+                fi
+                token="$(curl -fsS -H 'Metadata-Flavor: Google' \
+                  http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token |
+                  sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')"
+                bucket=https://storage.googleapis.com/upload/storage/v1/b/arikkfir-octomaton-ci-cache
+                # go.sum's modules as the module cache spells them, a capital as ! and its lower case.
+                sed -n 's|^\([^ ]*\) \([^ /]*\) .*|\1@\2|p' go.sum | sed 's/[A-Z]/!&/g' | tr A-Z a-z >/tmp/modules
+                cd /go-cache
+                if [ ! -d build ] || [ ! -d mod ]; then
+                  echo "Nothing to save as ${SAVE}/go.tar.gz"
+                  exit 0
+                fi
+                if [ -s /tmp/modules ] && ! (
+                  find build -path 'build/??/*' -type f ! -newer .restored -delete &&
+                    chmod -R u+w mod && rm -rf mod/cache/download/sumdb &&
+                    find mod/cache/download -name '*.zip' -delete &&
+                    find mod -path mod/cache -prune -o -type d -name testdata -prune -exec rm -rf {} + &&
+                    (cd mod && find . -path ./cache -prune -o -type d -name '*@*' -prune -print) |
+                    sed 's|^\./||' | grep -vxF -f /tmp/modules | (cd mod && xargs -r rm -rf)
+                ); then
+                  echo "Couldn't trim Go's caches"
+                fi
+                if ! (set -o pipefail; tar -cf - build mod | gzip -1 >/tmp/go.tar.gz); then
+                  echo "Couldn't archive Go's caches"
+                  exit 0
+                fi
+                object="$(printf '%s/go.tar.gz' "${SAVE}" | sed 's|/|%2F|g')"
+                status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -T /tmp/go.tar.gz \
+                  -H "Authorization: Bearer ${token}" -H 'Content-Type: application/gzip' \
+                  "${bucket}/o?uploadType=media&name=${object}" || true)"
+                if [ "${status}" = 200 ]; then
+                  echo "Saved ${SAVE}/go.tar.gz: $(du -h /tmp/go.tar.gz | cut -f1)"
+                else
+                  echo "Couldn't save ${SAVE}/go.tar.gz (HTTP ${status})"
+                fi

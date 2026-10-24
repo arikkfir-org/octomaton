@@ -10,8 +10,9 @@ import (
 	"octomaton.dev/internal/services/ci"
 )
 
-// A report is a check run. Its output text ends with a marker holding the report's trigger, so a
-// check run can be re-run after its run is gone.
+// A report is a check run. Its output summary ends with a marker holding the report's trigger, so a
+// check run can be re-run after its run is gone (check runs written before the marker moved there
+// hold it in their output text, which is still read).
 
 // checkRunUpdate is the body of a check-run update; unlike go-github's UpdateCheckRunOptions it
 // can set started_at.

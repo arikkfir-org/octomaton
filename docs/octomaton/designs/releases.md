@@ -30,12 +30,12 @@ sequenceDiagram
   participant T as Tekton: tag
   participant AR as Artifact Registry
   S->>GH: pull requests merged since the last v* tag, their commits
-  S->>S: version from the commit types (major, minor, patch); notes from the template
+  S->>S: version from the commit types (major, minor, patch), notes from the template
   S->>GH: draft release: tag v1.2.3 on main, title 1.2.3, notes
   Note over GH: a draft has no tag: nothing happens
   GH->>GH: the person publishes the release: tag v1.2.3 is created
   GH->>O: push refs/tags/v1.2.3
-  O->>O: .octomaton.yaml and tag.yaml read at main; tag matches on.push.tags v*; ci-octomaton-release allows the tag (octomaton.dev/tags: v*)
+  O->>O: .octomaton.yaml and tag.yaml read at main, tag matches on.push.tags v*, ci-octomaton-release allows the tag (octomaton.dev/tags: v*)
   O->>T: PipelineRun tag (tag=v1.2.3)
   T->>T: the tagged commit is on main, or fail
   T->>AR: wait for octomaton:abc1234 and octomaton-logs:abc1234 (main's build), then add tag v1.2.3 to both

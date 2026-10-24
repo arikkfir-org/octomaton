@@ -116,7 +116,10 @@ pipelines:
         tags: ["v*"]                   # tag globs
         paths: []                      # optional
       comment:                         # pull request comment command, e.g. "/deploy staging"
-        pattern: "^/deploy\\b"         # regexp on the comment's first line; commenter needs write access
+        pattern: "^/deploy\\b"         # regexp on the comment's first line
+        allow:                         # required: who may invoke it
+          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request
         reviewers: [arikkfir-reviewer] # GitHub logins, case-insensitive; required
@@ -141,8 +144,12 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
+  rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
+    allow: {users: [arikkfir], teams: [maintainers]}
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
+  commands: {}                         # same as commands, for every repository without a commands section of its own
 ```
 
 ### Triggers
@@ -152,7 +159,7 @@ organization:                          # only in the organization repository: pi
 | `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. |
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
-| `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
+| `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by a commenter in `allow` ([Comment commands](#comment-commands)). A pattern that matches `/rerun`, the built-in command, is refused. |
 | `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people; one GitHub would not serve is. |
 | `schedule` | each `cron` slot (5 fields, UTC) | Runs at the head of the default branch, once per slot, up to 10 minutes late. |
 
@@ -307,7 +314,7 @@ pipelines:
   - name: deploy                             # "/deploy staging" on a pull request into main
     pipelineRun: .tekton/deploy.yaml
     on:
-      comment: {pattern: "^/deploy\\b", branches: [main]}
+      comment: {pattern: "^/deploy\\b", allow: {teams: [deployers]}, branches: [main]}
     params:
       revision: "{{ .Revision }}"
       environment: "{{ .Comment.Arguments }}"
@@ -374,6 +381,29 @@ event with placeholder values, so a template that only works for one event is re
   needs write access); re-running `octomaton` re-evaluates the whole event.
 - Comment commands get a 👀 reaction when started, a 👎 and a reply when declined, and a reply with the result when done.
 
+## Comment commands
+
+A command is the first line of a new comment on a pull request, starting with `/`: a `comment` trigger's `pattern`
+matches it, or it is a built-in command. The configuration is read from the default branch, so a pull request cannot
+change what its own commands run or who may run them, and the pipeline runs at the pull request's head. Pull requests
+from forks get no answer at all ([Security](#security)).
+
+- **Who**: every command has an allow-list, `allow`, the only authority on who may invoke it: `users` are GitHub logins,
+  people's and bots' alike, and `teams` are slugs of teams of the repository's owner organization, checked by active
+  membership. A commenter outside it, write access or not, gets a 👎 and a reply saying so; one whose team
+  membership could not be read is declined too (the reply says to see the logs). Checking teams needs the App's
+  Members: read permission ([GitHub App](#github-app)).
+- **Middle dots**: Octomaton drops U+00B7 (`·`) from the first line before matching, so `·/·r·erun docs` is
+  `/rerun docs`. A proxy in front of some commenters' clients inserts them into slash commands; whether such a
+  commenter may run a command is its allow-list's decision, not the proxy's. Nothing else in the comment is touched.
+- **Built-in `/rerun [check...]`**: enabled by `commands.rerun.allow` in `.octomaton.yaml` (the organization
+  repository's `organization.commands` applies to every repository without a `commands` section of its own). Without
+  arguments it re-runs every check at the pull request's head that failed, timed out or was cancelled; with arguments
+  the named checks (each a check's name, spaces included, or a pipeline's, case-insensitive, separated by spaces: `/rerun Continuous Integration docs`) whatever their state, as **Re-run** on the
+  check would: the pipeline runs again as the next attempt with the check's stored trigger, and `octomaton`
+  re-evaluates its event. The reply names what was wrong: the command is not enabled, the commenter is not allowed,
+  the pull request is closed, nothing failed, or a name matches no check.
+
 ## Security
 
 - Only webhooks with a valid signature are processed; only installations on `OCTOMATON_GITHUB_ALLOWED_OWNERS` are
@@ -394,6 +424,10 @@ event with placeholder values, so a template that only works for one event is re
   resolved to a file beside the PipelineRun file, in the same repository at the same commit, and inlined before the
   checks run ([Pipeline, Task and StepAction files](#pipeline-task-and-stepaction-files)), so the run Octomaton checks
   and Tekton gets holds its whole `spec.pipelineSpec`, with a `taskSpec` per task and no step `ref`.
+- A comment command runs only for a commenter its allow-list names, as a user or through a team; repository
+  permissions play no part, so a bot can be allowed and a collaborator left out. The list is read from the default
+  branch, like the command's definitions. The middle dots Octomaton drops from a command line change who gets through
+  a proxy, never who is allowed.
 - A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
   must come from the repository's own branches. Only new commits on such a branch, which take write access, run a
   pending request again.
@@ -486,6 +520,8 @@ needs:
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
+- Organization permissions: Members: read, for the `teams` of comment commands' allow-lists. Without it every team
+  check fails and the command is declined, unless the commenter is named as a user.
 - Events: `push`, `pull_request`, `issue_comment`, `check_suite`, `check_run`, `merge_group`. Octomaton answers any
   other event `202` and ignores it.
 - Webhook URL: the server's `/github/hooks`, signed with the App's webhook secret.

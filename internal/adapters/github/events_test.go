@@ -142,6 +142,7 @@ func TestDecodeReasons(t *testing.T) {
 		{"check suite of another app", "check_suite", &github.CheckSuiteEvent{Action: new("rerequested"), CheckSuite: &github.CheckSuite{ID: new(int64(3)), App: &github.App{ID: new(int64(1))}}, Repo: ghRepo(owner), Installation: installation, Sender: sender}, "check suite belongs to another app", ""},
 		{"check suite requested", "check_suite", &github.CheckSuiteEvent{Action: new("requested")}, "unhandled check_suite action requested", ""},
 		{"comment command", "issue_comment", comment("created", "/deploy now\nplease", true), "", "comment octo-org/demo"},
+		{"comment command with middle dots", "issue_comment", comment("created", "\u00b7/\u00b7r\u00b7erun docs", true), "", "comment octo-org/demo"},
 		{"comment on an issue", "issue_comment", comment("created", "/deploy", false), "comment is not on a pull request", ""},
 		{"plain comment", "issue_comment", comment("created", "looks good", true), "comment is not a command", ""},
 		{"edited comment", "issue_comment", comment("edited", "/deploy", true), "unhandled issue_comment action edited", ""},
@@ -313,5 +314,28 @@ func TestHandles(t *testing.T) {
 		if got := app.Handles(event); got != want {
 			t.Errorf("Handles(%s) = %v, want %v", event, got, want)
 		}
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"a command", "/deploy staging", "/deploy staging"},
+		{"the first line only", "/deploy staging\nplease", "/deploy staging"},
+		{"Windows line ends", "/deploy\r\nplease", "/deploy"},
+		{"surrounding spaces", "  /deploy staging  ", "/deploy staging"},
+		{"middle dots a proxy inserted", "\u00b7/\u00b7t\u00b7est docs", "/test docs"},
+		{"middle dots around the slash", "\u00b7/\u00b7rerun", "/rerun"},
+		{"a plain comment", "looks good", "looks good"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := firstLine(tt.body); got != tt.want {
+				t.Fatalf("firstLine(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
 	}
 }

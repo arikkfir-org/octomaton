@@ -27,18 +27,25 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) error {
 		log.WarnContext(ctx, "Ignoring a re-run request from a user without write access", "permission", level)
 		return nil
 	}
-	refs := e.Reports
 	if e.SuiteID != 0 {
-		if refs, err = gh.SuiteReports(ctx, e.Repository, e.SuiteID); err != nil {
+		if e.Reports, err = gh.SuiteReports(ctx, e.Repository, e.SuiteID); err != nil {
 			log.ErrorContext(ctx, "Could not list the suite's reports", "suite", e.SuiteID, "error", err)
 			return err
 		}
 	}
+	_, err = s.rerunReports(ctx, gh, e)
+	return err
+}
 
+// rerunReports re-runs the event's reports for a requester already allowed to, and returns how many
+// pipelines (or evaluations) it started.
+func (s *Service) rerunReports(ctx context.Context, gh ci.Installation, e *ci.RerunEvent) (int, error) {
+	log := s.Logger.With("repository", e.Repository.FullName, "requester", e.Requester, "delivery", e.DeliveryID)
 	configs := map[string]*pipelines.Config{}
 	done := map[string]bool{}
+	started := 0
 	var errs []error
-	for _, ref := range refs {
+	for _, ref := range e.Reports {
 		t, ok, err := s.reportTrigger(ctx, gh, e, ref)
 		if !ok {
 			errs = append(errs, err)
@@ -61,6 +68,7 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) error {
 			read, err := s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: true, RerunBy: e.Requester})
 			errs = append(errs, err)
 			if read {
+				started++
 				errs = append(errs, s.openCompleted(ctx, gh, t, ci.ConfigReportName, ci.Success, "Evaluated again",
 					"Octomaton read the configuration and evaluated the event again."))
 			}
@@ -84,9 +92,11 @@ func (s *Service) Rerun(ctx context.Context, e *ci.RerunEvent) error {
 		if _, err := s.start(ctx, gh, t, p, true); err != nil {
 			s.logFor(t).WarnContext(ctx, "The re-run did not start", "error", err)
 			errs = append(errs, undone(err))
+			continue
 		}
+		started++
 	}
-	return errors.Join(errs...)
+	return started, errors.Join(errs...)
 }
 
 // pipelineGone says that no configuration defines t's pipeline anymore.

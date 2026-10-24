@@ -132,6 +132,31 @@ func TestPermission(t *testing.T) {
 	}
 }
 
+func TestTeamMember(t *testing.T) {
+	app, srv := newApp(t)
+	srv.TeamMembers = map[string][]string{"octo-org/deployers": {"alice"}}
+	gh := app.Installation(installationID)
+	tests := []struct {
+		name string
+		team string
+		user string
+		want bool
+	}{
+		{"a member", "deployers", "alice", true},
+		{"a member, in another case", "deployers", "Alice", true},
+		{"not a member", "deployers", "mallory", false},
+		{"no such team", "admins", "alice", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gh.TeamMember(context.Background(), "octo-org", tt.team, tt.user)
+			if err != nil || got != tt.want {
+				t.Fatalf("TeamMember(%s, %s) = %v, %v; want %v", tt.team, tt.user, got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestTokens(t *testing.T) {
 	app, srv := newApp(t)
 	ctx := context.Background()

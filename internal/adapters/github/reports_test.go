@@ -164,3 +164,26 @@ func TestReportTriggerAndSuiteReports(t *testing.T) {
 		t.Fatalf("reports without a readable marker must have no trigger: %+v", refs)
 	}
 }
+
+// TestRevisionReports lists the latest report of each name on a commit: an older attempt of the
+// same name and another commit's reports are left out.
+func TestRevisionReports(t *testing.T) {
+	app, srv := newApp(t)
+	first := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "ci", HeadSHA: "abc", Conclusion: "failure"})
+	second := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "ci", HeadSHA: "abc", Conclusion: "success"})
+	docs := srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "docs", HeadSHA: "abc", Conclusion: "timed_out"})
+	srv.AddCheckRun(githubtest.CheckRun{Repo: fullName, Name: "ci", HeadSHA: "def", Conclusion: "failure"})
+	gh := app.Installation(installationID)
+
+	got, err := gh.RevisionReports(context.Background(), repo, "abc")
+	want := []ci.ReportRef{
+		{ID: ci.ReportID(second), Name: "ci", Revision: "abc", Conclusion: ci.Success},
+		{ID: ci.ReportID(docs), Name: "docs", Revision: "abc", Conclusion: ci.TimedOut},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("RevisionReports = %+v, %v; want %+v (not %d)", got, err, want, first)
+	}
+	if got, err := gh.RevisionReports(context.Background(), repo, "none"); err != nil || len(got) != 0 {
+		t.Fatalf("RevisionReports of a commit without checks = %+v, %v", got, err)
+	}
+}

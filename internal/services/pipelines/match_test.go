@@ -16,7 +16,7 @@ pipelines:
   - {name: prs-main, pipelineRun: a.yaml, on: {pull_request: {branches: [main], types: [opened, closed]}}}
   - {name: no-drafts, pipelineRun: a.yaml, on: {pull_request: {drafts: false}}}
   - {name: queue, pipelineRun: a.yaml, on: {merge_group: {branches: [main]}}}
-  - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy(\\s|$)", branches: [main]}}}
+  - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy(\\s|$)", allow: {users: [maintainer]}, branches: [main]}}}
   - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [Octo-Reviewer, second-bot]}}}
   - {name: review-main, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-reviewer], branches: [main]}}}
 `

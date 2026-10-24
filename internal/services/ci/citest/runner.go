@@ -33,6 +33,7 @@ type Runner struct {
 	runs    map[ci.RunID]*ci.Run
 	specs   map[ci.RunID]ci.RunSpec
 	tokens  map[ci.RunID]ci.Token
+	copied  map[ci.RunID]int
 	details map[ci.RunID]ci.Details
 	logs    map[string]string
 	errs    map[string]error
@@ -45,7 +46,7 @@ var _ ci.Runner = (*Runner)(nil)
 // NewRunner returns a runner without runs.
 func NewRunner(now func() time.Time) *Runner {
 	return &Runner{
-		now: now, runs: map[ci.RunID]*ci.Run{}, specs: map[ci.RunID]ci.RunSpec{}, tokens: map[ci.RunID]ci.Token{},
+		now: now, runs: map[ci.RunID]*ci.Run{}, specs: map[ci.RunID]ci.RunSpec{}, tokens: map[ci.RunID]ci.Token{}, copied: map[ci.RunID]int{},
 		details: map[ci.RunID]ci.Details{}, logs: map[string]string{}, errs: map[string]error{},
 	}
 }
@@ -147,6 +148,7 @@ func (r *Runner) Remove(id ci.RunID) {
 	delete(r.runs, id)
 	delete(r.specs, id)
 	delete(r.tokens, id)
+	delete(r.copied, id)
 	delete(r.details, id)
 }
 
@@ -176,6 +178,27 @@ func (r *Runner) SetToken(_ context.Context, run ci.Run, t ci.Token) error {
 	}
 	r.tokens[run.ID] = t
 	return nil
+}
+
+// CopySecrets counts a copy of the run's Secrets (as a run's start would).
+func (r *Runner) CopySecrets(_ context.Context, run ci.Run) error {
+	if err := r.failure("CopySecrets"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[run.ID]; !ok {
+		return ci.ErrNotFound
+	}
+	r.copied[run.ID]++
+	return nil
+}
+
+// SecretsCopied returns how many times a run's Secrets were copied.
+func (r *Runner) SecretsCopied(id ci.RunID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.copied[id]
 }
 
 func copyRun(run *ci.Run) ci.Run {
@@ -222,7 +245,7 @@ func (r *Runner) Create(_ context.Context, spec ci.RunSpec, attempt int) (ci.Run
 	}
 	r.created++
 	run := &ci.Run{
-		ID: id, Trigger: t, Attempt: attempt, Policy: spec.Concurrency.Policy, Token: spec.Token, TaskReports: spec.TaskReports,
+		ID: id, Trigger: t, Attempt: attempt, Policy: spec.Concurrency.Policy, Token: spec.Token, Secrets: spec.SecretSource(), TaskReports: spec.TaskReports,
 		Phase: ci.Held, Created: r.now().Add(time.Duration(r.created) * time.Millisecond),
 	}
 	if spec.Concurrency.Key != "" {

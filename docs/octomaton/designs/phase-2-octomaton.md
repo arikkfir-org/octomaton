@@ -76,7 +76,7 @@ The full schema and template context are in the
 | Pull request from a fork (whoever opened it), or any event from a repository that is a fork | Ignored: no check run and no run; comment commands on it get no reaction or reply, and its stored reports are never re-run |
 | Repository namespace missing | Failed check: "repository not onboarded" |
 | Newer commit on the same pull request or branch | Concurrency groups decide: `supersede` cancels older runs (the default for pull requests), `queue` runs one at a time, `latest` keeps only the newest waiting run |
-| `/command` comment on a pull request | Pipelines with a matching `on.comment.pattern` run (definitions from the default branch, code from the pull request); the commenter needs write access; 👀 when started, a reply with the result when done |
+| `/command` comment on a pull request | Pipelines with a matching `on.comment.pattern` run (definitions from the default branch, code from the pull request); the commenter must be in the command's `allow` list, as a user or through a team; the built-in `/rerun` re-runs the failed or named checks ([comment commands](comment-commands.md)); 👀 when started, a reply with the result when done |
 | Cron schedule | Pipelines with `on.schedule` run at the default branch head, once per slot |
 | Long run | The installation token is refreshed while the run lives; a live task table and per-task checks (`taskChecks`) show progress |
 | Octomaton restarts mid-dispatch | Runs are created held (`PipelineRunPending`) and released only once their check and token exist; held runs are resumed |

@@ -42,7 +42,7 @@ organization:
     - name: format
       pipelineRun: .tekton/format.yaml
       on:
-        comment: {pattern: "^/format\\b"}
+        comment: {pattern: "^/format\\b", allow: {users: [maintainer]}}
 `
 
 // The organization pipelines' definitions, each told apart from the others and from ciRun.
@@ -167,6 +167,57 @@ func TestOrganizationPipelineMountsSecretsOnPullRequests(t *testing.T) {
 	run := h.run("demo-lint-1111111-1")
 	if got := h.runner.Spec(run.ID).Secrets; !reflect.DeepEqual(got, []string{"lint-key"}) {
 		t.Fatalf("secrets = %v, want [lint-key]", got)
+	}
+}
+
+// TestOrganizationPipelineSecretsAreTheOrganizationRepositorys: an organization pipeline's Secrets
+// live in the organization repository's namespace: its run gets copies of them, made before it is
+// released, and again when its start is resumed.
+func TestOrganizationPipelineSecretsAreTheOrganizationRepositorys(t *testing.T) {
+	h := newHarness(t)
+	setupOrganization(h)
+	h.requestReview("d-1", "octo-reviewer")
+
+	run := h.run("demo-review-1111111-1")
+	org := ci.Repository{Owner: repo.Owner, Name: orgRepo.Name, FullName: orgRepo.FullName}
+	if spec := h.runner.Spec(run.ID); !reflect.DeepEqual(spec.SecretsFrom, &org) || !reflect.DeepEqual(spec.Secrets, []string{"api-key"}) {
+		t.Fatalf("spec.SecretsFrom = %+v, secrets %v; want %s's namespace", spec.SecretsFrom, spec.Secrets, orgRepo.FullName)
+	}
+	if want := (&ci.SecretSource{Repository: org, Names: []string{"api-key"}}); !reflect.DeepEqual(run.Secrets, want) {
+		t.Fatalf("run.Secrets = %+v, want %+v", run.Secrets, want)
+	}
+	if got := h.runner.SecretsCopied(run.ID); got != 1 || run.Phase != ci.Released {
+		t.Fatalf("copies = %d, phase %s; want 1 copy before the release", got, run.Phase)
+	}
+	h.runner.Update(run.ID, func(r *ci.Run) { r.Phase = ci.Held })
+	if err := h.svc.Resume(context.Background(), h.run(run.ID.Name)); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if got := h.runner.SecretsCopied(run.ID); got != 2 {
+		t.Fatalf("copies after a resume = %d, want 2", got)
+	}
+
+	// An organization pipeline without secrets gets no copies.
+	h.svc.Handle(context.Background(), command(102, "maintainer", "/format"))
+	if format := h.run("demo-format-1111111-1"); format.Secrets != nil || h.runner.Spec(format.ID).SecretsFrom != nil || h.runner.SecretsCopied(format.ID) != 0 {
+		t.Fatalf("an organization pipeline without secrets got %+v", format.Secrets)
+	}
+}
+
+// TestSecretCopiesThatFailAbortTheRun: a run whose Secrets cannot be copied is cancelled and its
+// report says why.
+func TestSecretCopiesThatFailAbortTheRun(t *testing.T) {
+	h := newHarness(t)
+	setupOrganization(h)
+	h.runner.Fail("CopySecrets", errors.New("Secret api-key is not in namespace ci-tooling"))
+	h.requestReview("d-1", "octo-reviewer")
+
+	run := h.run("demo-review-1111111-1")
+	if !run.CancelRequested || run.Cancellation.Reason != "could not be started" || !run.Done {
+		t.Fatalf("run = %+v, want it aborted", run)
+	}
+	if r := h.onlyReport("AI Review"); r.Conclusion != ci.Failure || !strings.Contains(r.Summary, "copying the run's Secrets: Secret api-key is not in namespace ci-tooling") {
+		t.Fatalf("report = %+v", r)
 	}
 }
 

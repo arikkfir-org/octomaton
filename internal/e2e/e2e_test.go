@@ -61,7 +61,7 @@ pipelines:
   - name: preview
     pipelineRun: .tekton/ci.yaml
     on:
-      comment: {pattern: "^/preview\\b"}
+      comment: {pattern: "^/preview\\b", allow: {users: [arikkfir]}}
     params:
       revision: "{{ .Revision }}"
       target: "{{ .Comment.Arguments }}"

@@ -3,7 +3,9 @@ package github
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/go-github/v92/github"
@@ -131,6 +133,31 @@ func (c *installation) SuiteReports(ctx context.Context, repo ci.Repository, sui
 		}
 		opts.Page = resp.NextPage
 	}
+}
+
+// RevisionReports lists the latest of the App's check runs of each name on a commit.
+func (c *installation) RevisionReports(ctx context.Context, repo ci.Repository, revision string) ([]ci.ReportRef, error) {
+	opts := &github.ListCheckRunsOptions{Filter: new("latest"), AppID: &c.app.id, ListOptions: github.ListOptions{PerPage: 100}}
+	latest := map[string]ci.ReportRef{}
+	for {
+		res, resp, err := c.gh.Checks.ListCheckRunsForRef(ctx, repo.Owner, repo.Name, revision, opts)
+		if err != nil {
+			c.app.metrics.CheckRunError(ctx, "list")
+			return nil, fmt.Errorf("listing check runs of %s: %w", revision, err)
+		}
+		for _, cr := range res.CheckRuns {
+			if ref := reportRef(cr); ref.ID > latest[ref.Name].ID {
+				latest[ref.Name] = ref
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	refs := slices.Collect(maps.Values(latest))
+	slices.SortFunc(refs, func(a, b ci.ReportRef) int { return int(a.ID - b.ID) })
+	return refs, nil
 }
 
 // reportRef names a check run, with the trigger its output carries when it can be read.

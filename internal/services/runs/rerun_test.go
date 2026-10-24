@@ -145,7 +145,7 @@ func TestRerunAfterCommentUsesTheCommentsConfiguration(t *testing.T) {
 	ctx := context.Background()
 	setupComment(h)
 	h.svc.Handle(ctx, command(101, "maintainer", "/deploy staging"))
-	h.svc.Rerun(ctx, rerun("maintainer", h.onlyReport("deploy")))
+	h.svc.Rerun(ctx, rerun("maintainer", h.onlyReport("Deploy Staging")))
 	runs := h.runner.Runs()
 	if len(runs) != 2 {
 		t.Fatalf("runs = %d, want 2", len(runs))

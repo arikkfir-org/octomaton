@@ -57,6 +57,11 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
 		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, Concurrency: conc,
 	}
+	if p.Organization() && len(p.Secrets) > 0 {
+		// An organization pipeline's Secrets live with its definition, in the organization repository's namespace.
+		org := sibling(t.Repository, s.OrganizationRepository)
+		spec.SecretsFrom = &org
+	}
 	// The files the definition references are beside it, read where it was.
 	dir := path.Dir(p.PipelineRun.Path)
 	read := func(ctx context.Context, name string) ([]byte, error) {
@@ -154,6 +159,9 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 	}
 	if err == nil && run.Token != nil {
 		err = s.mintToken(ctx, run)
+	}
+	if err == nil && run.Secrets != nil {
+		err = s.copySecrets(ctx, run)
 	}
 	if err == nil {
 		err = s.release(ctx, run)
@@ -298,6 +306,14 @@ func (s *Service) mintToken(ctx context.Context, run ci.Run) error {
 		return fmt.Errorf("minting the run's token: %w", err)
 	}
 	return s.Runner.SetToken(ctx, run, tok)
+}
+
+// copySecrets copies the Secrets of another namespace the run mounts into its own.
+func (s *Service) copySecrets(ctx context.Context, run ci.Run) error {
+	if err := s.Runner.CopySecrets(ctx, run); err != nil {
+		return fmt.Errorf("copying the run's Secrets: %w", err)
+	}
+	return nil
 }
 
 // abort cancels a run that could not be started, fails its report and lets it go.

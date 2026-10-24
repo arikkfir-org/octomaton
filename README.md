@@ -26,7 +26,7 @@ sequenceDiagram
   SB->>GH: read the Pipeline, Task and StepAction files the PipelineRun references by name, and inline them
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
-  SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy
+  SB->>K8s: create the token Secret and the copies of an organization pipeline's Secrets (optional), then release the run per its concurrency policy
   loop reports (elected leader only)
     K8s-->>SB: PipelineRun and TaskRun changes
     SB->>GH: check run in_progress, task table, completed with conclusion and failed-step logs
@@ -41,8 +41,8 @@ sequenceDiagram
    branch, finds the existing run. Each comment command, review request and pull request change (`edited`, `labeled`,
    `unlabeled`) gets its own run, new commits on a pull
    request run every review request still pending on it again, and re-runs create the next attempt.
-4. Runs are created held, then their check run and token Secret are created, then they are released per their
-   concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
+4. Runs are created held, then their check run, token Secret and the copies of an organization pipeline's Secrets
+   are created, then they are released per their concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
    five minutes is resumed by the leader (which also serves as the poll for queued runs).
 5. The elected leader watches the runs and keeps their checks up to date, refreshes GitHub tokens of long runs, fires
    cron schedules and deletes PVCs of finished runs.
@@ -118,7 +118,10 @@ pipelines:
         tags: ["v*"]                   # tag globs
         paths: []                      # optional
       comment:                         # pull request comment command, e.g. "/deploy staging"
-        pattern: "^/deploy\\b"         # regexp on the comment's first line; commenter needs write access
+        pattern: "^/deploy\\b"         # regexp on the comment's first line
+        allow:                         # required: who may invoke it
+          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request
         reviewers: [arikkfir-reviewer] # GitHub logins, case-insensitive; required
@@ -134,17 +137,21 @@ pipelines:
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
                                        # one; only when every trigger is comment, review_request or schedule, or in
                                        # an organization pipeline
-    secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
-                                       # trigger is comment, review_request or schedule, or in an organization
-                                       # pipeline
+    secrets: []                        # optional: Secrets it may mount, of the run's namespace (of the organization
+                                       # repository's in an organization pipeline); only when every trigger is
+                                       # comment, review_request or schedule, or in an organization pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
     concurrency:                       # optional; default for pull_request and review_request:
                                        # group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
+  rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
+    allow: {users: [arikkfir], teams: [maintainers]}
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
+  commands: {}                         # same as commands, for every repository without a commands section of its own
 ```
 
 ### Triggers
@@ -154,7 +161,7 @@ organization:                          # only in the organization repository: pi
 | `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. |
 | `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
-| `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by users with write access. |
+| `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by a commenter in `allow` ([Comment commands](#comment-commands)). A pattern that matches `/rerun`, the built-in command, is refused. |
 | `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people; one GitHub would not serve is. |
 | `schedule` | each `cron` slot (5 fields, UTC) | Runs at the head of the default branch, once per slot, up to 10 minutes late. |
 
@@ -179,7 +186,8 @@ file of the organization repository. Their runs belong to the repository: its na
 token. A repository pipeline with the name or check name of an organization pipeline is a configuration error of that
 repository, so no repository can replace one. Organization pipelines can't use `schedule`. Since they are read at the
 organization repository's default branch whatever triggers them, they may list `secrets` and ask for a token for every
-repository on any trigger. `organization` in any other repository, or when the setting is unset, is a
+repository on any trigger. Their Secrets live with their definition: `secrets` names Secrets of the organization
+repository's namespace, which each run gets copies of ([Pipeline settings](#pipeline-settings)). `organization` in any other repository, or when the setting is unset, is a
 configuration error. Without the setting, the file or the section, there are no organization pipelines. A repository
 without its own `.octomaton.yaml` still runs them, and an unreadable or invalid organization repository configuration
 stops every pipeline of the repository, reported on the `octomaton` check.
@@ -193,7 +201,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
-| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
+| `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -309,7 +317,7 @@ pipelines:
   - name: deploy                             # "/deploy staging" on a pull request into main
     pipelineRun: .tekton/deploy.yaml
     on:
-      comment: {pattern: "^/deploy\\b", branches: [main]}
+      comment: {pattern: "^/deploy\\b", allow: {teams: [deployers]}, branches: [main]}
     params:
       revision: "{{ .Revision }}"
       environment: "{{ .Comment.Arguments }}"
@@ -343,7 +351,7 @@ organization:
       params:
         repository: "{{ .Repository.FullName }}"
         number: "{{ .PullRequest.Number }}"
-      secrets: [model-api-key]               # a Secret of the same name in each repository's namespace
+      secrets: [model-api-key]               # a Secret of the organization repository's namespace, copied for each run
 ```
 
 Validate a configuration and the PipelineRun files it references, with the files they reference, with
@@ -376,6 +384,29 @@ event with placeholder values, so a template that only works for one event is re
   needs write access); re-running `octomaton` re-evaluates the whole event.
 - Comment commands get a 👀 reaction when started, a 👎 and a reply when declined, and a reply with the result when done.
 
+## Comment commands
+
+A command is the first line of a new comment on a pull request, starting with `/`: a `comment` trigger's `pattern`
+matches it, or it is a built-in command. The configuration is read from the default branch, so a pull request cannot
+change what its own commands run or who may run them, and the pipeline runs at the pull request's head. Pull requests
+from forks get no answer at all ([Security](#security)).
+
+- **Who**: every command has an allow-list, `allow`, the only authority on who may invoke it: `users` are GitHub logins,
+  people's and bots' alike, and `teams` are slugs of teams of the repository's owner organization, checked by active
+  membership. A commenter outside it, write access or not, gets a 👎 and a reply saying so; one whose team
+  membership could not be read is declined too (the reply says to see the logs). Checking teams needs the App's
+  Members: read permission ([GitHub App](#github-app)).
+- **Middle dots**: Octomaton drops U+00B7 (`·`) from the first line before matching, so `·/·r·erun docs` is
+  `/rerun docs`. A proxy in front of some commenters' clients inserts them into slash commands; whether such a
+  commenter may run a command is its allow-list's decision, not the proxy's. Nothing else in the comment is touched.
+- **Built-in `/rerun [check...]`**: enabled by `commands.rerun.allow` in `.octomaton.yaml` (the organization
+  repository's `organization.commands` applies to every repository without a `commands` section of its own). Without
+  arguments it re-runs every check at the pull request's head that failed, timed out or was cancelled; with arguments
+  the named checks (each a check's name, spaces included, or a pipeline's, case-insensitive, separated by spaces: `/rerun Continuous Integration docs`) whatever their state, as **Re-run** on the
+  check would: the pipeline runs again as the next attempt with the check's stored trigger, and `octomaton`
+  re-evaluates its event. The reply names what was wrong: the command is not enabled, the commenter is not allowed,
+  the pull request is closed, nothing failed, or a name matches no check.
+
 ## Security
 
 - Only webhooks with a valid signature are processed; only installations on `OCTOMATON_GITHUB_ALLOWED_OWNERS` are
@@ -388,7 +419,12 @@ event with placeholder values, so a template that only works for one event is re
   workspaces, projected sources, `env` and `envFrom` are checked). Only an organization pipeline, or a pipeline whose
   every trigger is `comment`, `review_request` or `schedule`, may list any, so definitions at a pull request's head
   never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
-  pull request of the owner, Dependabot's included: it must never run the pull request's code. Tokens are scoped to the
+  pull request of the owner, Dependabot's included: it must never run the pull request's code. An organization
+  pipeline's Secrets are read from the organization repository's namespace, so a host needs them in no other
+  namespace: once it keeps them there alone, no repository's own default-branch pipelines can mount them (the
+  organization repository's own pipelines, which run in that namespace, still can). Each run gets copies owned by it,
+  named with a random nonce so that no other pipeline can list them, which the guard allows in place of the names
+  listed (and redaction covers, like every Secret the run references). Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
   (`githubToken.repositories: all`), which follows the same rule as `secrets`.
 - Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`
@@ -396,12 +432,16 @@ event with placeholder values, so a template that only works for one event is re
   resolved to a file beside the PipelineRun file, in the same repository at the same commit, and inlined before the
   checks run ([Pipeline, Task and StepAction files](#pipeline-task-and-stepaction-files)), so the run Octomaton checks
   and Tekton gets holds its whole `spec.pipelineSpec`, with a `taskSpec` per task and no step `ref`.
+- A comment command runs only for a commenter its allow-list names, as a user or through a team; repository
+  permissions play no part, so a bot can be allowed and a collaborator left out. The list is read from the default
+  branch, like the command's definitions. The middle dots Octomaton drops from a command line change who gets through
+  a proxy, never who is allowed.
 - A review request is only as trusted as whoever requested it: that takes triage or write access, and the pull request
   must come from the repository's own branches. Only new commits on such a branch, which take write access, run a
   pending request again.
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
-  name. Their runs get the repository's namespace and token, like its own.
+  name. Their runs get the repository's namespace and token, like its own, and copies of the Secrets they list.
 - A tag push runs the definitions of the default branch, never the tagged commit's: pushing a tag takes only write
   access and can name any commit, so a tag could otherwise run an unreviewed pipeline, with the identities the
   tenant's ServiceAccounts admit for tags.
@@ -493,6 +533,8 @@ needs:
 
 - Repository permissions: Checks: read and write; Contents: read; Metadata: read; Pull requests: read and write; Merge
   queues: read.
+- Organization permissions: Members: read, for the `teams` of comment commands' allow-lists. Without it every team
+  check fails and the command is declined, unless the commenter is named as a user.
 - Events: `push`, `pull_request`, `issue_comment`, `check_suite`, `check_run`, `merge_group`. Octomaton answers any
   other event `202` and ignores it.
 - Webhook URL: the server's `/github/hooks`, signed with the App's webhook secret.
@@ -522,7 +564,7 @@ the leader, the PipelineRun informer synced).
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
+| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete (`get` also reads an organization pipeline's Secrets in the organization repository's namespace, a tenant like the others); Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
 | Cluster (ClusterRole and ClusterRoleBinding `octomaton`) | PipelineRuns and TaskRuns: get, list, watch (the leader watches PipelineRuns in every namespace, for reports, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace (Role and RoleBinding `octomaton`) | Leases: get, list, watch, create, update, patch (leader election) |
 

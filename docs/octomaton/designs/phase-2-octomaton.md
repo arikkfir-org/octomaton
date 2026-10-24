@@ -118,8 +118,8 @@ flowchart LR
 | `ci-fin` | `ci-fin-release` | `main` | none | writes repository `images` and Fin's CI cache | fin's `release` |
 | `ci-fin` | `ci-fin-preview` | none | none | writes repository `previews`, reads the CI cache | fin's `preview` |
 | `ci-fin` | `ci-fin-ci` | none | none | creates reports under `reports/fin/` of `arikkfir-tests`, reads client `fin-e2e`'s secret and the CI cache | fin's `ci` and `e2e` |
-| `ci-infra` | `ci-infra-plan` | none | reads the project, the state and the plan's credentials | infra's `ci` |
-| `ci-infra` | `ci-infra-apply` | `main` | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
+| `ci-infra` | `ci-infra-plan` | none | none | reads the project, the state and the plan's credentials | infra's `ci` |
+| `ci-infra` | `ci-infra-apply` | `main` | none | administers what `terraform/gcp` manages | infra's `apply` ([Terraform plan and apply](../../infra/designs/terraform-plan-apply.md)) |
 
 Fin's `ci-fin-preview` and `ci-fin-ci` carry no annotation, since pull requests' runs need them: what they write reaches only pull requests' environments and the tests site, behind the hub's sign-in. Every grant: `infra`'s [IAM](../../infra/terraform/gcp.md#iam); what Octomaton may do in a tenant: ClusterRole [`octomaton-tenant`](deployment.md#rbac).
 

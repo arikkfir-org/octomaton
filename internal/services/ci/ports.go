@@ -120,6 +120,10 @@ type Runner interface {
 
 	// SetToken stores a run's code-host token where the run reads it, replacing any older one.
 	SetToken(ctx context.Context, run Run, t Token) error
+	// CopySecrets copies run.Secrets into the run's namespace, owned by the run, as the run mounts
+	// them (Create rewrote its references to the copies); a copy that exists already is kept. A
+	// source that is missing is an error.
+	CopySecrets(ctx context.Context, run Run) error
 	// TokenExpiry returns when a run's stored token expires; ok is false when it has none.
 	TokenExpiry(ctx context.Context, id RunID) (expires time.Time, ok bool, err error)
 

@@ -466,6 +466,157 @@ func TestTokens(t *testing.T) {
 	}
 }
 
+// TestSecretCopies: a run whose Secrets are another namespace's (an organization pipeline's) mounts
+// copies named after it, created in its namespace and owned by it; its check refuses a Secret that
+// is not in the source namespace, even one in the run's own.
+func TestSecretCopies(t *testing.T) {
+	ctx := context.Background()
+	tooling := ci.Repository{Owner: "octo-org", Name: "tooling", FullName: "octo-org/tooling"}
+	spec := demoSpec(pushTrigger(shaA))
+	spec.Definition = []byte(demoDef + "  workspaces:\n    - {name: key, secret: {secretName: api-key}}\n")
+	spec.Secrets, spec.SecretsFrom = []string{"api-key"}, &tooling
+	source := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "api-key", Namespace: "ci-tooling"}, Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"key": []byte("k1")}}
+
+	t.Run("missing in the source namespace", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		// A Secret of the same name in the run's own namespace is not the source.
+		own := source.DeepCopy()
+		own.Namespace = demoNS
+		if _, err := h.kube.CoreV1().Secrets(demoNS).Create(ctx, own, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		var refusal *ci.Refusal
+		err := h.r.Check(ctx, spec)
+		if !errors.As(err, &refusal) || refusal.Cause != nil || !strings.Contains(refusal.Reason, "Secret `api-key` is not in namespace `ci-tooling`") {
+			t.Fatalf("Check = %v, want a refusal naming the missing Secret", err)
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.kube.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("boom") })
+		var refusal *ci.Refusal
+		if err := h.r.Check(ctx, spec); !errors.As(err, &refusal) || refusal.Cause == nil || !strings.Contains(refusal.Reason, "Could not read Secret `api-key` in namespace `ci-tooling`") {
+			t.Fatalf("Check = %v, want a refusal with a cause", err)
+		}
+	})
+	t.Run("too long a copy name", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		long := spec
+		long.Secrets = []string{strings.Repeat("k", 220)}
+		var refusal *ci.Refusal
+		if err := h.r.Check(ctx, long); !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, "longer than 253 characters") {
+			t.Fatalf("Check = %v, want a refusal for the name", err)
+		}
+	})
+	t.Run("copied and mounted", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		if _, err := h.kube.CoreV1().Secrets("ci-tooling").Create(ctx, source, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.r.Check(ctx, spec); err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		run := h.create(spec, 1)
+		// The copy's name holds a nonce no other pipeline can guess from the run's name, which is
+		// public; the run records it, and the PipelineRun references the copy.
+		nonce := run.Secrets.Nonce
+		if len(nonce) != 2*nonceBytes || h.get(run.ID).Secrets.Nonce != nonce {
+			t.Fatalf("nonce = %q, want %d hex characters recorded on the run", nonce, 2*nonceBytes)
+		}
+		want := &ci.SecretSource{Repository: tooling, Names: []string{"api-key"}, Nonce: nonce}
+		if !reflect.DeepEqual(run.Secrets, want) || !reflect.DeepEqual(h.get(run.ID).Secrets, want) {
+			t.Fatalf("run.Secrets = %+v, want %+v", run.Secrets, want)
+		}
+		copy := "demo-ci-1111111-1-api-key-" + nonce
+		if got, want := secrets(h.object(run.ID).Object), []string{copy, "demo-ci-1111111-1-github-token"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("the PipelineRun references %v, want %v", got, want)
+		}
+		if other := h.create(spec, 2); other.Secrets.Nonce == nonce {
+			t.Fatalf("two runs got the same nonce %q", nonce)
+		}
+		if err := h.r.CopySecrets(ctx, run); err != nil {
+			t.Fatalf("CopySecrets: %v", err)
+		}
+		secret, err := h.kube.CoreV1().Secrets(demoNS).Get(ctx, copy, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secret.Type != corev1.SecretTypeOpaque || string(secret.Data["key"]) != "k1" || len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].UID != h.object(run.ID).GetUID() ||
+			secret.Labels[labelManagedBy] != managedByValue || secret.Labels[labelPipeline] != "ci" || secret.Annotations[annotationSecretSource] != "ci-tooling/api-key" || secret.Annotations[annotationRepository] != "octo-org/demo" {
+			t.Fatalf("copied Secret = %+v", secret)
+		}
+		// A copy is a point-in-time read: copying again keeps it, and the source's loss is no error.
+		source2 := source.DeepCopy()
+		source2.Data["key"] = []byte("k2")
+		if _, err := h.kube.CoreV1().Secrets("ci-tooling").Update(ctx, source2, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.r.CopySecrets(ctx, run); err != nil {
+			t.Fatalf("CopySecrets again: %v", err)
+		}
+		secret, _ = h.kube.CoreV1().Secrets(demoNS).Get(ctx, copy, metav1.GetOptions{})
+		if string(secret.Data["key"]) != "k1" {
+			t.Fatalf("the copy was replaced: %q", secret.Data["key"])
+		}
+		if err := h.kube.CoreV1().Secrets(demoNS).Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.kube.CoreV1().Secrets("ci-tooling").Delete(ctx, "api-key", metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.r.CopySecrets(ctx, run); err == nil || !strings.Contains(err.Error(), "Secret api-key is not in namespace ci-tooling") {
+			t.Fatalf("CopySecrets without the source = %v, want an error", err)
+		}
+		forgotten := run
+		forgotten.Secrets = &ci.SecretSource{Repository: tooling, Names: []string{"api-key"}}
+		if err := h.r.CopySecrets(ctx, forgotten); err == nil || !strings.Contains(err.Error(), "does not know the names") {
+			t.Fatalf("CopySecrets without the nonce = %v, want an error", err)
+		}
+	})
+	t.Run("a repository pipeline cannot name a copy", func(t *testing.T) {
+		// A copy's name is the run's, the Secret's and a nonce; a pipeline that lists a name
+		// guessed from a run's name finds no Secret, so its pods never start, and a name that
+		// exists was not guessable: every copy is created after its run, with a fresh nonce.
+		h := newRunnerHarness(t)
+		if _, err := h.kube.CoreV1().Secrets("ci-tooling").Create(ctx, source, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		run := h.create(spec, 1)
+		if err := h.r.CopySecrets(ctx, run); err != nil {
+			t.Fatalf("CopySecrets: %v", err)
+		}
+		guessed := spec
+		guessed.SecretsFrom = nil
+		guessed.Secrets = []string{"demo-ci-1111111-1-api-key"}
+		guessed.Definition = []byte(demoDef + "  workspaces:\n    - {name: key, secret: {secretName: demo-ci-1111111-1-api-key}}\n")
+		other := h.create(guessed, 2)
+		if names := secrets(h.object(other.ID).Object); slices.ContainsFunc(names, func(n string) bool { return strings.HasSuffix(n, run.Secrets.Nonce) }) {
+			t.Fatalf("the guessing run references a copy: %v", names)
+		}
+		list, err := h.kube.CoreV1().Secrets(demoNS).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range list.Items {
+			if s.Name == "demo-ci-1111111-1-api-key" {
+				t.Fatalf("a Secret with the guessed name exists: %+v", s)
+			}
+		}
+	})
+	t.Run("a repository pipeline's Secrets are its own namespace's", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		own := spec
+		own.SecretsFrom = nil
+		run := h.create(own, 1)
+		if run.Secrets != nil || !slices.Contains(secrets(h.object(run.ID).Object), "api-key") {
+			t.Fatalf("run.Secrets = %+v, references %v", run.Secrets, secrets(h.object(run.ID).Object))
+		}
+		if err := h.r.CopySecrets(ctx, run); err != nil {
+			t.Fatalf("CopySecrets of a run without copies: %v", err)
+		}
+	})
+}
+
 func (h *runnerHarness) taskRun(run ci.RunID, name, task string, created time.Time, status map[string]any) {
 	h.t.Helper()
 	tr := &unstructured.Unstructured{Object: map[string]any{

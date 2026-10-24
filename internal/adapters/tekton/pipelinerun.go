@@ -8,6 +8,7 @@ package tekton
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"octomaton.dev/internal/services/ci"
 	"sigs.k8s.io/yaml"
 )
 
@@ -108,6 +110,10 @@ const (
 	annotationExpiresAt = "octomaton.dev/expires-at"
 	// annotationPermissions lists the token permissions on a token Secret (JSON).
 	annotationPermissions = "octomaton.dev/permissions"
+	// annotationSecrets holds the source of the Secrets copied for a run (ci.SecretSource, JSON).
+	annotationSecrets = "octomaton.dev/secrets"
+	// annotationSecretSource names the Secret a copied Secret was read from (namespace/name).
+	annotationSecretSource = "octomaton.dev/secret-source"
 )
 
 const (
@@ -218,6 +224,35 @@ func tokenSecretName(pipelineRunName string) string {
 	return pipelineRunName + tokenSecretSuffix
 }
 
+// maxSecretNameLength bounds a Secret's name (a DNS subdomain).
+const maxSecretNameLength = 253
+
+// nonceBytes is the length of the random part of a copied Secret's name, before hex encoding.
+const nonceBytes = 8
+
+// newNonce returns the random part of a run's copied Secrets' names: 16 hex characters.
+func newNonce() string {
+	b := make([]byte, nonceBytes)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// copySecretName is the name of a run's copy of a Secret of another namespace:
+// <run>-<secret>-<nonce>. The nonce keeps the name from being guessed from the run's, which is
+// public, so no other pipeline of the namespace can list the copy in its secrets.
+func copySecretName(pipelineRunName, secret, nonce string) string {
+	return pipelineRunName + "-" + secret + "-" + nonce
+}
+
+// copySecretNames maps each Secret of src to the name of the run's copy.
+func copySecretNames(pipelineRunName string, src ci.SecretSource) map[string]string {
+	copies := make(map[string]string, len(src.Names))
+	for _, name := range src.Names {
+		copies[name] = copySecretName(pipelineRunName, name, src.Nonce)
+	}
+	return copies
+}
+
 // renderInput describes how Octomaton customizes a PipelineRun.
 type renderInput struct {
 	Namespace string
@@ -287,7 +322,7 @@ func merge(base, overrides map[string]string) map[string]string {
 	if len(base) == 0 && len(overrides) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(base)+len(overrides))
+	out := make(map[string]string, len(base))
 	for k, v := range base {
 		out[k] = v
 	}
@@ -356,18 +391,17 @@ func indexByName(list []any, name string) int {
 	return -1
 }
 
-// secrets lists every Secret a PipelineRun names: in a volume or workspace
-// (secretName), a projected source (secret.name) or an environment variable
+// walkSecretRefs calls visit with every field of a PipelineRun that names a Secret, and its mapping:
+// in a volume or workspace (secretName), a projected source (secret.name) or an environment variable
 // (secretKeyRef.name, secretRef.name).
-func secrets(obj map[string]any) []string {
-	var out []string
+func walkSecretRefs(obj map[string]any, visit func(m map[string]any, field string)) {
 	var walk func(key string, v any)
 	walk = func(key string, v any) {
 		switch t := v.(type) {
 		case map[string]any:
 			for k, child := range t {
-				if name, ok := child.(string); ok && (k == "secretName" || (k == "name" && (key == "secret" || key == "secretKeyRef" || key == "secretRef"))) {
-					out = append(out, name)
+				if _, ok := child.(string); ok && (k == "secretName" || (k == "name" && (key == "secret" || key == "secretKeyRef" || key == "secretRef"))) {
+					visit(t, k)
 				}
 				walk(k, child)
 			}
@@ -378,8 +412,23 @@ func secrets(obj map[string]any) []string {
 		}
 	}
 	walk("", obj)
+}
+
+// secrets lists every Secret a PipelineRun names, sorted.
+func secrets(obj map[string]any) []string {
+	var out []string
+	walkSecretRefs(obj, func(m map[string]any, field string) { out = append(out, m[field].(string)) })
 	sort.Strings(out)
 	return out
+}
+
+// renameSecrets replaces every reference to a Secret named in renames with the name it maps to.
+func renameSecrets(obj map[string]any, renames map[string]string) {
+	walkSecretRefs(obj, func(m map[string]any, field string) {
+		if to, ok := renames[m[field].(string)]; ok {
+			m[field] = to
+		}
+	})
 }
 
 // checkSecrets refuses a PipelineRun that references any Secret other than its own token Secret

@@ -26,7 +26,7 @@ sequenceDiagram
   SB->>GH: read the Pipeline, Task and StepAction files the PipelineRun references by name, and inline them
   SB->>K8s: create the PipelineRun held (spec.status: PipelineRunPending)
   SB->>GH: create the check run (queued, linked to the Tekton Dashboard)
-  SB->>K8s: create the token Secret (optional), then release the run per its concurrency policy
+  SB->>K8s: create the token Secret and the copies of an organization pipeline's Secrets (optional), then release the run per its concurrency policy
   loop reports (elected leader only)
     K8s-->>SB: PipelineRun and TaskRun changes
     SB->>GH: check run in_progress, task table, completed with conclusion and failed-step logs
@@ -41,8 +41,8 @@ sequenceDiagram
    branch, finds the existing run. Each comment command, review request and pull request change (`edited`, `labeled`,
    `unlabeled`) gets its own run, new commits on a pull
    request run every review request still pending on it again, and re-runs create the next attempt.
-4. Runs are created held, then their check run and token Secret are created, then they are released per their
-   concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
+4. Runs are created held, then their check run, token Secret and the copies of an organization pipeline's Secrets
+   are created, then they are released per their concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
    five minutes is resumed by the leader (which also serves as the poll for queued runs).
 5. The elected leader watches the runs and keeps their checks up to date, refreshes GitHub tokens of long runs, fires
    cron schedules and deletes PVCs of finished runs.
@@ -135,9 +135,10 @@ pipelines:
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
                                        # one; only when every trigger reads definitions from a default branch, or in
                                        # an organization pipeline
-    secrets: []                        # optional: Secrets in the run's namespace it may mount; only when every
-                                       # trigger reads definitions from a default branch (comment, review_request,
-                                       # schedule), or in an organization pipeline
+    secrets: []                        # optional: Secrets it may mount, of the run's namespace (of the organization
+                                       # repository's in an organization pipeline); only when every trigger reads
+                                       # definitions from a default branch (comment, review_request, schedule), or
+                                       # in an organization pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
     concurrency:                       # optional; default for pull_request and review_request:
                                        # group "pr-<number>", policy supersede
@@ -184,7 +185,8 @@ file of the organization repository. Their runs belong to the repository: its na
 token. A repository pipeline with the name or check name of an organization pipeline is a configuration error of that
 repository, so no repository can replace one. Organization pipelines can't use `schedule`. Since they are read at the
 organization repository's default branch whatever triggers them, they may list `secrets` and ask for a token for every
-repository on any trigger. `organization` in any other repository, or when the setting is unset, is a
+repository on any trigger. Their Secrets live with their definition: `secrets` names Secrets of the organization
+repository's namespace, which each run gets copies of ([Pipeline settings](#pipeline-settings)). `organization` in any other repository, or when the setting is unset, is a
 configuration error. Without the setting, the file or the section, there are no organization pipelines. A repository
 without its own `.octomaton.yaml` still runs them, and an unreadable or invalid organization repository configuration
 stops every pipeline of the repository, reported on the `octomaton` check.
@@ -198,7 +200,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
 | `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
-| `secrets` | Names of Secrets in the run's namespace that its runs may mount, besides the token. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
+| `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any, because only those read definitions from a default branch. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
@@ -348,7 +350,7 @@ organization:
       params:
         repository: "{{ .Repository.FullName }}"
         number: "{{ .PullRequest.Number }}"
-      secrets: [model-api-key]               # a Secret of the same name in each repository's namespace
+      secrets: [model-api-key]               # a Secret of the organization repository's namespace, copied for each run
 ```
 
 Validate a configuration and the PipelineRun files it references, with the files they reference, with
@@ -416,7 +418,12 @@ from forks get no answer at all ([Security](#security)).
   workspaces, projected sources, `env` and `envFrom` are checked). Only an organization pipeline, or a pipeline whose
   every trigger reads its definitions from the default branch, may list any, so definitions at a pull request's head
   never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
-  pull request of the owner, Dependabot's included: it must never run the pull request's code. Tokens are scoped to the
+  pull request of the owner, Dependabot's included: it must never run the pull request's code. An organization
+  pipeline's Secrets are read from the organization repository's namespace, so a host needs them in no other
+  namespace: once it keeps them there alone, no repository's own default-branch pipelines can mount them (the
+  organization repository's own pipelines, which run in that namespace, still can). Each run gets copies owned by it,
+  named with a random nonce so that no other pipeline can list them, which the guard allows in place of the names
+  listed (and redaction covers, like every Secret the run references). Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
   (`githubToken.repositories: all`), which follows the same rule as `secrets`.
 - Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`
@@ -433,7 +440,7 @@ from forks get no answer at all ([Security](#security)).
   pending request again.
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
-  name. Their runs get the repository's namespace and token, like its own.
+  name. Their runs get the repository's namespace and token, like its own, and copies of the Secrets they list.
 - A ServiceAccount in a tenant namespace may carry the annotation `octomaton.dev/branches`: comma-separated branch
   globs, as in `on.push.branches`. A run that names it (`spec.taskRunTemplate.serviceAccountName` or
   `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch matches one. The run's branch is the branch
@@ -551,7 +558,7 @@ the leader, the PipelineRun informer synced).
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
+| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete (`get` also reads an organization pipeline's Secrets in the organization repository's namespace, a tenant like the others); Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
 | Cluster (ClusterRole and ClusterRoleBinding `octomaton`) | PipelineRuns and TaskRuns: get, list, watch (the leader watches PipelineRuns in every namespace, for reports, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace (Role and RoleBinding `octomaton`) | Leases: get, list, watch, create, update, patch (leader election) |
 

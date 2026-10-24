@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
+	"octomaton.dev/internal/services/ci"
 	"sigs.k8s.io/yaml"
 )
 
@@ -284,6 +285,42 @@ spec:
 				t.Fatalf("CheckSecrets = %v, want a refusal containing %q", err, tt.refused)
 			}
 		})
+	}
+}
+
+// TestRenameSecrets: every reference to a Secret of another namespace (a volume or workspace, a
+// projected source, env and envFrom) is rewritten to the run's copy; other Secrets stay.
+func TestRenameSecrets(t *testing.T) {
+	doc := `
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+spec:
+  workspaces:
+    - {name: token, secret: {secretName: run-github-token}}
+    - {name: creds, secret: {secretName: registry-creds}}
+  taskRunTemplate:
+    podTemplate:
+      volumes:
+        - {name: v, secret: {secretName: volume-secret}}
+        - name: projected
+          projected: {sources: [{secret: {name: projected-secret}}]}
+  pipelineSpec:
+    tasks:
+      - name: t
+        taskSpec:
+          steps:
+            - name: s
+              env: [{name: A, valueFrom: {secretKeyRef: {name: env-secret, key: k}}}]
+              envFrom: [{secretRef: {name: envfrom-secret}}]
+`
+	pr, err := parsePipelineRun([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renameSecrets(pr.Object, copySecretNames("run", ci.SecretSource{Names: []string{"registry-creds", "volume-secret", "projected-secret", "env-secret", "envfrom-secret", "unused"}, Nonce: "n"}))
+	want := []string{"run-env-secret-n", "run-envfrom-secret-n", "run-github-token", "run-projected-secret-n", "run-registry-creds-n", "run-volume-secret-n"}
+	if got := secrets(pr.Object); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Secrets after the rename = %v, want %v", got, want)
 	}
 }
 

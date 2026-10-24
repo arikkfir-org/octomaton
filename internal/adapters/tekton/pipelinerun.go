@@ -308,7 +308,7 @@ func merge(base, overrides map[string]string) map[string]string {
 	if len(base) == 0 && len(overrides) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(base)+len(overrides))
+	out := make(map[string]string, len(base))
 	for k, v := range base {
 		out[k] = v
 	}

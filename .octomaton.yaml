@@ -33,8 +33,3 @@ pipelines:
       policy: latest
 
 
-# "/rerun [check...]" on a pull request re-runs its failed checks, or the named ones, for those listed.
-commands:
-  rerun:
-    allow:
-      users: [arikkfir]

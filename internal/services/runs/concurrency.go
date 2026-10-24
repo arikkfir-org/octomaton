@@ -201,7 +201,17 @@ func createdBefore(a, b ci.Run) bool {
 
 func (s *Service) supersededBy(ctx context.Context, id ci.RunID, why ci.Cancellation) error {
 	s.Logger.InfoContext(ctx, "Superseding run", "run", id.String(), "supersededBy", why.SupersededBy, "newerCommit", why.NewerCommit)
-	return s.Runner.Cancel(ctx, id, why)
+	err := s.Runner.Cancel(ctx, id, why)
+	if err == nil {
+		return nil
+	}
+	// The run may have finished, or gone, between the group's listing and the cancel, which the
+	// runner then refuses: a finished run needs no superseding.
+	if run, found, getErr := s.get(ctx, id); getErr == nil && (!found || run.Phase == ci.Finished) {
+		s.Logger.InfoContext(ctx, "Run finished before it was superseded", "run", id.String())
+		return nil
+	}
+	return err
 }
 
 // currentHead returns the commit at the head of the trigger's pull request or branch; known is

@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -38,6 +39,43 @@ func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {
 	}
 	if h.run("demo-ci-2222222-1").CancelRequested {
 		t.Fatalf("the head's run must keep running")
+	}
+}
+
+// A rival that finishes between the group's listing and the cancel is not superseded, and that is
+// no error: the runner refuses to cancel a finished run, and the new run still goes.
+func TestSupersedeToleratesARivalThatJustFinished(t *testing.T) {
+	h := newHarness(t)
+	h.files(sha1, ciConfig, ciRun)
+	h.files(sha2, ciConfig, ciRun)
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+	h.evaluate(branchPR(sha1), EvalOptions{})
+	h.runner.OnCancel = func(run *ci.Run) error {
+		run.Phase, run.Finished = ci.Finished, h.now
+		return errors.New("admission webhook denied the request: Once the PipelineRun is complete, no updates are allowed")
+	}
+
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
+	h.evaluate(branchPR(sha2), EvalOptions{})
+	first, second := h.run("demo-ci-1111111-1"), h.run("demo-ci-2222222-1")
+	if first.CancelRequested || first.Phase != ci.Finished {
+		t.Fatalf("the finished run must be left as it is: %+v", first)
+	}
+	if second.Phase != ci.Released || second.CancelRequested {
+		t.Fatalf("the newest commit's run must go: %+v", second)
+	}
+	for _, r := range h.host.ReportsNamed("ci") {
+		if r.Conclusion == ci.Failure {
+			t.Fatalf("no report may fail over the refused cancel: %+v", r)
+		}
+	}
+
+	// Any other refusal is still an error.
+	h.runner.OnCancel = func(run *ci.Run) error { return errors.New("the cluster is down") }
+	h.files(sha3, ciConfig, ciRun)
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha3}, State: "open"})
+	if _, err := h.svc.Evaluate(context.Background(), branchPR(sha3), EvalOptions{}); err == nil || !strings.Contains(err.Error(), "superseding ci-demo/demo-ci-2222222-1: the cluster is down") {
+		t.Fatalf("Evaluate = %v, want the cancel's error", err)
 	}
 }
 

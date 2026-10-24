@@ -19,6 +19,9 @@ type Runner struct {
 	Expander func(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error)
 	// CheckError, when set, is what Check returns for a spec.
 	CheckError func(ci.RunSpec) error
+	// OnCancel, when set, runs before Cancel marks a run cancelled, with the run to change; an error
+	// is what Cancel returns instead, as a runner that refuses to cancel a finished run.
+	OnCancel func(run *ci.Run) error
 	// Tasks, when set, lists the tasks of the run a spec creates.
 	Tasks func(ci.RunSpec) []string
 	// Freed is what FreeResources reports.
@@ -286,6 +289,11 @@ func (r *Runner) Cancel(_ context.Context, id ci.RunID, why ci.Cancellation) err
 	run, ok := r.runs[id]
 	if !ok {
 		return ci.ErrNotFound
+	}
+	if r.OnCancel != nil {
+		if err := r.OnCancel(run); err != nil {
+			return err
+		}
 	}
 	run.CancelRequested = true
 	if run.Phase == ci.Held {

@@ -1,5 +1,5 @@
 # ko build configuration (https://ko.build/configuration/).
-# Release images are built by .tekton/release.yaml; the first one by hand (see README).
+# Images are built by .tekton/main.yaml; the first one by hand (see README).
 defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
 defaultPlatforms:
   - linux/amd64
@@ -13,7 +13,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      # VERSION when set (the release pipeline and `make image` set it), else the commit's short SHA,
+      # VERSION when set (pipeline main and `make image` set it), else the commit's short SHA,
       # else "dev".
       - -X octomaton.dev/internal/system/buildinfo.version={{ or (index .Env "VERSION") (printf "%.7s" .Git.FullCommit) "dev" }}
   # The same build, of the step logs server.

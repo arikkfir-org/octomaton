@@ -1,9 +1,7 @@
-# Octomaton's release: build and push the images of a commit with ko, octomaton
-# and octomaton-logs. A push to main publishes them tagged with the commit's
-# short SHA (also the version the binaries report) and main; a version tag
-# (v1.2.3, created by publishing a GitHub release) publishes them tagged with
-# the version, which the binaries then report, once the tag is confirmed to
-# be a version (vX.Y.Z, nothing else) and the tagged commit to be on main. The pod authenticates to Artifact Registry through
+# Octomaton's build of main: build and push the images of a commit with ko,
+# octomaton and octomaton-logs, tagged with the commit's short SHA (also the
+# version the binaries report). A version (a v* tag) adds its tag to these
+# images: .tekton/tag.yaml. The pod authenticates to Artifact Registry through
 # Workload Identity (ko's Google keychain uses Application Default Credentials)
 # as ci-octomaton-release, the one ServiceAccount allowed to push, which only
 # main and v* tags may use (octomaton.dev/branches, octomaton.dev/tags).
@@ -11,14 +9,14 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: octomaton-release-
+  generateName: octomaton-main-
 spec:
   taskRunTemplate:
     serviceAccountName: ci-octomaton-release
   # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
   # ko's build peaked at 2.5Gi and 3.7 cores.
   taskRunSpecs:
-    - pipelineTaskName: release
+    - pipelineTaskName: build
       computeResources:
         requests:
           cpu: "3"
@@ -36,14 +34,10 @@ spec:
       - name: revision
         type: string
         description: Commit to release.
-      - name: tag
-        type: string
-        description: The version tag pushed (v1.2.3); empty for a push to main.
-        default: ""
     workspaces:
       - name: source
     tasks:
-      - name: release
+      - name: build
         # A lost node (an upgrade or a repair) kills the build. Argo CD runs the images of every commit on main, so try
         # again: pushing the same tags twice is harmless.
         retries: 2
@@ -52,8 +46,6 @@ spec:
             value: $(params.repo-url)
           - name: revision
             value: $(params.revision)
-          - name: tag
-            value: $(params.tag)
         workspaces:
           - name: source
             workspace: source
@@ -62,8 +54,6 @@ spec:
             - name: repo-url
               type: string
             - name: revision
-              type: string
-            - name: tag
               type: string
           workspaces:
             - name: source
@@ -90,72 +80,39 @@ spec:
                   value: $(params.repo-url)
                 - name: REVISION
                   value: $(params.revision)
-                - name: TAG
-                  value: $(params.tag)
-              # A version tag releases a commit of main only: pushing a tag takes write access, but merging a
-              # commit into main takes a review, and a release is the latter's.
               script: |
                 #!/bin/sh
                 set -eu
                 git init --quiet .
                 git remote add origin "$REPO_URL"
-                if [ -z "$TAG" ]; then
-                  git fetch --quiet --depth=1 origin "$REVISION"
-                else
-                  # ko takes a comma-separated tag list, and a Git tag may hold a comma: only a version is built.
-                  case "$TAG" in
-                    v[0-9]*.[0-9]*.[0-9]*) echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Tag $TAG is not a version (vX.Y.Z): not releasing it" >&2; exit 1; } ;;
-                    *) echo "Tag $TAG is not a version (vX.Y.Z): not releasing it" >&2; exit 1 ;;
-                  esac
-                  git fetch --quiet origin "$REVISION" main
-                  if ! git merge-base --is-ancestor "$REVISION" origin/main; then
-                    echo "Tag $TAG points at $REVISION, which is not on main: not releasing it" >&2
-                    exit 1
-                  fi
-                fi
+                git fetch --quiet --depth=1 origin "$REVISION"
                 git checkout --quiet --detach "$REVISION"
             - name: publish
               image: golang:1.27.1
               env:
                 - name: REVISION
                   value: $(params.revision)
-                - name: TAG
-                  value: $(params.tag)
                 - name: KO_DOCKER_REPO
                   value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton
               script: |
                 #!/bin/sh
                 set -eu
-                if [ -z "$TAG" ]; then
-                  VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
-                  TAGS="$VERSION"
-                else
-                  VERSION="$TAG"
-                  TAGS="$TAG"
-                fi
+                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $TAGS"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$TAGS" ./cmd/octomaton
+                echo "Publishing $KO_DOCKER_REPO:$VERSION"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION" ./cmd/octomaton
             # The step logs server, from the same checkout and Go cache: Argo CD runs both images of every commit.
             - name: publish-logs
               image: golang:1.27.1
               env:
                 - name: REVISION
                   value: $(params.revision)
-                - name: TAG
-                  value: $(params.tag)
                 - name: KO_DOCKER_REPO
                   value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
               script: |
                 #!/bin/sh
                 set -eu
-                if [ -z "$TAG" ]; then
-                  VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
-                  TAGS="$VERSION"
-                else
-                  VERSION="$TAG"
-                  TAGS="$TAG"
-                fi
+                VERSION=$(printf '%s' "$REVISION" | cut -c1-7)
                 export VERSION
-                echo "Publishing $KO_DOCKER_REPO with tags $TAGS"
-                go run github.com/google/ko@v0.19.1 build --bare --tags "$TAGS" ./cmd/octomaton-logs
+                echo "Publishing $KO_DOCKER_REPO:$VERSION"
+                go run github.com/google/ko@v0.19.1 build --bare --tags "$VERSION" ./cmd/octomaton-logs

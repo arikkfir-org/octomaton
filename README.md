@@ -547,7 +547,7 @@ repository (served by `delivery`'s `go-import`, which answers for every hub modu
 go install octomaton.dev/cmd/octomaton-lint@latest
 ```
 
-Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as the release pipeline does.
+Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as pipeline `main` does.
 
 ```bash
 make test      # go vet ./... && go test -race ./...
@@ -611,29 +611,31 @@ services. The layering itself is tested by `internal/architecture`, which fails 
 
 Octomaton is released two ways, both from `main` and both by Octomaton itself
 ([design](docs/octomaton/designs/releases.md)). `.octomaton.yaml` runs `ci` (lint, `deploy/` rendered and validated,
-vet, race tests, build) on pull requests and in the merge queue, and `release` on pushes to `main` and on version tags.
-`release` publishes the images `octomaton` and `octomaton-logs` to `me-west1-docker.pkg.dev/arikkfir/octomaton/`, a
+vet, race tests, build) on pull requests and in the merge queue, `main` on pushes to `main` and `tag` on version tags.
+`main` publishes the images `octomaton` and `octomaton-logs` to `me-west1-docker.pkg.dev/arikkfir/octomaton/`, a
 public repository of Octomaton's own
 ([Artifact Registry](https://docs.dev.kfirs.com/infra/terraform/gcp.md#artifact-registry)), so any installation pulls
 a release without a grant. Which release an installation runs is the host's choice
 ([installing Octomaton](docs/octomaton/installation.md)).
 
-| Release | Trigger | Image tags | Version the binaries report |
+| Release | Trigger | Pipeline | Image tags |
 | --- | --- | --- | --- |
-| Every commit on `main` | A push to `main` | The commit's short SHA (for example `afa6953`) | The short SHA |
-| A version, `1.2.3` | The tag `v1.2.3`, which publishing the [GitHub release](https://github.com/arikkfir-org/octomaton/releases) `1.2.3` creates | `v1.2.3` | `v1.2.3` |
+| Every commit on `main` | A push to `main` | `main` builds and pushes the images | The commit's short SHA (for example `afa6953`), also the version the binaries report |
+| A version, `1.2.3` | The tag `v1.2.3`, which publishing the [GitHub release](https://github.com/arikkfir-org/octomaton/releases) `1.2.3` creates | `tag` adds the tag to the tagged commit's images; nothing is rebuilt | `v1.2.3`, on the same images as the commit's short SHA |
 
 A version is a [GitHub release](https://github.com/arikkfir-org/octomaton/releases): tag `v<version>` on a commit of
 `main`, titled `<version>`, with notes that list the pull requests since the previous version by kind and link
 [installing Octomaton](docs/octomaton/installation.md) at that tag. The hub's `octomaton-release` skill drafts them
 ([tooling](https://github.com/arikkfir-org/tooling)). GitHub creates the tag when the release is published, not when
-it is drafted, so a draft release builds nothing; publishing it pushes the tag, and `release` publishes the images.
-`release` refuses a tag that is not a version (`vX.Y.Z` exactly) or whose commit is not on `main`, and runs as `ci-octomaton-release`, which only `main` and `v*`
-tags may use (`octomaton.dev/branches`, `octomaton.dev/tags`). The version is also the `service.version` of the
-binaries' telemetry.
+it is drafted, so a draft release does nothing; publishing it pushes the tag, and `tag` waits for the commit's images
+(`main` may still be building them) and tags them with the version. A version is therefore the very image `main`
+ran, and the binaries keep reporting the commit's short SHA (`service.version` in their telemetry): the version is a
+name in the registry and on GitHub. `tag` refuses a tag that is not a version (`vX.Y.Z` exactly) or whose commit is
+not on `main`. Both pipelines run as `ci-octomaton-release`, which only `main` and `v*` tags may use
+(`octomaton.dev/branches`, `octomaton.dev/tags`).
 
 The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
-commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way the release pipeline would, and
+commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way `main` would, and
 refuses uncommitted changes:
 
 ```bash

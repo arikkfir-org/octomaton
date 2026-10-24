@@ -17,7 +17,7 @@ import (
 const annotationBranches = "octomaton.dev/branches"
 
 // annotationTags is the same for tag pushes: the tag globs (as in on.push.tags) whose runs may use the
-// ServiceAccount. A release pipeline that publishes from version tags names a ServiceAccount carrying it.
+// ServiceAccount. A pipeline that runs on version tags names a ServiceAccount carrying it.
 const annotationTags = "octomaton.dev/tags"
 
 // serviceAccountNames lists the ServiceAccounts a PipelineRun names for its tasks: the template's and

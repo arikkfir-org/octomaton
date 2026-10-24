@@ -94,7 +94,7 @@
   node pool; AppProject `octomaton` admits only namespace `octomaton`, Octomaton's own ClusterRoles and
   ClusterRoleBinding, and the namespaced kinds `deploy/` holds, so a new kind or cluster-scoped object needs `delivery`
   changed first. Secrets only through the host; a NetworkPolicy is the host's too.
-- `release` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
+- `main` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
   images of whatever commit `main` is at.
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
   single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
@@ -120,8 +120,8 @@
 
 - `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
 - Every push to `main` publishes the images tagged with the commit's short SHA, which is also the version the binaries
-  report. A version is a GitHub release whose tag `vX.Y.Z` runs the same `release` pipeline, publishing the images
-  tagged `vX.Y.Z` (`docs/octomaton/designs/releases.md`); a tag push runs the default branch's definitions, and the
-  pipeline refuses any other tag or a commit not on `main`.
+  report (pipeline `main`). A version is a GitHub release whose tag `vX.Y.Z` runs pipeline `tag`, which adds the tag
+  to the commit's images without rebuilding (`docs/octomaton/designs/releases.md`); a tag push runs the default
+  branch's definitions, and `tag` refuses any other tag or a commit not on `main`.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

@@ -115,7 +115,7 @@ failure a host sees for a forgotten object, rather than a server running on defa
 | Decision | Why | Rejected |
 | --- | --- | --- |
 | Manifests in the octomaton repository | One pull request changes code and deployment together, and nothing is pinned by hand where the host follows `main` | Manifests in the host's repository, one pull request per release |
-| The images are untagged; the host tags them | The host knows the commit it deploys (Argo CD's `${ARGOCD_APP_REVISION_SHORT}` when it follows a branch, the pin when it pins), and `release` tags every commit with the same 7 characters | A tag in `deploy/` that a release bumps; Argo CD Image Updater; `release` opening the host's pull request |
+| The images are untagged; the host tags them | The host knows the commit it deploys (Argo CD's `${ARGOCD_APP_REVISION_SHORT}` when it follows a branch, the pin when it pins), and `main` tags every commit with the same 7 characters | A tag in `deploy/` that a release bumps; Argo CD Image Updater; `main` opening the host's pull request |
 | The host writes the ConfigMaps and the Secret; `deploy/` ships none | Every value in them is the host's; a ConfigMap of defaults is one the host patches ([host-agnostic](host-agnostic.md#decisions)) | Defaults in `deploy/`; a Helm chart with values |
 | The route, the Secret's source and the network admission are the host's | They name the host's gateway, store and namespaces; Octomaton needs a Secret and a route, not a way of making them | Parametrizing them in `deploy/` |
 | `octomaton-logs` is `deploy/logs/` | Its own workload on purpose, which a host may not want; a second Application needs no overlay | Part of the base, scaled to zero; a Kustomize component |
@@ -134,10 +134,10 @@ failure a host sees for a forgotten object, rather than a server running on defa
   Service `octomaton`) breaks that host silently where kustomize skips the patch, or loudly where the host's CI renders
   `deploy/` with its options ([the hub's](../../delivery/designs/octomaton.md#ci)). It is a breaking change for every
   host and says so in its pull request.
-- A host that follows `main` hears of a commit before `release` has published its images. The new pod waits in
+- A host that follows `main` hears of a commit before `main` has published its images. The new pod waits in
   `ImagePullBackOff` while the old ones keep serving: the rollout surges, so it starts a new pod before it stops an old
   one. The Application shows `Progressing`, and `Degraded` once the Deployment's 10-minute progress deadline passes,
-  until the images arrive. If `release` fails, re-run it or merge a fix.
+  until the images arrive. If `main` fails, re-run it or merge a fix.
 - A commit that breaks Octomaton breaks CI for every repository its host serves, its own fix included. The hub merges
   the revert with the admin bypass; Argo CD deploys it like any other commit.
 
@@ -151,6 +151,6 @@ base and the hub's overrides (merged `delivery` first, since a Namespace in the 
 
 ## Open questions
 
-- The wait for the image could go away: `release` could move a branch (say `deployed`) once the image is published,
-  and a host that follows `main` would follow that branch instead. `release` would then need write access to the
+- The wait for the image could go away: `main` could move a branch (say `deployed`) once the image is published,
+  and a host that follows `main` would follow that branch instead. `main` would then need write access to the
   repository.

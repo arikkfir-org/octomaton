@@ -16,22 +16,31 @@ pipelines:
     timeout: 30m
 
   # Publish the images of every push to main, tagged with the commit's short SHA (also the version the
-  # binaries report) and "main", and of every version tag (v1.2.3, which publishing a GitHub release creates),
-  # tagged with the version. A host may deploy every commit on main with the images of that commit (deploy/), so
-  # release runs on every push: never give it a paths filter.
-  - name: release
-    pipelineRun: .tekton/release.yaml
+  # binaries report). A host may deploy every commit on main with the images of that commit (deploy/), so
+  # main runs on every push: never give it a paths filter.
+  - name: main
+    pipelineRun: .tekton/main.yaml
     on:
       push:
         branches: [main]
+    params:
+      repo-url: "{{ .Repository.CloneURL }}"
+      revision: "{{ .Revision }}"
+    timeout: 30m
+    # Argo CD runs the images of whatever commit main is at: only the newest waiting push needs building.
+    concurrency:
+      group: main
+      policy: latest
+
+  # A version: a v* tag (v1.2.3, which publishing a GitHub release creates) adds its name to the tagged
+  # commit's images, once the tag is confirmed to be a version and the commit to be on main. Nothing is rebuilt.
+  - name: tag
+    pipelineRun: .tekton/tag.yaml
+    on:
+      push:
         tags: ["v*"]
     params:
       repo-url: "{{ .Repository.CloneURL }}"
       revision: "{{ .Revision }}"
       tag: "{{ .Tag }}"
-    timeout: 30m
-    # Pushes to main publish the "main" tag: only the newest waiting release may run. A tag's pushes form a group
-    # of their own.
-    concurrency:
-      group: "release-{{ .Ref }}"
-      policy: latest
+    timeout: 20m

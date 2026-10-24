@@ -676,9 +676,9 @@ name in the registry and on GitHub. `tag` refuses a tag that is not a version (`
 not on `main`. Both pipelines run as `ci-octomaton-release`, which only `main` and `v*` tags may use
 (`octomaton.dev/branches`, `octomaton.dev/tags`).
 
-The first images have to come from a workstation, before Octomaton runs, and from the head of `main`: that is the
-commit Argo CD deploys. `make image` builds and pushes the images of `HEAD` the way `main` would, and
-refuses uncommitted changes:
+The first images have to come from a workstation, before Octomaton runs, and from the commit the host deploys: check
+it out first. `make image` builds and pushes the images of `HEAD` the way `main` would, and refuses uncommitted
+changes:
 
 ```bash
 gcloud auth configure-docker me-west1-docker.pkg.dev

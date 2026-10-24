@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -38,6 +39,68 @@ func TestSupersedeCancelsOlderCommitsRuns(t *testing.T) {
 	}
 	if h.run("demo-ci-2222222-1").CancelRequested {
 		t.Fatalf("the head's run must keep running")
+	}
+}
+
+// A rival that finishes, or is pruned, between the group's listing and the cancel is not
+// superseded, and that is no error: the runner refuses to cancel it, and the new run still goes.
+func TestSupersedeToleratesARivalThatJustFinished(t *testing.T) {
+	refused := errors.New("admission webhook denied the request: Once the PipelineRun is complete, no updates are allowed")
+	tests := []struct {
+		name  string
+		rival func(h *harness, id ci.RunID) error
+		check func(t *testing.T, h *harness)
+	}{
+		{name: "finished", rival: func(h *harness, id ci.RunID) error {
+			h.runner.Finish(id, ci.Outcome{Conclusion: ci.Success}, h.now)
+			return refused
+		}, check: func(t *testing.T, h *harness) {
+			if first := h.run("demo-ci-1111111-1"); first.CancelRequested || first.Phase != ci.Finished {
+				t.Fatalf("the finished run must be left as it is: %+v", first)
+			}
+		}},
+		{name: "gone", rival: func(h *harness, id ci.RunID) error {
+			h.runner.Remove(id)
+			return ci.ErrNotFound
+		}, check: func(t *testing.T, h *harness) {
+			if _, err := h.runner.Get(context.Background(), ci.RunID{Tenant: "ci-demo", Name: "demo-ci-1111111-1"}); !errors.Is(err, ci.ErrNotFound) {
+				t.Fatalf("Get = %v, want not found", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.files(sha1, ciConfig, ciRun)
+			h.files(sha2, ciConfig, ciRun)
+			h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+			h.evaluate(branchPR(sha1), EvalOptions{})
+			h.runner.OnCancel = func(id ci.RunID) error { return tt.rival(h, id) }
+
+			h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
+			h.evaluate(branchPR(sha2), EvalOptions{})
+			tt.check(t, h)
+			if second := h.run("demo-ci-2222222-1"); second.Phase != ci.Released || second.CancelRequested {
+				t.Fatalf("the newest commit's run must go: %+v", second)
+			}
+			for _, r := range h.host.ReportsNamed("ci") {
+				if r.Conclusion == ci.Failure {
+					t.Fatalf("no report may fail over the refused cancel: %+v", r)
+				}
+			}
+		})
+	}
+
+	// Any other refusal is still an error.
+	h := newHarness(t)
+	h.files(sha1, ciConfig, ciRun)
+	h.files(sha2, ciConfig, ciRun)
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+	h.evaluate(branchPR(sha1), EvalOptions{})
+	h.runner.OnCancel = func(ci.RunID) error { return errors.New("the cluster is down") }
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
+	if _, err := h.svc.Evaluate(context.Background(), branchPR(sha2), EvalOptions{}); err == nil || !strings.Contains(err.Error(), "superseding ci-demo/demo-ci-1111111-1: the cluster is down") {
+		t.Fatalf("Evaluate = %v, want the cancel's error", err)
 	}
 }
 

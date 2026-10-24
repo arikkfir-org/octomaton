@@ -201,7 +201,7 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 
 | Policy | Behaviour |
 | --- | --- |
-| `supersede` | The newest commit wins: older live runs in the group are cancelled and their checks concluded `skipped` ("Superseded"). A run whose commit is no longer the head of its branch or pull request stands itself down. |
+| `supersede` | The newest commit wins: older live runs in the group are cancelled and their checks concluded `skipped` ("Superseded"); one that finishes first is left as it is. A run whose commit is no longer the head of its branch or pull request stands itself down. |
 | `queue` (default) | One run at a time, oldest first. |
 | `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled. |
 

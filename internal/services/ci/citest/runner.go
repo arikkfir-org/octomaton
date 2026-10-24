@@ -19,6 +19,10 @@ type Runner struct {
 	Expander func(ctx context.Context, spec ci.RunSpec, read ci.FileReader) ([]byte, error)
 	// CheckError, when set, is what Check returns for a spec.
 	CheckError func(ci.RunSpec) error
+	// OnCancel, when set, runs before Cancel marks a run cancelled and may move the run along (Finish,
+	// Remove); an error is what Cancel returns instead, as a runner that refuses to cancel a
+	// finished run.
+	OnCancel func(id ci.RunID) error
 	// Tasks, when set, lists the tasks of the run a spec creates.
 	Tasks func(ci.RunSpec) []string
 	// Freed is what FreeResources reports.
@@ -134,6 +138,16 @@ func (r *Runner) Finish(id ci.RunID, o ci.Outcome, at time.Time) {
 		}
 		run.Phase, run.Outcome, run.Finished = ci.Finished, o, at
 	})
+}
+
+// Remove forgets a run, as a pruned PipelineRun.
+func (r *Runner) Remove(id ci.RunID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.runs, id)
+	delete(r.specs, id)
+	delete(r.tokens, id)
+	delete(r.details, id)
 }
 
 // SetDetails sets what Details returns for a run.
@@ -280,6 +294,11 @@ func (r *Runner) Release(_ context.Context, id ci.RunID) error {
 func (r *Runner) Cancel(_ context.Context, id ci.RunID, why ci.Cancellation) error {
 	if err := r.failure("Cancel"); err != nil {
 		return err
+	}
+	if r.OnCancel != nil {
+		if err := r.OnCancel(id); err != nil {
+			return err
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

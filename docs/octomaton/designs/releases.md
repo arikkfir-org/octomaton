@@ -43,8 +43,8 @@ sequenceDiagram
 
 | Piece | Where | What |
 | --- | --- | --- |
-| Pipelines | `.octomaton.yaml` | `release` becomes `main` (`on.push.branches: [main]`, `.tekton/main.yaml`: build and push, unchanged otherwise); new `tag` (`on.push.tags: ["v*"]`, `.tekton/tag.yaml`, param `tag` is `{{ .Tag }}`). Both name `ci-octomaton-release` |
-| Version | `.tekton/tag.yaml` | Refuse anything but `vX.Y.Z`; fetch the commit and `main`, refuse a commit that is not an ancestor of `main`; wait up to 15 minutes for the commit's images under its short SHA (`main` may still be building them), then `gcloud artifacts docker tags add` the version to both. The floating `main` image tag is gone: a host pins a commit or a version |
+| Pipelines | `.octomaton.yaml` | `release` becomes `main` (`on.push.branches: [main]`, `.tekton/main.yaml`: build and push, unchanged otherwise); new `tag` (`on.push.tags: ["v*"]`, `.tekton/tag.yaml` with its Task in `tag.task.yaml`, param `tag` is `{{ .Tag }}`). Both name `ci-octomaton-release` |
+| Version | `.tekton/tag.yaml`, its task in `tag.task.yaml` | Refuse anything but `vX.Y.Z`; fetch the commit and `main`, refuse a commit that is not an ancestor of `main`; wait up to 15 minutes for the commit's images under its short SHA (`main` may still be building them), then `gcloud artifacts docker tags add` the version to both. The floating `main` image tag is gone: a host pins a commit or a version |
 | Identity | `delivery`, `ci-octomaton-release` | `octomaton.dev/tags: v*` beside `octomaton.dev/branches: main` ([CI tenants](../../delivery/platform.md#ci-tenants)) |
 | Definitions | `adapters/github/events.go` | A tag push reads `.octomaton.yaml` and the PipelineRun at the default branch, like a comment command or a schedule, and runs the tagged commit. So a tag runs only reviewed definitions, in every repository |
 | Check | `adapters/tekton/serviceaccounts.go` | A ServiceAccount with either annotation is restricted: a branch's run must match a branch glob, a tag push a tag glob. Branches alone still refuse every tag push, as before; tags alone refuse every branch's run |

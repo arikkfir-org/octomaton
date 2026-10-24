@@ -121,6 +121,7 @@
 - `make test`, `make lint`, `make manifests` (Docker), `make build`, `make image` (ko; needs registry credentials).
 - Every push to `main` publishes the images tagged with the commit's short SHA, which is also the version the binaries
   report. A version is a GitHub release whose tag `vX.Y.Z` runs the same `release` pipeline, publishing the images
-  tagged `vX.Y.Z` (`docs/octomaton/designs/releases.md`); the pipeline refuses any other tag or a commit not on `main`.
+  tagged `vX.Y.Z` (`docs/octomaton/designs/releases.md`); a tag push runs the default branch's definitions, and the
+  pipeline refuses any other tag or a commit not on `main`.
 - `go run ./cmd/octomaton-lint -render .` prints the PipelineRuns as Octomaton would create them.
 - Do not add GitHub Actions workflows; CI runs through Octomaton itself (`.octomaton.yaml`).

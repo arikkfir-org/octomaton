@@ -127,7 +127,8 @@ func incomplete(t ci.Trigger) string {
 
 // pushTrigger converts a push. Deleted refs, merge queue branches and refs other than branches and
 // tags are ignored. The revision is the pushed commit (head_commit, which for annotated tags
-// differs from "after", the tag object).
+// differs from "after", the tag object). A tag's run reads its configuration at the default branch:
+// a tag names any commit, reviewed or not, so the definitions it runs must not be its own.
 func pushTrigger(ev *github.PushEvent, delivery string) (ci.Trigger, string) {
 	t := ci.Trigger{
 		Version:        ci.TriggerVersion,
@@ -147,7 +148,11 @@ func pushTrigger(ev *github.PushEvent, delivery string) (ci.Trigger, string) {
 	case strings.HasPrefix(t.Ref, "refs/heads/"):
 		t.Branch = strings.TrimPrefix(t.Ref, "refs/heads/")
 	case strings.HasPrefix(t.Ref, "refs/tags/"):
+		if t.Repository.DefaultBranch == "" {
+			return t, "no default branch in payload"
+		}
 		t.Tag = strings.TrimPrefix(t.Ref, "refs/tags/")
+		t.ConfigRef = t.Repository.DefaultBranch
 	default:
 		return t, "ref is neither a branch nor a tag"
 	}

@@ -165,10 +165,10 @@ comparison `before...after` for pushes; `base...head` for merge groups). A file 
 changed files cannot be determined (a new branch or tag, an API error, more files than GitHub lists), the filters are
 ignored and the pipeline runs.
 
-**Where definitions are read:** pull requests, merge groups and pushes read `.octomaton.yaml` and the PipelineRun file
-at the commit under test. Comment commands, review requests and schedules read them from the default branch (comment
-commands and review requests still run against the pull request's head commit, so a pull request cannot change what
-they run). A `pipelineRun` in another repository is always read at that repository's default branch. The files a
+**Where definitions are read:** pull requests, merge groups and pushes to branches read `.octomaton.yaml` and the
+PipelineRun file at the commit under test. Tag pushes, comment commands, review requests and schedules read them from
+the default branch (a tag's run and a comment command's still run against the tagged commit or the pull request's head
+commit, so neither a tag nor a pull request can change what runs: a tag names any commit, reviewed or not). A `pipelineRun` in another repository is always read at that repository's default branch. The files a
 PipelineRun references by name ([below](#pipeline-task-and-stepaction-files)) are read where it was.
 
 **Organization pipelines:** the organization repository, which `OCTOMATON_ORGANIZATION_REPOSITORY` names (`tooling` in
@@ -386,7 +386,7 @@ event with placeholder values, so a template that only works for one event is re
   from the repository's own branches run automatically: pushing a branch there takes write access.
 - A run may mount no Secret other than the token Octomaton binds and those its pipeline lists in `secrets` (volumes,
   workspaces, projected sources, `env` and `envFrom` are checked). Only an organization pipeline, or a pipeline whose
-  every trigger reads its definitions from the default branch, may list any, so definitions at a pull request's head
+  every trigger is `comment`, `review_request` or `schedule`, may list any, so definitions at a pull request's head
   never reach a listed Secret. An organization pipeline that mounts one on pull requests runs automatically on every
   pull request of the owner, Dependabot's included: it must never run the pull request's code. Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
@@ -402,6 +402,9 @@ event with placeholder values, so a template that only works for one event is re
 - Organization pipelines are read at the organization repository's default branch, so no pull request, not even one on
   that repository, changes what they run, and no repository can replace one with a pipeline of the same name or check
   name. Their runs get the repository's namespace and token, like its own.
+- A tag push runs the definitions of the default branch, never the tagged commit's: pushing a tag takes only write
+  access and can name any commit, so a tag could otherwise run an unreviewed pipeline, with the identities the
+  tenant's ServiceAccounts admit for tags.
 - A ServiceAccount in a tenant namespace may carry the annotations `octomaton.dev/branches` and `octomaton.dev/tags`:
   comma-separated branch globs, as in `on.push.branches`, and tag globs, as in `on.push.tags`. A run that names it
   (`spec.taskRunTemplate.serviceAccountName` or `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch

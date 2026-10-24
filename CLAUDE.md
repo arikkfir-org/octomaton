@@ -91,13 +91,14 @@
   never needs to rewrite one: a change that makes a host patch something, or that renames an object a host patches or
   reads by name, is a breaking change for every host and says so in its pull request. The code never reads `deploy/`.
 - The hub's installation is `arikkfir-org/delivery`'s (`platform/octomaton/manifests`, its
-  `docs/delivery/designs/octomaton.md`): Application `octomaton` applies `deploy/` from `main`, tags the images with
-  the synced commit's short SHA (so every merge to `main` deploys itself) and patches the namespace's label and the
-  node pool; AppProject `octomaton` admits only namespace `octomaton`, Octomaton's own ClusterRoles and
-  ClusterRoleBinding, and the namespaced kinds `deploy/` holds, so a new kind or cluster-scoped object needs `delivery`
-  changed first. Secrets only through the host; a NetworkPolicy is the host's too.
-- `main` must publish both images for every push to `main`, so it never gets a `paths` filter: Argo CD runs the
-  images of whatever commit `main` is at.
+  `docs/delivery/designs/octomaton.md`): Application `octomaton` applies `deploy/` at a version's tag, tags the images
+  with that version (so a version reaches the hub through a `delivery` pull request that bumps it, and a merge to
+  `main` deploys nothing by itself) and patches the namespace's label and the node pool; AppProject `octomaton` admits
+  only namespace `octomaton`, Octomaton's own ClusterRoles and ClusterRoleBinding, and the namespaced kinds `deploy/`
+  holds, so a new kind or cluster-scoped object needs `delivery` changed first. Secrets only through the host; a
+  NetworkPolicy is the host's too.
+- `main` must publish both images for every push to `main`, so it never gets a `paths` filter: a version retags the
+  images of a commit of `main`, and a host that follows `main` runs those of whatever commit it is at.
 - `octomaton` runs two replicas, spread over nodes, with a PodDisruptionBudget (`maxUnavailable: 1`). It needs no
   single-replica guard: every replica serves webhooks, and only the Lease holder reports, schedules and cleans up. The
   Go import page isn't here: `delivery`'s `go-import` serves it with every hub module domain's.

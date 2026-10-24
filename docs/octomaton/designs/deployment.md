@@ -125,8 +125,9 @@ failure a host sees for a forgotten object, rather than a server running on defa
 
 ## Security and failure modes
 
-- Where a host follows `main`, a merge here changes its cluster. The hub's ruleset (pull request, the
-  `Continuous Integration` check, merge queue) and its AppProject bound it; a host that pins a commit reviews the bump.
+- Where a host follows `main`, a merge here changes its cluster, bounded by this repository's ruleset (pull request,
+  the `Continuous Integration` check, merge queue) and the host's AppProject; a host that pins a version or a commit,
+  as the hub does, reviews the bump.
   Octomaton's ClusterRoles are its own, and a merge can still widen them: it needs RBAC across the tenants.
 - A new kind or cluster-scoped object in `deploy/` fails to sync in a host whose project doesn't admit it: the host
   changes first.

@@ -16,8 +16,9 @@ Octomaton became a product other clusters host ([host-agnostic Octomaton](host-a
 `main` gets every commit; a host that pins wants a name to pin, a list of what changed since the name it runs, and a
 page that says how to install and upgrade. Until now the only names were short SHAs, the list was `git log`, and the
 installation guide was the README's contract table, which says what a host provides but not in which order or with
-which commands. The reviewer image's `main` tag and the hub's own Argo CD Applications keep following `main`: nothing
-here changes how the hub deploys Octomaton.
+which commands. The reviewer image's `main` tag keeps following `main`. The hub's Argo CD Applications followed `main`
+too until the first version, `v0.0.1`, which they now pin ([hosting Octomaton](../../delivery/designs/octomaton.md)):
+a later version reaches the hub through a pull request in `delivery` that bumps it.
 
 ## Design
 
@@ -82,4 +83,5 @@ sequenceDiagram
    was refused.
 3. arikkfir-org/octomaton#55: the notes are GitHub's generated ones; the skill that drafted them is gone
    (arikkfir-org/tooling#56).
-4. Still to do: the first version, drafted on GitHub with generated notes, read, then published.
+4. The first version, `v0.0.1` (`59cf68d`), drafted on GitHub with generated notes, read, then published.
+5. arikkfir-org/delivery#85: the hub's Applications pin `v0.0.1` instead of following `main`.

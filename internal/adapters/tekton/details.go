@@ -3,6 +3,7 @@ package tekton
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -240,6 +241,49 @@ func (r *Runner) SetToken(ctx context.Context, run ci.Run, t ci.Token) error {
 		return err
 	}
 	return c.UpdateTokenSecret(ctx, secret, token)
+}
+
+// CopySecrets copies the Secrets of another namespace a run mounts into the run's namespace, each
+// owned by the run and named after it (copySecretName): a point-in-time copy, which lives as long as
+// the run. A copy that exists already is kept.
+func (r *Runner) CopySecrets(ctx context.Context, run ci.Run) error {
+	if run.Secrets == nil {
+		return nil
+	}
+	c := r.client()
+	ns, err := r.Namespaces.Resolve(run.Secrets.Repository)
+	if err != nil {
+		return fmt.Errorf("determining the namespace of %s: %w", run.Secrets.Repository.FullName, err)
+	}
+	var pr *unstructured.Unstructured
+	for _, name := range run.Secrets.Names {
+		existing, err := c.Secret(ctx, run.ID.Tenant, copySecretName(run.ID.Name, name))
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			continue
+		}
+		src, err := c.Secret(ctx, ns, name)
+		if err != nil {
+			return err
+		}
+		if src == nil {
+			return fmt.Errorf("Secret %s is not in namespace %s", name, ns)
+		}
+		if pr == nil {
+			if pr, err = c.Get(ctx, run.ID.Tenant, run.ID.Name); err != nil {
+				return err
+			}
+			if pr == nil {
+				return ci.ErrNotFound
+			}
+		}
+		if err := c.CreateSecretCopy(ctx, pr, src); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // TokenExpiry reads when a run's stored token expires. An unreadable expiry reads as the zero time:

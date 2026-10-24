@@ -253,8 +253,8 @@ func (s *Service) ReleaseNext(ctx context.Context, run ci.Run) error {
 
 // Resume finishes starting a run that has been held for a while: its start may have been cut short
 // (a restart), or it waits its turn in a queue. It opens the report (taking over one the code host
-// already has), the task reports and the token when missing, then applies the concurrency policy
-// again.
+// already has), the task reports, the token when missing and the copies of its Secrets, then applies
+// the concurrency policy again.
 func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 	t := run.Trigger
 	if t.Version != ci.TriggerVersion {
@@ -288,6 +288,11 @@ func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 			if err := s.mintToken(ctx, run); err != nil {
 				return err
 			}
+		}
+	}
+	if run.Secrets != nil {
+		if err := s.copySecrets(ctx, run); err != nil {
+			return err
 		}
 	}
 	return s.release(ctx, run)

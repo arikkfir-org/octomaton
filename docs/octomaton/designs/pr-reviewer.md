@@ -30,11 +30,11 @@ sequenceDiagram
   O->>GH: the repository's .octomaton.yaml and the organization repository's, at their default branches
   O->>O: match organization pipeline review, whose reviewers include the login
   O->>GH: review's PipelineRun file, at the organization repository's default branch
-  O->>O: render the params, refuse remote references and any Secret not listed in secrets
+  O->>O: render the params, refuse remote references and any Secret not listed in secrets; point the run at its copies of them
   O->>T: create the PipelineRun, held
   O->>GH: check AI Review, queued, on the head commit
   O->>GH: an installation token for every repository, contents and pull requests read
-  O->>T: the token Secret, owned by the run, then release it (group pr-number, supersede)
+  O->>T: the token Secret and copies of the Secrets listed, read from the organization repository's namespace, owned by the run; then release it (group pr-number, supersede)
   loop until the run ends, on the Lease holder
     T-->>O: status
     O->>GH: the check in progress, then concluded, with check-title and check-summary
@@ -51,7 +51,7 @@ sequenceDiagram
 | Configuration errors | An invalid configuration isn't reported on review requests: most requests are for people, and each would add a failed `octomaton` check. A configuration GitHub wouldn't serve is reported, on `octomaton` |
 | Organization pipelines | `organization.pipelines` in the organization repository's `.octomaton.yaml`, read at its default branch, even for its own pull requests, join every repository's pipelines, the organization repository's included. Their runs are the repository's: its namespace, checks, template context and token. A repository pipeline with the name or check name of one is a configuration error of that repository. No `schedule` triggers |
 | `pipelineRun` | In an organization pipeline, a plain path names a file of the organization repository, read at its default branch. `{repository, path}` reads a file of another repository of the same owner, also at its default branch; `octomaton-lint` checks such a pipeline's templates but can't render its run |
-| `secrets` | Names the Secrets in the run's namespace that its runs may mount besides the token, such as `model-api-key` and `review-bot-token`. Allowed only in an organization pipeline, or when every trigger is `comment`, `review_request` or `schedule` |
+| `secrets` | Names the Secrets its runs may mount besides the token, such as `model-api-key` and `review-bot-token`. In an organization pipeline they are Secrets of the organization repository's namespace, which each run gets copies of, owned by it and named `<run>-<name>`, with the PipelineRun's references rewritten to them; so they live in one namespace, where no repository's own pipeline runs. In a repository pipeline they are Secrets of the run's namespace. Allowed only in an organization pipeline, or when every trigger is `comment`, `review_request` or `schedule` |
 | `githubToken.repositories: all` | Mints the run's token for every repository the App is installed on in the owner, with the pipeline's `permissions` (for a review bot, `contents: read` and `pull_requests: read`), and keeps that scope on every refresh. Allowed only under the same rule as `secrets` |
 | Remote references refused | A PipelineRun with a `pipelineRef`, a `taskRef`, a step's `ref`, a `resolver` or a `bundle` is refused, so the Secret guard sees every definition |
 
@@ -90,6 +90,7 @@ Once the review is posted, the request is fulfilled: a later push runs nothing u
 | The organization repository is a server setting | Octomaton stays free of repository names, and a host picks whichever repository suits it (an agent may be unable to clone `.github`, whose name starts with a dot) | A fixed `.github` in the code (the first version, [octomaton#13](https://github.com/arikkfir-org/octomaton/pull/13)) |
 | A repository can't redefine an organization pipeline | No repository can skip an organization's pipeline or point it at another definition | Repository pipelines overriding organization ones by name |
 | A pipeline may mount the Secrets it declares, only if its definitions are read at a default branch: an organization pipeline, or one whose every trigger reads the default branch ([Linear check](linear-check.md)) | Head-commit definitions still can't name a Secret, so a pull request can't reach a bot's token | A server-wide allowlist (any pull request's CI could mount the token) |
+| An organization pipeline's Secrets are the organization repository's namespace's, copied for each run | The Secrets exist in one namespace, so no other repository's default-branch pipeline can mount them, and nothing is synced into every tenant; a pod can't mount another namespace's Secret, so a run-owned copy, like the token Secret, is the only shape | A copy of every Secret in every tenant namespace (each repository's own default-branch pipelines could mount them) |
 | Remote Tekton references are refused (`pipelineRef`, resolvers, bundles) | The guard only sees inline definitions; a remote one would slip past it | Resolving them first (Octomaton would fetch and trust what Tekton fetches) |
 | `githubToken.repositories: all`, under the rule of `secrets` | Octomaton already mints and refreshes run tokens, and widening their scope is one option, which no pull request's own definitions get | A second fine-grained personal access token (a manual yearly renewal, and a Secret every namespace holds) |
 
@@ -99,7 +100,7 @@ Once the review is posted, the request is fulfilled: a later push runs nothing u
 - Every definition a review runs (the repository's `.octomaton.yaml`, the organization pipelines and the PipelineRun) is read at a default branch, so no pull request, not even one to the organization repository, changes what its own review runs or mounts. A change to the pipeline takes effect once merged.
 - A run may mount the token Octomaton binds and the Secrets its pipeline lists, nothing else: volumes, workspaces, projected sources, `env` and `envFrom` are checked, and remote references are refused so that nothing escapes the check. Which of the run's containers mount what is the PipelineRun's to decide.
 - A token for `repositories: all` reads every repository the App is installed on, internal ones included. Octomaton mints it only for pipelines read from a default branch, with the permissions they list, and it lives an hour at most, refreshed while the run lives.
-- Failed steps' logs, `check-title`, `check-summary` and task messages lose every value of every Secret the run references, the installation token included, before they reach GitHub ([redaction](check-run-redaction.md)).
+- Failed steps' logs, `check-title`, `check-summary` and task messages lose every value of every Secret the run references, the installation token and the copies included, before they reach GitHub ([redaction](check-run-redaction.md)).
 - A broken organization pipeline, or a broken `.octomaton.yaml` in the repository, shows on a review request as no check at all, with a warning in Octomaton's log; the repository's own pull request events report its configuration on `octomaton`. GitHub failing to serve a configuration is reported on `octomaton`, and Octomaton retries GitHub's calls and forgets a delivery that left work undone, so a redelivery runs it again ([GitHub outages](github-retries.md)).
 - A new request for the same pull request supersedes the running review, and so do new commits while the review is still requested.
 

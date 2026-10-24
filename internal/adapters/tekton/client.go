@@ -189,6 +189,45 @@ func (c *kubeClient) CreateTokenSecret(ctx context.Context, run *unstructured.Un
 	return nil
 }
 
+// Secret returns a Secret, or nil when it does not exist.
+func (c *kubeClient) Secret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	s, err := c.Kube.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading Secret %s/%s: %w", namespace, name, err)
+	}
+	return s, nil
+}
+
+// CreateSecretCopy creates a run's copy of src in the run's namespace: the same type and data, owned
+// by the run so it is deleted with it. The error is the API's, so an existing copy reads as
+// AlreadyExists.
+func (c *kubeClient) CreateSecretCopy(ctx context.Context, run *unstructured.Unstructured, src *corev1.Secret) error {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        copySecretName(run.GetName(), src.Name),
+			Namespace:   run.GetNamespace(),
+			Labels:      map[string]string{labelManagedBy: managedByValue, labelPipeline: run.GetLabels()[labelPipeline], labelRepositoryID: run.GetLabels()[labelRepositoryID]},
+			Annotations: map[string]string{annotationRepository: run.GetAnnotations()[annotationRepository], annotationSecretSource: src.Namespace + "/" + src.Name},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: apiVersion,
+				Kind:       kindPipelineRun,
+				Name:       run.GetName(),
+				UID:        run.GetUID(),
+			}},
+		},
+		Type: src.Type,
+		Data: src.Data,
+	}
+	_, err := c.Kube.CoreV1().Secrets(run.GetNamespace()).Create(ctx, secret, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating Secret %s/%s: %w", secret.Namespace, secret.Name, err)
+	}
+	return err
+}
+
 // TokenSecret returns a run's token Secret, or nil when it does not exist.
 func (c *kubeClient) TokenSecret(ctx context.Context, namespace, run string) (*corev1.Secret, error) {
 	s, err := c.Kube.CoreV1().Secrets(namespace).Get(ctx, tokenSecretName(run), metav1.GetOptions{})

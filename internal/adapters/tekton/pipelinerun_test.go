@@ -287,6 +287,42 @@ spec:
 	}
 }
 
+// TestRenameSecrets: every reference to a Secret of another namespace (a volume or workspace, a
+// projected source, env and envFrom) is rewritten to the run's copy; other Secrets stay.
+func TestRenameSecrets(t *testing.T) {
+	doc := `
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+spec:
+  workspaces:
+    - {name: token, secret: {secretName: run-github-token}}
+    - {name: creds, secret: {secretName: registry-creds}}
+  taskRunTemplate:
+    podTemplate:
+      volumes:
+        - {name: v, secret: {secretName: volume-secret}}
+        - name: projected
+          projected: {sources: [{secret: {name: projected-secret}}]}
+  pipelineSpec:
+    tasks:
+      - name: t
+        taskSpec:
+          steps:
+            - name: s
+              env: [{name: A, valueFrom: {secretKeyRef: {name: env-secret, key: k}}}]
+              envFrom: [{secretRef: {name: envfrom-secret}}]
+`
+	pr, err := parsePipelineRun([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renameSecrets(pr.Object, copySecretNames("run", []string{"registry-creds", "volume-secret", "projected-secret", "env-secret", "envfrom-secret", "unused"}))
+	want := []string{"run-env-secret", "run-envfrom-secret", "run-github-token", "run-projected-secret", "run-registry-creds", "run-volume-secret"}
+	if got := secrets(pr.Object); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Secrets after the rename = %v, want %v", got, want)
+	}
+}
+
 func TestRemoteRefs(t *testing.T) {
 	const head = "apiVersion: tekton.dev/v1\nkind: PipelineRun\nmetadata:\n  labels: {bundle: x, resolver: y}\nspec:\n"
 	tests := []struct {

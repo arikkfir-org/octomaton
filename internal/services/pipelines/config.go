@@ -80,15 +80,20 @@ type Pipeline struct {
 	On          Triggers          `yaml:"on"`
 	Params      map[string]string `yaml:"params"`
 	GitHubToken *GitHubToken      `yaml:"githubToken"`
-	// Secrets name the Secrets in the run's namespace that its runs may mount besides their token.
+	// Secrets name the Secrets its runs may mount besides their token: of the run's namespace, or
+	// of the organization repository's for an organization pipeline.
 	Secrets     []string     `yaml:"secrets"`
 	Timeout     string       `yaml:"timeout"`
 	Concurrency *Concurrency `yaml:"concurrency"`
 	TaskChecks  bool         `yaml:"taskChecks"`
 
-	timeout time.Duration
-	params  map[string]*template.Template
+	timeout      time.Duration
+	params       map[string]*template.Template
+	organization bool
 }
+
+// Organization reports whether the pipeline is an organization pipeline, added by ForRepository.
+func (p *Pipeline) Organization() bool { return p.organization }
 
 // PipelineRunRef locates a pipeline definition: a file in the repository itself, read where its
 // .octomaton.yaml is, or a file in another repository of the same owner, read at that repository's
@@ -464,6 +469,7 @@ func ForRepository(repository, organization string, own, org *Config) (*Config, 
 		if p.PipelineRun.Repository == "" {
 			p.PipelineRun.Repository = organization
 		}
+		p.organization = true
 		merged.Pipelines = append(merged.Pipelines, p)
 	}
 	return merged, nil

@@ -19,6 +19,7 @@ func runOf(pr *unstructured.Unstructured) ci.Run {
 		Group:            l[labelConcurrencyGroup],
 		Policy:           ci.Policy(a[annotationConcurrencyPolicy]),
 		Token:            tokenSettingsOf(a[annotationToken]),
+		Secrets:          secretSourceOf(a[annotationSecrets]),
 		TaskReports:      a[annotationTaskChecks] == "true",
 		Tasks:            taskNames(pr),
 		Phase:            phaseOf(pr),
@@ -103,6 +104,17 @@ func tokenSettingsOf(raw string) *ci.TokenSettings {
 		return nil
 	}
 	return &t
+}
+
+func secretSourceOf(raw string) *ci.SecretSource {
+	if raw == "" {
+		return nil
+	}
+	var s ci.SecretSource
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return nil
+	}
+	return &s
 }
 
 func jsonMap[V any](raw string) map[string]V {

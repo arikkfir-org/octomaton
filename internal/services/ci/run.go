@@ -121,6 +121,8 @@ type Run struct {
 	Policy Policy
 	// Token, when set, has the run read a code-host token.
 	Token *TokenSettings
+	// Secrets, when set, are Secrets of another namespace the run mounts as copies of its own.
+	Secrets *SecretSource
 	// TaskReports is set when each task of the run is reported on its own.
 	TaskReports bool
 	// Tasks lists the pipeline's tasks in order, when the runner knows them.
@@ -163,10 +165,34 @@ type RunSpec struct {
 	// Timeout, when positive, bounds the run.
 	Timeout time.Duration
 	Token   *TokenSettings
-	// Secrets name the Secrets in the run's namespace it may mount besides its token.
-	Secrets     []string
+	// Secrets name the Secrets the run may mount besides its token: Secrets of the run's namespace,
+	// or, with SecretsFrom, of that repository's namespace.
+	Secrets []string
+	// SecretsFrom, when set, is the repository whose namespace holds the Secrets: an organization
+	// pipeline's organization repository. The runner copies them into the run's namespace, owned by
+	// the run, and the run mounts the copies.
+	SecretsFrom *Repository
 	TaskReports bool
 	Concurrency Concurrency
+}
+
+// SecretSource returns the Secrets a run of the spec gets copies of, or nil when its Secrets are its
+// own namespace's.
+func (s RunSpec) SecretSource() *SecretSource {
+	if s.SecretsFrom == nil || len(s.Secrets) == 0 {
+		return nil
+	}
+	return &SecretSource{Repository: *s.SecretsFrom, Names: s.Secrets}
+}
+
+// SecretSource is where a run's Secrets come from when they are not its own namespace's: the runner
+// copies each into the run's namespace as a Secret owned by the run, named after the run and the
+// Secret, and the run mounts the copies.
+type SecretSource struct {
+	// Repository is the repository whose runs' namespace holds the Secrets.
+	Repository Repository `json:"repository"`
+	// Names are the Secrets.
+	Names []string `json:"names"`
 }
 
 // RunQuery selects runs. Zero fields select everything.

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,8 +103,39 @@ func (r *Runner) Check(ctx context.Context, spec ci.RunSpec) error {
 	if !exists {
 		return refusal("repository not onboarded: namespace %s not found", ns)
 	}
-	_, err = r.definition(spec, ns)
-	return err
+	if _, err = r.definition(spec, ns); err != nil {
+		return err
+	}
+	return r.checkSecretSource(ctx, spec)
+}
+
+// checkSecretSource makes sure every Secret the run gets a copy of exists in its source namespace,
+// and that its copy has a usable name.
+func (r *Runner) checkSecretSource(ctx context.Context, spec ci.RunSpec) error {
+	src := spec.SecretSource()
+	if src == nil {
+		return nil
+	}
+	ns, err := r.Namespaces.Resolve(src.Repository)
+	if err != nil {
+		return refusal("Could not determine the namespace of %s, where pipeline `%s` reads its secrets: %v", src.Repository.FullName, spec.Trigger.Pipeline, err)
+	}
+	name := runName(spec.Trigger.Repository.Name, spec.Trigger.Pipeline, spec.Trigger.Revision, 1)
+	for _, secret := range src.Names {
+		if len(copySecretName(name, secret)) > maxSecretNameLength {
+			return refusal("Secret `%s` cannot be copied for the run: `%s` is longer than %d characters.", secret, copySecretName(name, secret), maxSecretNameLength)
+		}
+		s, err := r.client().Secret(ctx, ns, secret)
+		if err != nil {
+			refused := refusal("Could not read Secret `%s` in namespace `%s`, where pipeline `%s` reads its secrets: %v", secret, ns, spec.Trigger.Pipeline, err)
+			refused.Cause = err
+			return refused
+		}
+		if s == nil {
+			return refusal("Secret `%s` is not in namespace `%s`, where pipeline `%s` reads its secrets (an organization pipeline's Secrets live in the organization repository's namespace).", secret, ns, spec.Trigger.Pipeline)
+		}
+	}
+	return nil
 }
 
 // definition parses spec's PipelineRun file and checks it fits the namespace and the pipeline's
@@ -145,7 +178,14 @@ func (r *Runner) Create(ctx context.Context, spec ci.RunSpec, attempt int) (ci.R
 	if err != nil {
 		return ci.Run{}, refusal("%v", err)
 	}
-	if err := checkSecrets(pr, token, spec.Secrets); err != nil {
+	// A run mounts copies of the Secrets of another namespace, named after it.
+	declared := spec.Secrets
+	if spec.SecretSource() != nil {
+		copies := copySecretNames(name, spec.Secrets)
+		renameSecrets(pr.Object, copies)
+		declared = slices.Sorted(maps.Values(copies))
+	}
+	if err := checkSecrets(pr, token, declared); err != nil {
 		return ci.Run{}, &ci.Refusal{Title: "Refused", Reason: err.Error()}
 	}
 	if err := checkServiceAccounts(ctx, r.client(), ns, spec.Path, pr, t.Branch); err != nil {
@@ -219,6 +259,11 @@ func runAnnotations(spec ci.RunSpec, attempt int) map[string]string {
 	}
 	if spec.TaskReports {
 		a[annotationTaskChecks] = "true"
+	}
+	if src := spec.SecretSource(); src != nil {
+		if data, err := json.Marshal(src); err == nil {
+			a[annotationSecrets] = string(data)
+		}
 	}
 	return a
 }

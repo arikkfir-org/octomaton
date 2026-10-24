@@ -108,6 +108,10 @@ const (
 	annotationExpiresAt = "octomaton.dev/expires-at"
 	// annotationPermissions lists the token permissions on a token Secret (JSON).
 	annotationPermissions = "octomaton.dev/permissions"
+	// annotationSecrets holds the source of the Secrets copied for a run (ci.SecretSource, JSON).
+	annotationSecrets = "octomaton.dev/secrets"
+	// annotationSecretSource names the Secret a copied Secret was read from (namespace/name).
+	annotationSecretSource = "octomaton.dev/secret-source"
 )
 
 const (
@@ -216,6 +220,23 @@ func groupLabel(repository, key string) string {
 // tokenSecretName is the name of the Secret holding a PipelineRun's GitHub token.
 func tokenSecretName(pipelineRunName string) string {
 	return pipelineRunName + tokenSecretSuffix
+}
+
+// maxSecretNameLength bounds a Secret's name (a DNS subdomain).
+const maxSecretNameLength = 253
+
+// copySecretName is the name of a run's copy of a Secret of another namespace.
+func copySecretName(pipelineRunName, secret string) string {
+	return pipelineRunName + "-" + secret
+}
+
+// copySecretNames maps each Secret a run gets a copy of to the copy's name.
+func copySecretNames(pipelineRunName string, secrets []string) map[string]string {
+	copies := make(map[string]string, len(secrets))
+	for _, name := range secrets {
+		copies[name] = copySecretName(pipelineRunName, name)
+	}
+	return copies
 }
 
 // renderInput describes how Octomaton customizes a PipelineRun.
@@ -356,18 +377,17 @@ func indexByName(list []any, name string) int {
 	return -1
 }
 
-// secrets lists every Secret a PipelineRun names: in a volume or workspace
-// (secretName), a projected source (secret.name) or an environment variable
+// walkSecretRefs calls visit with every field of a PipelineRun that names a Secret, and its mapping:
+// in a volume or workspace (secretName), a projected source (secret.name) or an environment variable
 // (secretKeyRef.name, secretRef.name).
-func secrets(obj map[string]any) []string {
-	var out []string
+func walkSecretRefs(obj map[string]any, visit func(m map[string]any, field string)) {
 	var walk func(key string, v any)
 	walk = func(key string, v any) {
 		switch t := v.(type) {
 		case map[string]any:
 			for k, child := range t {
-				if name, ok := child.(string); ok && (k == "secretName" || (k == "name" && (key == "secret" || key == "secretKeyRef" || key == "secretRef"))) {
-					out = append(out, name)
+				if _, ok := child.(string); ok && (k == "secretName" || (k == "name" && (key == "secret" || key == "secretKeyRef" || key == "secretRef"))) {
+					visit(t, k)
 				}
 				walk(k, child)
 			}
@@ -378,8 +398,23 @@ func secrets(obj map[string]any) []string {
 		}
 	}
 	walk("", obj)
+}
+
+// secrets lists every Secret a PipelineRun names, sorted.
+func secrets(obj map[string]any) []string {
+	var out []string
+	walkSecretRefs(obj, func(m map[string]any, field string) { out = append(out, m[field].(string)) })
 	sort.Strings(out)
 	return out
+}
+
+// renameSecrets replaces every reference to a Secret named in renames with the name it maps to.
+func renameSecrets(obj map[string]any, renames map[string]string) {
+	walkSecretRefs(obj, func(m map[string]any, field string) {
+		if to, ok := renames[m[field].(string)]; ok {
+			m[field] = to
+		}
+	})
 }
 
 // checkSecrets refuses a PipelineRun that references any Secret other than its own token Secret

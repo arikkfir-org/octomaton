@@ -667,9 +667,8 @@ a release without a grant. Which release an installation runs is the host's choi
 | A version, `1.2.3` | The tag `v1.2.3`, which publishing the [GitHub release](https://github.com/arikkfir-org/octomaton/releases) `1.2.3` creates | `tag` adds the tag to the tagged commit's images; nothing is rebuilt | `v1.2.3`, on the same images as the commit's short SHA |
 
 A version is a [GitHub release](https://github.com/arikkfir-org/octomaton/releases): tag `v<version>` on a commit of
-`main`, titled `<version>`, with notes that list the pull requests since the previous version by kind and link
-[installing Octomaton](docs/octomaton/installation.md) at that tag. The hub's `octomaton-release` skill drafts them
-([tooling](https://github.com/arikkfir-org/tooling)). GitHub creates the tag when the release is published, not when
+`main`, titled `<version>`, with GitHub's generated release notes (the pull requests since the previous version) and a
+link to [installing Octomaton](docs/octomaton/installation.md) at that tag. GitHub creates the tag when the release is published, not when
 it is drafted, so a draft release does nothing; publishing it pushes the tag, and `tag` waits for the commit's images
 (`main` may still be building them) and tags them with the version. A version is therefore the very image `main`
 ran, and the binaries keep reporting the commit's short SHA (`service.version` in their telemetry): the version is a

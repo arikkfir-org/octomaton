@@ -1,0 +1,19 @@
+# Restores Go's caches into /go-cache from the first of the archives named in restore that exists
+# (scripts/go-cache-restore.sh, docs/octomaton/designs/ci-caches.md). Octomaton inlines it into each step that
+# references it by name.
+apiVersion: tekton.dev/v1beta1
+kind: StepAction
+metadata:
+  name: go-cache-restore
+spec:
+  params:
+    - name: restore
+      type: string
+      description: Space-separated archives to try, in order (main, pull-requests/<number>).
+  image: docker.io/curlimages/curl:8.22.0
+  securityContext:
+    runAsUser: 0
+  env:
+    - name: RESTORE
+      value: $(params.restore)
+  command: [sh, .tekton/scripts/go-cache-restore.sh]

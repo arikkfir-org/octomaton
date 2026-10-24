@@ -1,0 +1,26 @@
+# Checks out a commit of a repository into the step's working directory, the task's source workspace. The one step
+# whose script can't come from the checkout. Octomaton inlines it into each step that references it by name.
+apiVersion: tekton.dev/v1beta1
+kind: StepAction
+metadata:
+  name: clone
+spec:
+  params:
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+  image: alpine/git:2.54.0
+  env:
+    - name: REPO_URL
+      value: $(params.repo-url)
+    - name: REVISION
+      value: $(params.revision)
+  script: |
+    #!/bin/sh
+    set -eu
+    git init --quiet .
+    git remote add origin "$REPO_URL"
+    git fetch --quiet --depth=1 origin "$REVISION"
+    git checkout --quiet --detach FETCH_HEAD
+    git log -1 --format='Checked out %H: %s'

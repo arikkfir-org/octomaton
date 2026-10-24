@@ -1,0 +1,78 @@
+# The task of .tekton/main.yaml: build and push the images of a commit with ko, octomaton and octomaton-logs,
+# tagged with the commit's short SHA, from main's Go caches, then build what ci compiles and save the caches back
+# (docs/octomaton/designs/ci-caches.md). Octomaton inlines it, and the steps it references, into the PipelineRun.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: main
+spec:
+  params:
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+  workspaces:
+    - name: source
+  volumes:
+    - name: go-cache
+      emptyDir: {}
+    - name: tools
+      emptyDir: {}
+  stepTemplate:
+    workingDir: $(workspaces.source.path)
+    env:
+      - name: GOCACHE
+        value: /go-cache/build
+      - name: GOMODCACHE
+        value: /go-cache/mod
+      - name: GOTOOLCHAIN
+        value: local
+      # As ci's, so that ci reuses what main compiles.
+      - name: GOFLAGS
+        value: -mod=readonly
+      - name: REVISION
+        value: $(params.revision)
+    volumeMounts:
+      - name: go-cache
+        mountPath: /go-cache
+      - name: tools
+        mountPath: /tools
+  steps:
+    - name: clone
+      ref: {name: clone}
+      params:
+        - name: repo-url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+    - name: restore
+      ref: {name: go-cache-restore}
+      params:
+        - name: restore
+          value: main
+    - name: ko
+      image: docker.io/curlimages/curl:8.22.0
+      securityContext:
+        runAsUser: 0
+      command: [sh, .tekton/scripts/ko.sh]
+    - name: publish
+      image: golang:1.27.1
+      env:
+        - name: KO_DOCKER_REPO
+          value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton
+      command: [sh, .tekton/scripts/publish.sh, ./cmd/octomaton]
+    # The step logs server, from the same checkout and Go cache: Argo CD runs both images of every commit.
+    - name: publish-logs
+      image: golang:1.27.1
+      env:
+        - name: KO_DOCKER_REPO
+          value: me-west1-docker.pkg.dev/arikkfir/octomaton/octomaton-logs
+      command: [sh, .tekton/scripts/publish.sh, ./cmd/octomaton-logs]
+    - name: warm
+      image: golang:1.27.1
+      command: [sh, .tekton/scripts/warm.sh]
+    - name: save
+      ref: {name: go-cache-save}
+      params:
+        - name: save
+          value: main

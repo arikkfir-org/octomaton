@@ -1,0 +1,77 @@
+# The task of .tekton/ci.yaml: lint this repository's .octomaton.yaml, render and validate deploy/ and deploy/logs/
+# as written, vet, test (with the race detector) and build, with Go's caches restored before and saved after
+# (docs/octomaton/designs/ci-caches.md). Octomaton inlines it, and the steps it references, into the PipelineRun.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ci
+spec:
+  params:
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+    - name: cache
+      type: string
+      description: Where this run saves Go's caches, pull-requests/<number>; empty saves none.
+  workspaces:
+    - name: source
+  volumes:
+    - name: go-cache
+      emptyDir: {}
+  stepTemplate:
+    workingDir: $(workspaces.source.path)
+    env:
+      - name: GOCACHE
+        value: /go-cache/build
+      - name: GOMODCACHE
+        value: /go-cache/mod
+      - name: GOTOOLCHAIN
+        value: local
+      - name: GOFLAGS
+        value: -mod=readonly
+    volumeMounts:
+      - name: go-cache
+        mountPath: /go-cache
+  steps:
+    - name: clone
+      ref: {name: clone}
+      params:
+        - name: repo-url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+    # The pull request's own caches, or main's while it has none; a merge group's run, main's.
+    - name: restore
+      ref: {name: go-cache-restore}
+      params:
+        - name: restore
+          value: $(params.cache) main
+    - name: lint
+      image: golang:1.27.1
+      command: [go, run, ./cmd/octomaton-lint, .]
+    # deploy/ and deploy/logs/ as written; how a host renders them is the host's to check.
+    - name: manifests
+      image: docker.io/alpine/k8s:1.37.1
+      command: [sh, deploy/manifests.sh, .ci/manifests]
+    - name: vet
+      image: golang:1.27.1
+      command: [go, vet, ./...]
+    # Every test, every time: the restored cache may hold a passing result.
+    - name: test
+      image: golang:1.27.1
+      command: [go, test, -race, -count=1, ./...]
+    - name: build
+      image: golang:1.27.1
+      env:
+        - name: CGO_ENABLED
+          value: "0"
+      command: [go, build, -trimpath, -o, .ci/bin/, ./cmd/...]
+    - name: version
+      image: golang:1.27.1
+      command: [$(workspaces.source.path)/.ci/bin/octomaton-lint, -version]
+    - name: save
+      ref: {name: go-cache-save}
+      params:
+        - name: save
+          value: $(params.cache)

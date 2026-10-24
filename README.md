@@ -589,7 +589,8 @@ repository (served by `delivery`'s `go-import`, which answers for every hub modu
 go install octomaton.dev/cmd/octomaton-lint@latest
 ```
 
-Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`, as pipeline `main` does.
+Requirements: Go 1.27. `make image` runs [ko](https://ko.build) v0.19.1 through `go run`; pipeline `main` runs the
+same version's release binary, which keeps ko's modules out of its Go caches ([CI caches](docs/octomaton/designs/ci-caches.md)).
 
 ```bash
 make test      # go vet ./... && go test -race ./...

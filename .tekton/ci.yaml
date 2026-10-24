@@ -1,13 +1,15 @@
-# Octomaton's CI: lint its own .octomaton.yaml, render and validate deploy/
-# and deploy/logs/ as written, vet, test (with the race detector) and build. A plain Tekton PipelineRun; Octomaton sets the
-# params.
+# Octomaton's CI: lint its own .octomaton.yaml, render and validate deploy/ and deploy/logs/ as written, vet, test
+# (with the race detector) and build, in task ci (ci.task.yaml). A plain Tekton PipelineRun; Octomaton sets the params.
+# Go's caches come from bucket arikkfir-octomaton-ci-cache (docs/octomaton/designs/ci-caches.md): a pull request's run
+# restores its own, or main's, and saves its own; a merge group's restores main's and saves none. As ci-octomaton-ci,
+# which any branch may use and which may write only pull requests' caches, never main's.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: octomaton-ci-
 spec:
   taskRunTemplate:
-    serviceAccountName: pipeline
+    serviceAccountName: ci-octomaton-ci
   # Reserved once for all of the task's steps (step-level requests would add up as if the steps ran at once).
   # Lint, vet, race tests and build peaked at 2.1Gi and 3.6 cores: a run gets a 4-vCPU CI node to itself.
   taskRunSpecs:
@@ -29,6 +31,9 @@ spec:
       - name: revision
         type: string
         description: Commit to test.
+      - name: cache
+        type: string
+        description: Where this run saves Go's caches, pull-requests/<number>; empty saves none.
     workspaces:
       - name: source
     tasks:
@@ -38,82 +43,10 @@ spec:
             value: $(params.repo-url)
           - name: revision
             value: $(params.revision)
+          - name: cache
+            value: $(params.cache)
         workspaces:
           - name: source
             workspace: source
-        taskSpec:
-          params:
-            - name: repo-url
-              type: string
-            - name: revision
-              type: string
-          workspaces:
-            - name: source
-          volumes:
-            - name: go-cache
-              emptyDir: {}
-          stepTemplate:
-            workingDir: $(workspaces.source.path)
-            env:
-              - name: GOCACHE
-                value: /go-cache/build
-              - name: GOMODCACHE
-                value: /go-cache/mod
-              - name: GOTOOLCHAIN
-                value: local
-              - name: GOFLAGS
-                value: -mod=readonly
-            volumeMounts:
-              - name: go-cache
-                mountPath: /go-cache
-          steps:
-            - name: clone
-              image: alpine/git:2.54.0
-              env:
-                - name: REPO_URL
-                  value: $(params.repo-url)
-                - name: REVISION
-                  value: $(params.revision)
-              script: |
-                #!/bin/sh
-                set -eu
-                git init --quiet .
-                git remote add origin "$REPO_URL"
-                git fetch --quiet --depth=1 origin "$REVISION"
-                git checkout --quiet --detach FETCH_HEAD
-                git log -1 --format='Testing %H: %s'
-            - name: lint
-              image: golang:1.27.1
-              script: |
-                #!/bin/sh
-                set -eu
-                go run ./cmd/octomaton-lint .
-            - name: manifests
-              image: docker.io/alpine/k8s:1.37.1
-              script: |
-                #!/bin/sh
-                # deploy/ and deploy/logs/ as written; how a host renders them is the host's to check.
-                set -eu
-                deploy/manifests.sh .ci/manifests
-            - name: vet
-              image: golang:1.27.1
-              script: |
-                #!/bin/sh
-                set -eu
-                go vet ./...
-            - name: test
-              image: golang:1.27.1
-              script: |
-                #!/bin/sh
-                set -eu
-                go test -race ./...
-            - name: build
-              image: golang:1.27.1
-              env:
-                - name: CGO_ENABLED
-                  value: "0"
-              script: |
-                #!/bin/sh
-                set -eu
-                go build -trimpath -o /tmp/bin/ ./cmd/...
-                /tmp/bin/octomaton-lint -version
+        taskRef:
+          name: ci # .tekton/ci.task.yaml

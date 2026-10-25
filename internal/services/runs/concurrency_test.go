@@ -90,17 +90,68 @@ func TestSupersedeToleratesARivalThatJustFinished(t *testing.T) {
 			}
 		})
 	}
+}
 
-	// Any other refusal is still an error.
-	h := newHarness(t)
-	h.files(sha1, ciConfig, ciRun)
-	h.files(sha2, ciConfig, ciRun)
-	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
-	h.evaluate(branchPR(sha1), EvalOptions{})
-	h.runner.OnCancel = func(ci.RunID) error { return errors.New("the cluster is down") }
-	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
-	if _, err := h.svc.Evaluate(context.Background(), branchPR(sha2), EvalOptions{}); err == nil || !strings.Contains(err.Error(), "superseding ci-demo/demo-ci-1111111-1: the cluster is down") {
-		t.Fatalf("Evaluate = %v, want the cancel's error", err)
+// A rival the runner will not stand down, still running, runs on to its end beside the run that
+// supersedes it: that run still goes, and no report fails for the rival. Its report is the one the
+// code host shows, and failing it would show a failure nobody caused (Tekton's admission webhook
+// refused to cancel a running PipelineRun when a pull request was edited during its run).
+func TestSupersedeGoesOnPastARivalItCannotStandDown(t *testing.T) {
+	started := errors.New(`admission webhook "validation.webhook.pipeline.tekton.dev" denied the request: validation failed: invalid value: Once the PipelineRun has started, only status updates are allowed: spec`)
+	edited := branchPR(sha1)
+	edited.Action, edited.DeliveryID = "edited", "edit-1"
+	tests := []struct {
+		name   string
+		next   ci.Trigger
+		head   string
+		newer  string
+		refuse error
+	}{
+		{name: "an edit of the pull request", next: edited, head: sha1, newer: "demo-ci-1111111-2", refuse: started},
+		{name: "new commits", next: branchPR(sha2), head: sha2, newer: "demo-ci-2222222-1", refuse: started},
+		{name: "a runner that is down", next: branchPR(sha2), head: sha2, newer: "demo-ci-2222222-1", refuse: errors.New("the cluster is down")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			const cfg = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - name: ci
+    pipelineRun: .tekton/ci.yaml
+    on:
+      pull_request: {types: [opened, synchronize, edited]}
+`
+			h.files(sha1, cfg, ciRun)
+			h.files(sha2, cfg, ciRun)
+			h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+			h.evaluate(branchPR(sha1), EvalOptions{})
+			rival := h.run("demo-ci-1111111-1")
+			h.runner.Start(rival.ID, h.now)
+			h.runner.OnCancel = func(id ci.RunID) error {
+				if id == rival.ID {
+					return tt.refuse
+				}
+				return nil
+			}
+
+			h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: tt.head}, State: "open"})
+			if _, err := h.svc.Evaluate(ctx, tt.next, EvalOptions{}); err != nil {
+				t.Fatalf("Evaluate = %v, want the newer run started", err)
+			}
+			if got := h.run(tt.newer); got.Phase != ci.Released || got.CancelRequested || got.Done {
+				t.Fatalf("the newer run must go: %+v", got)
+			}
+			if got := h.run(rival.ID.Name); got.Phase != ci.Running || got.CancelRequested {
+				t.Fatalf("the rival runs on: %+v", got)
+			}
+			for _, r := range h.host.ReportsNamed("ci") {
+				if r.Status == ci.StatusCompleted {
+					t.Fatalf("no report may conclude over the refused cancel: %+v", r)
+				}
+			}
+		})
 	}
 }
 
@@ -210,6 +261,46 @@ func TestLatestPolicy(t *testing.T) {
 	}
 	if h.run("demo-ci-1111111-1").CancelRequested {
 		t.Fatalf("the running run is not touched")
+	}
+}
+
+// A waiting run the runner will not stand down stays held, and waits its turn; the newest still
+// waits for the running run, its report open.
+func TestLatestGoesOnPastARivalItCannotStandDown(t *testing.T) {
+	tests := []struct {
+		name   string
+		refuse error
+	}{
+		{name: "refused", refuse: errors.New(`admission webhook "validation.webhook.pipeline.tekton.dev" denied the request: validation failed: invalid value: Once the PipelineRun has started, only status updates are allowed: spec`)},
+		{name: "a runner that is down", refuse: errors.New("the cluster is down")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			cfg := strings.Replace(queueConfig, "POLICY", "latest", 1)
+			for _, sha := range []string{sha1, sha2, sha3} {
+				h.files(sha, cfg, ciRun)
+			}
+			h.host.SetBranch(repo, "main", sha3)
+			h.evaluate(pushTrigger(sha1, "main"), EvalOptions{})
+			h.evaluate(pushTrigger(sha2, "main"), EvalOptions{})
+			h.runner.OnCancel = func(ci.RunID) error { return tt.refuse }
+
+			if _, err := h.svc.Evaluate(context.Background(), pushTrigger(sha3, "main"), EvalOptions{}); err != nil {
+				t.Fatalf("Evaluate = %v, want the newest run waiting", err)
+			}
+			if second := h.run("demo-ci-2222222-1"); second.Phase != ci.Held || second.CancelRequested {
+				t.Fatalf("the older waiting run stays held: %+v", second)
+			}
+			if third := h.run("demo-ci-3333333-1"); third.Phase != ci.Held || third.CancelRequested || third.Done {
+				t.Fatalf("the newest run waits for the running one: %+v", third)
+			}
+			for _, r := range h.host.ReportsNamed("ci") {
+				if r.Status == ci.StatusCompleted {
+					t.Fatalf("no report may conclude over the refused cancel: %+v", r)
+				}
+			}
+		})
 	}
 }
 

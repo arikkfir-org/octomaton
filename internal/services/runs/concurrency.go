@@ -195,11 +195,12 @@ func createdBefore(a, b ci.Run) bool {
 	return a.ID.Name < b.ID.Name
 }
 
-// standDown supersedes rival, which run outranks, as far as the runner lets it. A rival the runner
-// will not cancel (a cluster may refuse to change a running run) is left as it is: a running one runs
-// to its end and its report concludes with it, a held one waits its turn. run goes on all the same:
-// its report is the newer one, which the code host shows, and failing it over the rival would put a
-// failure nobody caused on the check that counts.
+// standDown supersedes rival, which run outranks, as far as the runner lets it. A rival it fails to
+// cancel, whatever the reason (a cluster may refuse to change a running run, a call may fail), is
+// left as it is: a running one runs to its end and its report concludes with it, a held one waits its
+// turn. run goes on all the same: its report is the newer one, which the code host shows, and failing
+// it over the rival would put a failure nobody caused on the check that counts. The cancel is not
+// tried again: a missed one costs the rival's run time, not a report anyone reads.
 func (s *Service) standDown(ctx context.Context, rival, run ci.RunID) {
 	if err := s.supersededBy(ctx, rival, ci.Cancellation{SupersededBy: run.Name}); err != nil {
 		s.Logger.WarnContext(ctx, "Could not supersede the run; leaving it as it is", "run", rival.String(), "supersededBy", run.Name, "error", err)

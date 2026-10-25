@@ -17,7 +17,7 @@ flowchart TD
   T -->|yes| D{"a run of<br/>this delivery?"}
   D -->|yes, a redelivery| X
   D -->|no| N["the next attempt at C"]
-  N -->|"concurrency: supersede"| O["older attempt cancelled,<br/>its check concluded skipped"]
+  N -->|"concurrency: supersede"| O["older attempt cancelled,<br/>its check concluded skipped<br/>(one that can't be cancelled runs on)"]
   N --> R["its check, the newest of its name,<br/>is the one GitHub requires"]
 ```
 

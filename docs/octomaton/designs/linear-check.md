@@ -26,7 +26,7 @@ flowchart TD
 | `secrets` and `githubToken.repositories: all` | Only on a pipeline whose every trigger is `comment`, `review_request` or `schedule` | Also on an organization pipeline, whatever its triggers |
 | A repository's own pipeline on pull requests, merge groups or pushes | Refused both | Still refused both: its definitions come from the commit under test |
 | A pull request's `edited`, `labeled`, `unlabeled` | Found the commit's run | On an open pull request, a run of its own, keyed by its delivery: the next attempt at the commit, which supersedes the one before under the pipeline's concurrency. On a closed one, nothing |
-| Other pull request actions, pushes, merge groups | Find the commit's run | Unchanged |
+| Other pull request actions, pushes, merge groups | Find the commit's run | Unchanged; since then, endings and resumptions are runs of their own too ([pull request endings](pull-request-endings.md)) |
 
 Code: `Pipeline.validate` in `internal/services/pipelines/config.go` learns whether it checks an organization pipeline; `sameRun` in `internal/services/runs/start.go` keys a pull request change by its delivery (`Trigger.ChangesPullRequest`), as it does a review request; and the GitHub adapter drops a change to a pull request that isn't open. The contract is the README's [`.octomaton.yaml`](https://github.com/arikkfir-org/octomaton#repository-configuration-octomatonyaml).
 
@@ -37,7 +37,7 @@ Code: `Pipeline.validate` in `internal/services/pipelines/config.go` learns whet
 | Organization pipelines may mount Secrets on any trigger | The rule exists so that a pull request's own definitions never reach a Secret, and Octomaton never reads an organization pipeline at a pull request's head | A ServiceAccount that reads Secret Manager at run time, which any pull request's own pipeline in that namespace could name; a per-pipeline exemption |
 | One rule for Secrets and for a token for every repository | Both rest on where definitions are read | Widening Secrets alone, which leaves two rules for one reason |
 | A pull request change is its own run, keyed by its delivery | What a pipeline that lists the action reads has changed, though the commit hasn't; a redelivery still finds its run. Review requests work the same way | A setting per pipeline; asking people to press Re-run after labelling |
-| Only `edited`, `labeled` and `unlabeled` | They change what a pull request says. `reopened` and `ready_for_review` change nothing at a commit that already ran, and `ready_for_review` still starts a run when a draft was skipped | Every action, which would run `ci` again on events that change nothing it reads |
+| Only `edited`, `labeled` and `unlabeled` | They change what a pull request says. `reopened` and `ready_for_review` change nothing a check reads at a commit that already ran; they run again only to redo what an ending undid ([pull request endings](pull-request-endings.md)) | Every action, which would run `ci` again on events that change nothing it reads |
 
 ## Security
 

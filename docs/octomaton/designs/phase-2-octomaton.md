@@ -80,7 +80,8 @@ The full schema and template context are in the
 | Cron schedule | Pipelines with `on.schedule` run at the default branch head, once per slot |
 | Long run | The installation token is refreshed while the run lives; a live task table and per-task checks (`taskChecks`) show progress |
 | Octomaton restarts mid-dispatch | Runs are created held (`PipelineRunPending`) and released only once their check and token exist; held runs are resumed |
-| Merge group destroyed | Its runs are cancelled |
+| Pull request closed or made a draft | Pipelines that list the action run at its head commit, each event as a run of its own, outside the pull request's default concurrency group; closing cancels none of its runs ([pull request endings](pull-request-endings.md)) |
+| Merge group destroyed | Its `checks_requested` runs are cancelled, then the pipelines that list `destroyed` run |
 | "Re-run" in GitHub | The pipeline re-runs with the original context, stored in the check run itself, so it works after pruning |
 
 ## Tenancy and identity

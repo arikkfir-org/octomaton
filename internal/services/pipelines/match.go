@@ -98,7 +98,9 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 		if !slices.Contains(types, ev.Action) {
 			return PathFilter{}, false
 		}
-		if ev.Draft && t.Drafts != nil && !*t.Drafts {
+		// Closing a draft, or making a pull request one, ends work the pipeline may have done before it
+		// was a draft: skipping drafts never skips an ending.
+		if ev.Draft && t.Drafts != nil && !*t.Drafts && !ci.IsEnding(ev.Name, ev.Action) {
 			return PathFilter{}, false
 		}
 		if len(t.Branches) > 0 && !anyGlob(t.Branches, ev.Branch) {
@@ -109,6 +111,13 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 	case ci.EventMergeGroup:
 		t := p.On.MergeGroup
 		if t == nil {
+			return PathFilter{}, false
+		}
+		types := t.Types
+		if len(types) == 0 {
+			types = DefaultMergeGroupTypes
+		}
+		if !slices.Contains(types, ev.Action) {
 			return PathFilter{}, false
 		}
 		if len(t.Branches) > 0 && !anyGlob(t.Branches, ev.Branch) {
@@ -127,6 +136,24 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 		return PathFilter{}, true
 	}
 	return PathFilter{}, false
+}
+
+// Resumes reports whether t resumes a pull request after a time the pipeline did not run in, so
+// that the pipeline runs again at a commit it already ran, as a run of its own: reopening ends a time
+// the pull request was closed, and marking it ready ends one it was a draft, which a pipeline with
+// drafts: false skipped. Whatever an ending undid, the pipeline does again.
+func (p *Pipeline) Resumes(t ci.Trigger) bool {
+	if t.Event != ci.EventPullRequest {
+		return false
+	}
+	switch t.Action {
+	case "reopened":
+		return true
+	case "ready_for_review":
+		pr := p.On.PullRequest
+		return pr != nil && pr.Drafts != nil && !*pr.Drafts
+	}
+	return false
 }
 
 // IsCommand reports whether line (a comment's first line) is this pipeline's comment command.

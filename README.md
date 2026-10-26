@@ -38,8 +38,9 @@ sequenceDiagram
 2. The event is matched against each pipeline's triggers. A matching pipeline whose path filters do not match gets a
    check run concluded `skipped` (required checks do not block). Forks are ignored outright: see [Security](#security).
 3. Runs are named `<repo>-<pipeline>-<sha7>-<attempt>`. A redelivery, or a second event for the same commit, pipeline and
-   branch, finds the existing run. Each comment command, review request and pull request change (`edited`, `labeled`,
-   `unlabeled`) gets its own run, new commits on a pull
+   branch, finds the existing run. Each comment command, review request, pull request change (`edited`, `labeled`,
+   `unlabeled`), ending (`closed`, `converted_to_draft`, a destroyed merge group) and resumption (`reopened`;
+   `ready_for_review` for a pipeline with `drafts: false`) gets its own run, new commits on a pull
    request run every review request still pending on it again, and re-runs create the next attempt.
 4. Runs are created held, then their check run, token Secret and the copies of an organization pipeline's Secrets
    are created, then they are released per their concurrency group. If anything fails in between, the run is cancelled and its check says why. A run held longer than
@@ -107,12 +108,13 @@ pipelines:
     on:
       pull_request:
         branches: [main]               # base-branch globs; omitted = all
-        types: [opened, reopened, synchronize, ready_for_review]  # default
-        drafts: true                   # default; false skips draft pull requests
+        types: [opened, reopened, synchronize, ready_for_review]  # default; also closed, converted_to_draft, edited…
+        drafts: true                   # default; false skips draft pull requests (not their endings)
         paths: ["**"]                  # optional globs; no match = check reported as skipped
         pathsIgnore: []                # optional
       merge_group:                     # merge queue; optional base-branch globs
         branches: [main]
+        types: [checks_requested]      # default; or destroyed
       push:
         branches: [main]               # branch globs
         tags: ["v*"]                   # tag globs
@@ -120,7 +122,7 @@ pipelines:
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line
         allow:                         # required: who may invoke it
-          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          users: [octocat]             # GitHub logins, people and bots, case-insensitive
           teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request
@@ -141,14 +143,14 @@ pipelines:
                                        # repository's in an organization pipeline); only when every trigger is
                                        # comment, review_request or schedule, or in an organization pipeline
     timeout: 1h                        # optional, sets spec.timeouts.pipeline
-    concurrency:                       # optional; default for pull_request and review_request:
+    concurrency:                       # optional; default for pull_request (but its endings) and review_request:
                                        # group "pr-<number>", policy supersede
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
 commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
   rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
-    allow: {users: [arikkfir], teams: [maintainers]}
+    allow: {users: [octocat], teams: [maintainers]}
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
   commands: {}                         # same as commands, for every repository without a commands section of its own
@@ -158,8 +160,8 @@ organization:                          # only in the organization repository: pi
 
 | Trigger | Matches | Notes |
 | --- | --- | --- |
-| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. |
-| `merge_group` | `checks_requested` for merge groups whose base branch matches `branches` | Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its runs. |
+| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests, but not their endings. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. `closed` (merged or not: `.PullRequest.Merged` tells) and `converted_to_draft` are endings: each runs the pipeline at the head commit as it was when the event fired, as a run of its own that only its redelivery finds, outside the default concurrency group (below), so by default no run supersedes it and it supersedes none. Closing a pull request does not cancel its other runs. `reopened`, and `ready_for_review` for a pipeline with `drafts: false`, resume a pull request after a time the pipeline did not run in (it was closed, or a draft the pipeline skipped): each runs it again at the same commit, as the next attempt, so that whatever an ending undid is done again. |
+| `merge_group` | the listed actions (`types`) on merge groups whose base branch matches `branches` | Types: `checks_requested` (the default) and `destroyed`. Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its `checks_requested` runs, then runs the pipelines that list `destroyed` at its head (the commit is read by its SHA: unless the group merged, no branch holds it any more), as a run of its own; `.MergeGroup.Reason` says why. An invalid configuration is reported on `checks_requested` only. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by a commenter in `allow` ([Comment commands](#comment-commands)). A pattern that matches `/rerun`, the built-in command, is refused. |
 | `review_request` | a review requested from one of `reviewers` (logins, case-insensitive) on an open pull request into `branches` | Drafts included; team requests are ignored. Requesting a review takes triage or write access. New commits (`synchronize`) while the review is still requested run it again at the new head and supersede the older commit's run: GitHub sends no new request while one is pending. `review_requested` is not a `pull_request` type. An invalid configuration is not reported on review requests: most are for people; one GitHub would not serve is. |
@@ -216,7 +218,10 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 | `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled. |
 
 Without `concurrency`, pull request and review request runs of the same pipeline and pull request share the group
-`pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained.
+`pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained, and so are the runs of a pull
+request's endings (`closed`, `converted_to_draft`). A pipeline that sets `concurrency` gets it for every run, endings
+included: a teardown that names the group of the pipeline that deploys, with policy `latest`, waits for a deployment
+in flight instead of racing it ([example](#examples)).
 
 ### Pipeline, Task and StepAction files
 
@@ -276,7 +281,8 @@ spec:
 `.Event` (`push`, `pull_request`, `merge_group`, `comment`, `review_request`, `schedule`), `.Action`, `.Repository`
 (`Owner`, `Name`, `FullName`, `CloneURL`, `HTMLURL`, `DefaultBranch`, `Private`), `.Revision` (SHA under test), `.Ref`,
 `.Branch`, `.Tag`, `.Sender`, `.Pipeline`, `.Push` (`Before`, `After`), `.PullRequest` (`Number`, `HeadRef`, `HeadSHA`,
-`BaseRef`, `BaseSHA`), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`), `.Comment` (`ID`, `Author`,
+`BaseRef`, `BaseSHA`, `Merged`), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`, `PullRequestNumber`,
+`Reason`), `.Comment` (`ID`, `Author`,
 `Command`, `Arguments`), `.ReviewRequest` (`Reviewer`), `.Schedule` (`Cron`, `Slot`). Event-specific objects are nil for
 other events; referencing a missing value fails the check with the rendering error. Guard optional objects with
 `{{ if .PullRequest }}…{{ end }}`.
@@ -284,8 +290,8 @@ other events; referencing a missing value fails the check with the rendering err
 | Event | `.Revision` | `.Ref` | `.Branch` | Objects set |
 | --- | --- | --- | --- | --- |
 | `push` | pushed commit (the tagged commit for annotated tags) | `refs/heads/<b>` or `refs/tags/<t>` | pushed branch (`.Tag` for tags) | `.Push` |
-| `pull_request` | head commit | `refs/pull/<n>/head` | head branch | `.PullRequest` |
-| `merge_group` | merge group head | merge group ref | merge group branch | `.MergeGroup` (`HeadRef`/`BaseRef` are full refs) |
+| `pull_request` | head commit | `refs/pull/<n>/head` | head branch | `.PullRequest` (`Merged` is true on `closed` when the pull request was merged) |
+| `merge_group` | merge group head | merge group ref | merge group branch | `.MergeGroup` (`HeadRef`/`BaseRef` are full refs; `PullRequestNumber` is the pull request whose queue entry the group is, from its branch's name, `0` when the name holds none; `Reason` is `merged`, `invalidated` or `dequeued` on `destroyed`, empty otherwise) |
 | `comment` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.Comment` (`Command` is the first word, `Arguments` the rest of the first line) |
 | `review_request` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.ReviewRequest` (`Reviewer` as GitHub sent it; `.Action` is `review_requested`) |
 | `schedule` | head of the default branch | `refs/heads/<default>` | default branch | `.Schedule` (`Slot` is RFC 3339, UTC) |
@@ -321,6 +327,27 @@ pipelines:
     params:
       revision: "{{ .Revision }}"
       environment: "{{ .Comment.Arguments }}"
+  - name: environment                        # an environment per pull request that is not a draft, and per queue entry
+    pipelineRun: .tekton/environment.yaml
+    on:
+      pull_request: {drafts: false}          # runs again on reopened and ready_for_review, after a teardown
+      merge_group: {}
+    params:
+      environment: '{{ with .PullRequest }}pr-{{ .Number }}{{ else }}pr-{{ .MergeGroup.PullRequestNumber }}-merge{{ end }}'
+    concurrency:                             # one run at a time per environment; only the newest waiting one
+      group: 'environment-{{ with .PullRequest }}pr-{{ .Number }}{{ else }}pr-{{ .MergeGroup.PullRequestNumber }}-merge{{ end }}'
+      policy: latest
+  - name: teardown                           # removes it when the pull request closes or becomes a draft, or the entry leaves the queue
+    pipelineRun: .tekton/teardown.yaml
+    on:
+      pull_request: {types: [closed, converted_to_draft]}
+      merge_group: {types: [destroyed]}
+    params:
+      environment: '{{ with .PullRequest }}pr-{{ .Number }}{{ else }}pr-{{ .MergeGroup.PullRequestNumber }}-merge{{ end }}'
+      merged: '{{ with .PullRequest }}{{ .Merged }}{{ else }}{{ eq .MergeGroup.Reason "merged" }}{{ end }}'
+    concurrency:                             # environment's group: waits for a deployment in flight, never cancelled while running
+      group: 'environment-{{ with .PullRequest }}pr-{{ .Number }}{{ else }}pr-{{ .MergeGroup.PullRequestNumber }}-merge{{ end }}'
+      policy: latest
   - name: nightly
     pipelineRun: .tekton/nightly.yaml
     on:
@@ -362,7 +389,9 @@ event with placeholder values, so a template that only works for one event is re
 
 - Each run reports on a check named after its pipeline (its `displayName`, or else its `name`): `queued` →
   `in_progress` → `completed`, linked to `<OCTOMATON_TEKTON_DASHBOARD_URL>/#/namespaces/<namespace>/pipelineruns/<name>` (no link when unset),
-  with `external_id` `<namespace>/<name>`.
+  with `external_id` `<namespace>/<name>`. A run reports on the commit it ran at: an ending's on the pull request's
+  head, which stays readable once it is closed, or on a destroyed merge group's head, which for a merged group is the
+  base branch's new commit, beside the group's other checks.
 - While a run of two or more tasks runs, the title reads `<done> of <n> · <running task> · <elapsed>` and the summary
   holds a task table (✅ ❌ ⏳ ⬜); it is rewritten only when the table changes.
 - Conclusions: `Succeeded=True` → `success`; superseded → `skipped` ("Superseded"); cancelled or stopped → `cancelled`;

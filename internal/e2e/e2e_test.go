@@ -61,7 +61,7 @@ pipelines:
   - name: preview
     pipelineRun: .tekton/ci.yaml
     on:
-      comment: {pattern: "^/preview\\b", allow: {users: [arikkfir]}}
+      comment: {pattern: "^/preview\\b", allow: {users: [octocat]}}
     params:
       revision: "{{ .Revision }}"
       target: "{{ .Comment.Arguments }}"
@@ -111,8 +111,8 @@ func setup(t *testing.T) *env {
 	gh.AddFile(fullName, headSHA, ".tekton/ci.yaml", ciYAML)
 	gh.AddFile(fullName, "main", ".octomaton.yaml", octomatonYAML)
 	gh.AddFile(fullName, "main", ".tekton/ci.yaml", ciYAML)
-	gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: headSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "arikkfir", AuthorAssociation: "OWNER"})
-	gh.SetPermission(fullName, "arikkfir", "admin")
+	gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: headSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "octocat", AuthorAssociation: "OWNER"})
+	gh.SetPermission(fullName, "octocat", "admin")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	m := metricstest.New(t).Metrics
@@ -190,13 +190,13 @@ func pullRequestPayload(action string) map[string]any {
 		"action": action, "number": 12,
 		"pull_request": map[string]any{
 			"number": 12, "draft": false, "author_association": "OWNER", "html_url": "https://github.com/" + fullName + "/pull/12",
-			"user": map[string]any{"login": "arikkfir"},
+			"user": map[string]any{"login": "octocat"},
 			"head": map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"full_name": fullName}},
 			"base": map[string]any{"ref": "main", "sha": baseSHA},
 		},
 		"repository":   repository,
 		"installation": map[string]any{"id": 5},
-		"sender":       map[string]any{"login": "arikkfir"},
+		"sender":       map[string]any{"login": "octocat"},
 	}
 }
 
@@ -266,14 +266,14 @@ func TestEndToEnd(t *testing.T) {
 		"check_run":    map[string]any{"id": checkID, "name": "ci", "head_sha": headSHA, "app": map[string]any{"id": appID}},
 		"repository":   repository,
 		"installation": map[string]any{"id": 5},
-		"sender":       map[string]any{"login": "arikkfir"},
+		"sender":       map[string]any{"login": "octocat"},
 	}
 	if rec := e.deliver("check_run", "d-2", rerun, true); rec.Code != http.StatusAccepted {
 		t.Fatalf("check_run: %d %s", rec.Code, rec.Body.String())
 	}
 	// Attempts follow the highest one still there; the first run was pruned.
 	second, _ := e.waitForRun("octomaton-ci-abcdef0-1")
-	if second.Trigger.RerunBy != "arikkfir" {
+	if second.Trigger.RerunBy != "octocat" {
 		t.Fatalf("re-run trigger = %+v", second.Trigger)
 	}
 	if second.ReportID == run.ReportID {
@@ -284,10 +284,10 @@ func TestEndToEnd(t *testing.T) {
 	comment := map[string]any{
 		"action":       "created",
 		"issue":        map[string]any{"number": 12, "pull_request": map[string]any{"url": "https://api.github.com/repos/" + fullName + "/pulls/12"}},
-		"comment":      map[string]any{"id": 555, "body": "/preview eu-west\nthanks!", "user": map[string]any{"login": "arikkfir"}},
+		"comment":      map[string]any{"id": 555, "body": "/preview eu-west\nthanks!", "user": map[string]any{"login": "octocat"}},
 		"repository":   repository,
 		"installation": map[string]any{"id": 5},
-		"sender":       map[string]any{"login": "arikkfir"},
+		"sender":       map[string]any{"login": "octocat"},
 	}
 	if rec := e.deliver("issue_comment", "d-3", comment, true); rec.Code != http.StatusAccepted {
 		t.Fatalf("issue_comment: %d %s", rec.Code, rec.Body.String())
@@ -403,7 +403,7 @@ func TestReviewRequestEndToEnd(t *testing.T) {
 
 	// New commits while the review is still requested review the new head, and stop the older commit's review.
 	const newSHA = "fedcba9876543210fedcba9876543210fedcba98"
-	e.gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: newSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "arikkfir", AuthorAssociation: "OWNER"})
+	e.gh.SetPullRequest(fullName, githubtest.PullRequest{Number: 12, State: "open", HeadSHA: newSHA, HeadRef: "feature", BaseRef: "main", BaseSHA: baseSHA, HeadRepo: fullName, Author: "octocat", AuthorAssociation: "OWNER"})
 	e.gh.AddFile(fullName, newSHA, ".octomaton.yaml", "apiVersion: octomaton.dev/v1\npipelines: []\n")
 	pushed := pullRequestPayload("synchronize")
 	pull := pushed["pull_request"].(map[string]any)

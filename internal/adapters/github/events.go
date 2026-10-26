@@ -2,6 +2,8 @@ package github
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v92/github"
@@ -193,6 +195,7 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 			HeadRepo: pr.GetHead().GetRepo().GetFullName(),
 			Author:   pr.GetUser().GetLogin(),
 			HTMLURL:  pr.GetHTMLURL(),
+			Merged:   pr.GetMerged(),
 		},
 	}
 	if t.FromFork() {
@@ -247,6 +250,23 @@ func pendingReviewers(ev *github.PullRequestEvent) []string {
 	return logins
 }
 
+// queueBranchRE matches a merge queue branch's name, which ends with the pull request whose queue
+// entry it is and a commit: "gh-readonly-queue/<base>/pr-<number>-<sha>".
+var queueBranchRE = regexp.MustCompile(`^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$`)
+
+// queuedPullRequest is the number of the pull request a merge queue branch names, or 0.
+func queuedPullRequest(ref string) int {
+	m := queueBranchRE.FindStringSubmatch(ref)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // mergeGroupEvent converts a merge group ready for checks, or one the queue destroyed.
 func mergeGroupEvent(ev *github.MergeGroupEvent, delivery string) (ci.Event, string) {
 	mg := ev.GetMergeGroup()
@@ -265,10 +285,12 @@ func mergeGroupEvent(ev *github.MergeGroupEvent, delivery string) (ci.Event, str
 		Branch:         strings.TrimPrefix(mg.GetHeadRef(), "refs/heads/"),
 		Sender:         ev.GetSender().GetLogin(),
 		MergeGroup: &ci.MergeGroup{
-			HeadRef: mg.GetHeadRef(),
-			HeadSHA: mg.GetHeadSHA(),
-			BaseRef: mg.GetBaseRef(),
-			BaseSHA: mg.GetBaseSHA(),
+			HeadRef:           mg.GetHeadRef(),
+			HeadSHA:           mg.GetHeadSHA(),
+			BaseRef:           mg.GetBaseRef(),
+			BaseSHA:           mg.GetBaseSHA(),
+			PullRequestNumber: queuedPullRequest(mg.GetHeadRef()),
+			Reason:            ev.GetReason(),
 		},
 	}
 	if reason := incomplete(t); reason != "" {
@@ -278,7 +300,7 @@ func mergeGroupEvent(ev *github.MergeGroupEvent, delivery string) (ci.Event, str
 	case "checks_requested":
 		return &ci.TriggerEvent{Trigger: t}, ""
 	case "destroyed":
-		return &ci.MergeGroupDestroyed{Trigger: t, Reason: ev.GetReason()}, ""
+		return &ci.MergeGroupDestroyed{Trigger: t}, ""
 	default:
 		return nil, "unhandled merge_group action " + ev.GetAction()
 	}

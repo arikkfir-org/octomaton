@@ -38,6 +38,12 @@ const (
 // DefaultPullRequestTypes are the pull_request actions that trigger a pipeline when `types` is omitted.
 var DefaultPullRequestTypes = []string{"opened", "reopened", "synchronize", "ready_for_review"}
 
+// DefaultMergeGroupTypes are the merge_group actions that trigger a pipeline when `types` is omitted.
+var DefaultMergeGroupTypes = []string{"checks_requested"}
+
+// mergeGroupActions are the merge_group webhook actions GitHub sends.
+var mergeGroupActions = map[string]bool{"checks_requested": true, "destroyed": true}
+
 // pullRequestActions are the pull_request webhook actions GitHub sends.
 var pullRequestActions = map[string]bool{
 	"assigned": true, "auto_merge_disabled": true, "auto_merge_enabled": true, "closed": true,
@@ -206,6 +212,7 @@ type PullRequestTrigger struct {
 // MergeGroupTrigger configures merge_group (merge queue) events.
 type MergeGroupTrigger struct {
 	Branches    []string `yaml:"branches"`
+	Types       []string `yaml:"types"`
 	Paths       []string `yaml:"paths"`
 	PathsIgnore []string `yaml:"pathsIgnore"`
 }
@@ -609,6 +616,11 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 		}
 	}
 	if t := on.MergeGroup; t != nil {
+		for i, typ := range t.Types {
+			if !mergeGroupActions[typ] {
+				add("on.merge_group.types[%d]: unknown merge_group action %q (checks_requested or destroyed)", i, typ)
+			}
+		}
 		problems = append(problems, validateGlobs("on.merge_group.branches", t.Branches)...)
 		problems = append(problems, validateGlobs("on.merge_group.paths", t.Paths)...)
 		problems = append(problems, validateGlobs("on.merge_group.pathsIgnore", t.PathsIgnore)...)
@@ -864,7 +876,8 @@ func (p *Pipeline) TokenWorkspace() string {
 // ConcurrencyFor resolves the run's concurrency group for ctx. Without a
 // concurrency setting, pull_request and review_request runs of the same pipeline
 // and pull request share the group "pr-<number>" (scoped to the pipeline) with
-// policy supersede, and other runs are unconstrained.
+// policy supersede, and other runs are unconstrained: so are the runs of a pull
+// request's ending, which no newer commit or run can supersede.
 func (p *Pipeline) ConcurrencyFor(ctx TemplateContext) (ci.Concurrency, error) {
 	if c := p.Concurrency; c != nil && c.group != nil {
 		group, err := ExecuteTemplate(c.group, ctx)
@@ -876,7 +889,8 @@ func (p *Pipeline) ConcurrencyFor(ctx TemplateContext) (ci.Concurrency, error) {
 		}
 		return ci.Concurrency{Group: group, Key: group, Policy: ci.Policy(c.Policy)}, nil
 	}
-	if (ctx.Event == ci.EventPullRequest || ctx.Event == ci.EventReviewRequest) && ctx.PullRequest != nil {
+	byPullRequest := ctx.Event == ci.EventPullRequest && !ci.IsEnding(ctx.Event, ctx.Action) || ctx.Event == ci.EventReviewRequest
+	if byPullRequest && ctx.PullRequest != nil {
 		group := fmt.Sprintf("pr-%d", ctx.PullRequest.Number)
 		return ci.Concurrency{Group: group, Key: p.Name + "/" + group, Policy: ci.Supersede}, nil
 	}

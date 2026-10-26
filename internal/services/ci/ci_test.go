@@ -44,7 +44,8 @@ func TestTriggerJSON(t *testing.T) {
 			trigger: Trigger{
 				Version: TriggerVersion, Event: EventComment, InstallationID: 1, Repository: Repository{ID: 2, Owner: "o", Name: "r", FullName: "o/r", HTMLURL: "https://github.com/o/r", Private: true},
 				Revision: "abc", Tag: "v1", Push: &Push{Before: "a", After: "b", Created: true},
-				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b"},
+				PullRequest:   &PullRequest{Number: 5, Merged: true},
+				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b", PullRequestNumber: 5, Reason: "merged"},
 				Comment:       &Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
 				ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},
 				Schedule:      &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
@@ -52,7 +53,8 @@ func TestTriggerJSON(t *testing.T) {
 			},
 			want: `{"v":1,"event":"comment","installationID":1,"repository":{"id":2,"owner":"o","name":"r","fullName":"o/r","htmlURL":"https://github.com/o/r","private":true},` +
 				`"revision":"abc","tag":"v1","push":{"before":"a","after":"b","created":true},` +
-				`"mergeGroup":{"headRef":"refs/heads/q","headSHA":"h","baseRef":"refs/heads/main","baseSHA":"b"},` +
+				`"pullRequest":{"number":5,"headRef":"","headSHA":"","baseRef":"","baseSHA":"","merged":true},` +
+				`"mergeGroup":{"headRef":"refs/heads/q","headSHA":"h","baseRef":"refs/heads/main","baseSHA":"b","pullRequestNumber":5,"reason":"merged"},` +
 				`"comment":{"id":3,"author":"alice","command":"/deploy","arguments":"prod"},"reviewRequest":{"reviewer":"octo-reviewer"},` +
 				`"schedule":{"cron":"0 3 * * *","slot":"2026-01-01T03:00:00Z"},` +
 				`"configRef":"main","rerunBy":"carol"}`,
@@ -136,6 +138,10 @@ func TestDescribe(t *testing.T) {
 	review.ReviewRequest = &ReviewRequest{Reviewer: "octo-reviewer"}
 	pending := review
 	pending.ReviewRequest = &ReviewRequest{Reviewer: "octo-reviewer", Pending: true}
+	closed := pullRequestTrigger()
+	closed.Action = "closed"
+	merged := pullRequestTrigger()
+	merged.Action, merged.PullRequest.Merged = "closed", true
 	tests := []struct {
 		name    string
 		trigger Trigger
@@ -151,6 +157,14 @@ func TestDescribe(t *testing.T) {
 		{"push", Trigger{Event: EventPush, Branch: "main", Revision: "abcdef0123"}, "Push to `main` at `abcdef0`"},
 		{"tag", Trigger{Event: EventPush, Tag: "v1.0.0"}, "Push of tag `v1.0.0`"},
 		{"merge group", Trigger{Event: EventMergeGroup, MergeGroup: &MergeGroup{BaseRef: "refs/heads/main"}}, "Merge queue into `main`"},
+		{"closed", closed, "Pull request #5 (`feature` → `main`), closed at `0123456` by @alice"},
+		{"merged", merged, "Pull request #5 (`feature` → `main`), closed (merged) at `0123456` by @alice"},
+		{"queued pull request", Trigger{Event: EventMergeGroup, Action: "checks_requested", MergeGroup: &MergeGroup{BaseRef: "refs/heads/main", PullRequestNumber: 5}},
+			"Merge queue into `main` for pull request #5"},
+		{"destroyed merge group", Trigger{Event: EventMergeGroup, Action: "destroyed", MergeGroup: &MergeGroup{BaseRef: "refs/heads/main", PullRequestNumber: 5, Reason: "dequeued"}},
+			"Merge queue into `main` for pull request #5, destroyed (dequeued)"},
+		{"destroyed merge group without a reason", Trigger{Event: EventMergeGroup, Action: "destroyed", MergeGroup: &MergeGroup{BaseRef: "refs/heads/main"}},
+			"Merge queue into `main`, destroyed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,6 +172,36 @@ func TestDescribe(t *testing.T) {
 				t.Fatalf("Describe() = %q\nwant %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEndings: closing a pull request, making it a draft and destroying a merge group end work; an
+// ending, like a change to a pull request, is a run of its own.
+func TestEndings(t *testing.T) {
+	tests := []struct {
+		event, action string
+		ends, own     bool
+	}{
+		{EventPullRequest, "closed", true, true},
+		{EventPullRequest, "converted_to_draft", true, true},
+		{EventMergeGroup, "destroyed", true, true},
+		{EventPullRequest, "labeled", false, true},
+		{EventPullRequest, "edited", false, true},
+		{EventPullRequest, "synchronize", false, false},
+		{EventPullRequest, "reopened", false, false},
+		{EventPullRequest, "ready_for_review", false, false},
+		{EventMergeGroup, "checks_requested", false, false},
+		{EventReviewRequest, "closed", false, false},
+		{EventPush, "", false, false},
+	}
+	for _, tt := range tests {
+		tr := Trigger{Event: tt.event, Action: tt.action}
+		if got := tr.Ends(); got != tt.ends {
+			t.Errorf("%s %s: Ends() = %v, want %v", tt.event, tt.action, got, tt.ends)
+		}
+		if got := tr.OwnRun(); got != tt.own {
+			t.Errorf("%s %s: OwnRun() = %v, want %v", tt.event, tt.action, got, tt.own)
+		}
 	}
 }
 

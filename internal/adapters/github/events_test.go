@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v92/github"
@@ -191,6 +192,21 @@ func TestDecodeEvents(t *testing.T) {
 			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
 		},
 	}
+	merged := &github.PullRequestEvent{
+		Action: new("closed"), Number: new(12), Repo: ghRepo(owner),
+		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
+		PullRequest: &github.PullRequest{
+			State: new("closed"), Merged: new(true), User: &github.User{Login: new("carol")}, HTMLURL: new("https://github.com/octo-org/demo/pull/12"),
+			Head: &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new(owner + "/" + repoName)}},
+			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
+		},
+	}
+	queue := "refs/heads/gh-readonly-queue/release/1.x/pr-12-" + baseSHA
+	destroyed := &github.MergeGroupEvent{
+		Action: new("destroyed"), Reason: new("invalidated"), Repo: ghRepo(owner),
+		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
+		MergeGroup: &github.MergeGroup{HeadSHA: new(sha1), HeadRef: new(queue), BaseSHA: new(baseSHA), BaseRef: new("refs/heads/release/1.x")},
+	}
 	trigger := sampleTrigger()
 	marker, _ := Marker(trigger)
 	checkRun := &github.CheckRunEvent{
@@ -231,6 +247,23 @@ func TestDecodeEvents(t *testing.T) {
 			}},
 		},
 		{
+			name: "a merged pull request's closing", event: "pull_request", payload: merged,
+			want: &ci.TriggerEvent{Trigger: ci.Trigger{
+				Version: ci.TriggerVersion, Event: ci.EventPullRequest, Action: "closed", DeliveryID: "d", InstallationID: installationID,
+				Repository: repository, Revision: sha1, Ref: "refs/pull/12/head", Branch: "topic", Sender: "bob",
+				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: owner + "/" + repoName,
+					Author: "carol", HTMLURL: "https://github.com/octo-org/demo/pull/12", Merged: true},
+			}},
+		},
+		{
+			name: "a destroyed merge group names its pull request and why", event: "merge_group", payload: destroyed,
+			want: &ci.MergeGroupDestroyed{Trigger: ci.Trigger{
+				Version: ci.TriggerVersion, Event: ci.EventMergeGroup, Action: "destroyed", DeliveryID: "d", InstallationID: installationID,
+				Repository: repository, Revision: sha1, Ref: queue, Branch: strings.TrimPrefix(queue, "refs/heads/"), Sender: "bob",
+				MergeGroup: &ci.MergeGroup{HeadRef: queue, HeadSHA: sha1, BaseRef: "refs/heads/release/1.x", BaseSHA: baseSHA, PullRequestNumber: 12, Reason: "invalidated"},
+			}},
+		},
+		{
 			name: "a review request runs the head commit with the default branch's configuration", event: "pull_request", payload: review,
 			want: &ci.TriggerEvent{Draft: true, Trigger: ci.Trigger{
 				Version: ci.TriggerVersion, Event: ci.EventReviewRequest, Action: "review_requested", DeliveryID: "d", InstallationID: installationID,
@@ -260,6 +293,26 @@ func TestDecodeEvents(t *testing.T) {
 				t.Fatalf("Decode = %#v, %q, %v\nwant %#v", ev, reason, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestQueuedPullRequest(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want int
+	}{
+		{"refs/heads/gh-readonly-queue/main/pr-123-" + sha1, 123},
+		{"refs/heads/gh-readonly-queue/release/1.x/pr-7-" + baseSHA, 7},
+		{"refs/heads/gh-readonly-queue/main/x", 0},
+		{"refs/heads/gh-readonly-queue/pr-123-" + sha1, 0},
+		{"refs/heads/feature/pr-123-" + sha1, 0},
+		{"refs/heads/gh-readonly-queue/main/pr-123-" + sha1 + "-x", 0},
+		{"", 0},
+	}
+	for _, tt := range tests {
+		if got := queuedPullRequest(tt.ref); got != tt.want {
+			t.Errorf("queuedPullRequest(%q) = %d, want %d", tt.ref, got, tt.want)
+		}
 	}
 }
 

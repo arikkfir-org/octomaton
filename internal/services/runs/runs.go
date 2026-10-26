@@ -89,7 +89,12 @@ func (s *Service) Handle(ctx context.Context, ev ci.Event) error {
 		}
 		return errors.Join(errs...)
 	case *ci.MergeGroupDestroyed:
-		return s.CancelMergeGroup(ctx, e.Trigger, e.Reason)
+		// The group's checks guard nothing any more, then the pipelines that list its destruction run.
+		t := e.Trigger
+		t.Action = "destroyed"
+		err := s.CancelMergeGroup(ctx, t)
+		_, evalErr := s.Evaluate(ctx, t, EvalOptions{ReportConfigErrors: reportsConfigErrors(t)})
+		return errors.Join(err, evalErr)
 	case *ci.CommandEvent:
 		return s.HandleComment(ctx, e)
 	case *ci.RerunEvent:
@@ -121,12 +126,15 @@ func pendingReview(t ci.Trigger, reviewer string) (ci.Trigger, bool) {
 }
 
 // reportsConfigErrors reports whether a trigger's configuration problems are reported. For pull
-// requests, only the actions that normally run pipelines report them, so that labeling or editing a
-// pull request does not add failures. Review requests never do: most are for people, not pipelines.
+// requests and merge groups, only the actions that normally run pipelines report them, so that
+// labeling, editing or closing a pull request, or the end of a merge group, does not add failures.
+// Review requests never do: most are for people, not pipelines.
 func reportsConfigErrors(t ci.Trigger) bool {
 	switch t.Event {
 	case ci.EventPullRequest:
 		return slices.Contains(pipelines.DefaultPullRequestTypes, t.Action)
+	case ci.EventMergeGroup:
+		return slices.Contains(pipelines.DefaultMergeGroupTypes, t.Action)
 	case ci.EventReviewRequest:
 		return false
 	}

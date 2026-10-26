@@ -33,7 +33,8 @@ func TestContextOf(t *testing.T) {
 			trigger: ci.Trigger{
 				Event: ci.EventComment, Repository: repo, Tag: "v1",
 				Push:          &ci.Push{Before: "a", After: "b", Created: true},
-				MergeGroup:    &ci.MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b"},
+				PullRequest:   &ci.PullRequest{Number: 5, Merged: true},
+				MergeGroup:    &ci.MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b", PullRequestNumber: 5, Reason: "dequeued"},
 				Comment:       &ci.Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
 				ReviewRequest: &ci.ReviewRequest{Reviewer: "octo-reviewer"},
 				Schedule:      &ci.Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},
@@ -41,7 +42,8 @@ func TestContextOf(t *testing.T) {
 			want: TemplateContext{
 				Event: "comment", Repository: RepositoryOf(repo), Tag: "v1",
 				Push:          &Push{Before: "a", After: "b"},
-				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b"},
+				PullRequest:   &PullRequest{Number: 5, Merged: true},
+				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b", PullRequestNumber: 5, Reason: "dequeued"},
 				Comment:       &Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
 				ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},
 				Schedule:      &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},

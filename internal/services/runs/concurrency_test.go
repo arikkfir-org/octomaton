@@ -227,7 +227,9 @@ func TestCancelMergeGroup(t *testing.T) {
 	if h.run("demo-ci-1111111-1").CancelRequested {
 		t.Fatalf("the merge group's run must start")
 	}
-	h.svc.Handle(ctx, &ci.MergeGroupDestroyed{Trigger: mg, Reason: "dequeued"})
+	destroyed := mg
+	destroyed.Action, destroyed.MergeGroup = "destroyed", &ci.MergeGroup{HeadRef: "refs/heads/" + queue, HeadSHA: sha1, BaseRef: "refs/heads/main", BaseSHA: baseSHA, Reason: "dequeued"}
+	h.svc.Handle(ctx, &ci.MergeGroupDestroyed{Trigger: destroyed})
 	if run := h.run("demo-ci-1111111-1"); !run.CancelRequested || run.Cancellation.Reason != "merge group destroyed (dequeued)" {
 		t.Fatalf("the destroyed merge group's run must be cancelled: %+v", run)
 	}

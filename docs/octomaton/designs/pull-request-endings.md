@@ -5,7 +5,8 @@ moments a pull request's environment, or a queue entry's, is torn down. A pull r
 ready again for a pipeline that skips drafts) runs its pipelines again at the same commit, so whatever the teardown
 removed comes back too. Templates can tell a merge from an abandonment, why a merge group was destroyed, and which
 pull request it was for. Asked for by weesp-ai, whose pull request environments move off a controller of their own onto
-Octomaton. Linear: [ENG-190](https://linear.app/arikkfir/issue/ENG-190).
+Octomaton. Linear: [ENG-190](https://linear.app/arikkfir/issue/ENG-190); pull request:
+[#59](https://github.com/arikkfir-org/octomaton/pull/59).
 
 ## Context
 

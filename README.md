@@ -122,7 +122,7 @@ pipelines:
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line
         allow:                         # required: who may invoke it
-          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          users: [octocat]             # GitHub logins, people and bots, case-insensitive
           teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request
@@ -150,7 +150,7 @@ pipelines:
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
 commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
   rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
-    allow: {users: [arikkfir], teams: [maintainers]}
+    allow: {users: [octocat], teams: [maintainers]}
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
   commands: {}                         # same as commands, for every repository without a commands section of its own

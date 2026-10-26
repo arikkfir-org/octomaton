@@ -38,7 +38,7 @@ pipelines:
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line
         allow:                         # required: who may invoke it
-          users: [arikkfir]            # GitHub logins, people and bots, case-insensitive
+          users: [octocat]             # GitHub logins, people and bots, case-insensitive
           teams: [maintainers]         # teams of the owner organization, by slug
         branches: [main]               # optional pull request base-branch globs
       review_request:                  # a review is requested from one of these users on a pull request

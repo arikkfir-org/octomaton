@@ -4,7 +4,7 @@
 
 ## Context
 
-Octomaton vets a run only as it sees it, so it refuses every definition fetched from elsewhere: `pipelineRef`, `taskRef`, a step's `ref`, resolvers and bundles. Every task had to be an inline `taskSpec`, and a pipeline of six tasks was one long file whose only reuse was YAML anchors (weesp-ai/delivery#1 asked to split `.tekton/ci.yaml` and `.tekton/apply.yaml` into a file per task). A syntax of Octomaton's own (`taskRef: {path: …}`) would have made the files invalid Tekton; Tekton's references by name are already what a pipeline uses to point at a predefined Task or StepAction, and a naming convention turns each name into a file.
+Octomaton vets a run only as it sees it, so it refuses every definition fetched from elsewhere: `pipelineRef`, `taskRef`, a step's `ref`, resolvers and bundles. Every task had to be an inline `taskSpec`, and a pipeline of six tasks was one long file whose only reuse was YAML anchors (a repository asked to split its `.tekton/ci.yaml` and `.tekton/apply.yaml` into a file per task). A syntax of Octomaton's own (`taskRef: {path: …}`) would have made the files invalid Tekton; Tekton's references by name are already what a pipeline uses to point at a predefined Task or StepAction, and a naming convention turns each name into a file.
 
 ## Design
 
@@ -60,7 +60,7 @@ sequenceDiagram
 
 ## Rollout
 
-Merging deploys it: every merge to `main` publishes the images and the hub's Argo CD rolls them out. No manual step, and nothing changes for a repository until it references a file by name: a PipelineRun that references nothing is returned byte for byte. weesp-ai/delivery adopts it first, splitting its CI and apply pipelines into Task files. Rollback: revert the pull request.
+Merging deploys it: every merge to `main` publishes the images and the hub's Argo CD rolls them out. No manual step, and nothing changes for a repository until it references a file by name: a PipelineRun that references nothing is returned byte for byte. Rollback: revert the pull request.
 
 ## Open questions
 

@@ -2,6 +2,7 @@ package runs
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -76,7 +77,9 @@ func TestEvaluateIsIdempotent(t *testing.T) {
 
 // TestPullRequestChangesRunAgain: an edit or a label changes the pull request, not its commit, so it runs the
 // pipelines that list it again at the same commit, and the new attempt supersedes the older one; only its
-// redelivery finds its run. Other actions at the same commit find the commit's run, as before.
+// redelivery finds its run. So does a pull request that resumes after a time the pipeline did not run in:
+// reopened, or ready for review again for a pipeline that skips drafts. Other actions at the same commit find
+// the commit's run, as before.
 func TestPullRequestChangesRunAgain(t *testing.T) {
 	const cfg = `
 apiVersion: octomaton.dev/v1
@@ -84,22 +87,27 @@ pipelines:
   - name: ci
     pipelineRun: .tekton/ci.yaml
     on:
-      pull_request: {types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled]}
+      pull_request: {types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled], drafts: DRAFTS}
 `
 	tests := []struct {
 		action string
+		drafts bool
 		again  bool
 	}{
-		{"edited", true},
-		{"labeled", true},
-		{"unlabeled", true},
-		{"reopened", false},
-		{"ready_for_review", false},
+		{"edited", true, true},
+		{"labeled", true, true},
+		{"unlabeled", true, true},
+		{"reopened", true, true},
+		{"reopened", false, true},
+		{"ready_for_review", true, false},
+		{"ready_for_review", false, true},
+		{"opened", false, false},
+		{"synchronize", true, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.action, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s, drafts %v", tt.action, tt.drafts), func(t *testing.T) {
 			h := newHarness(t)
-			h.files(sha1, cfg, ciRun)
+			h.files(sha1, strings.Replace(cfg, "DRAFTS", fmt.Sprint(tt.drafts), 1), ciRun)
 			h.evaluate(branchPR(sha1), EvalOptions{})
 			change := branchPR(sha1)
 			change.Action, change.DeliveryID = tt.action, "change-1"

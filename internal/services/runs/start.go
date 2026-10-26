@@ -93,7 +93,8 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 }
 
 // start creates the run of pipeline p for t, or finds the one there: a redelivery (or another event
-// for the same commit and head) finds its run; a re-run creates the next attempt. The run is created
+// for the same commit and head) finds its run; a re-run creates the next attempt, and so does an
+// event that is a run of its own (Trigger.OwnRun, Pipeline.Resumes). The run is created
 // held, then its report, task reports and token are made, and it is let go per its concurrency
 // policy. Any failure after the run exists cancels it and fails its report.
 func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p *pipelines.Pipeline, rerun bool) (ci.Run, error) {
@@ -121,7 +122,7 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 		s.Metrics.RunCreated(ctx, metrics.RunError)
 		return ci.Run{}, err
 	}
-	same := sameRun(t)
+	same := sameRun(t, t.OwnRun() || p.Resumes(t))
 	if !rerun {
 		if there, ok := current(runs, same); ok && !there.CancelRequested {
 			log.InfoContext(ctx, "The run exists already", "run", there.ID.String())
@@ -178,9 +179,9 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 }
 
 // sameRun reports whether a run is the one a start for t would create: the run of the same comment
-// command, review request delivery, pull request change delivery or schedule slot, or else of the same
-// head (at the same commit, as the query selects).
-func sameRun(t ci.Trigger) func(ci.Run) bool {
+// command, review request delivery or schedule slot, of the same delivery when each is a run of its
+// own (own), or else of the same head (at the same commit, as the query selects).
+func sameRun(t ci.Trigger, own bool) func(ci.Run) bool {
 	return func(r ci.Run) bool {
 		o := r.Trigger
 		switch {
@@ -192,12 +193,14 @@ func sameRun(t ci.Trigger) func(ci.Run) bool {
 			return o.ReviewRequest != nil && o.DeliveryID == t.DeliveryID && strings.EqualFold(o.ReviewRequest.Reviewer, t.ReviewRequest.Reviewer)
 		case t.Schedule != nil:
 			return o.Schedule != nil && o.Schedule.Slot == t.Schedule.Slot
-		case t.ChangesPullRequest():
-			// An edit or a label changes the pull request, not its commit, so what a pipeline checks may have changed:
-			// each is its own run at the commit; only its redeliveries find it.
-			return o.ChangesPullRequest() && o.DeliveryID == t.DeliveryID
+		case own:
+			// An edit or a label changes the pull request, not its commit, so what a pipeline checks may have changed;
+			// an ending, or a pull request resuming after one, may need its pipeline to act again whatever ran at the
+			// commit: each is its own run at the commit; only its redeliveries find it.
+			return o.DeliveryID == t.DeliveryID && o.Event == t.Event && o.Action == t.Action
 		default:
-			return o.Comment == nil && o.ReviewRequest == nil && o.Schedule == nil && o.Head() == t.Head()
+			// An ending's run is never a commit's.
+			return o.Comment == nil && o.ReviewRequest == nil && o.Schedule == nil && !o.Ends() && o.Head() == t.Head()
 		}
 	}
 }

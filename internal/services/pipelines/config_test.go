@@ -30,6 +30,7 @@ pipelines:
         pathsIgnore: []                # optional
       merge_group:                     # merge queue; optional base-branch globs
         branches: [main]
+        types: [checks_requested]      # default; or destroyed
       push:
         branches: [main]               # branch globs
         tags: ["v*"]                   # tag globs
@@ -197,6 +198,7 @@ func TestParseProblems(t *testing.T) {
 		{name: "absolute pipelineRun", yaml: head + "  - {name: ci, pipelineRun: /etc/passwd, on: {push: {}}}\n", want: "clean repository-relative"},
 		{name: "escaping pipelineRun", yaml: head + "  - {name: ci, pipelineRun: ../x.yaml, on: {push: {}}}\n", want: "clean repository-relative"},
 		{name: "no triggers", yaml: head + "  - {name: ci, pipelineRun: a.yaml}\n", want: "at least one of"},
+		{name: "unknown merge group action", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {types: [created]}}}\n", want: `on.merge_group.types[0]: unknown merge_group action "created"`},
 		{name: "bad branch glob", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {branches: [\"feature/[\"]}}}\n", want: "invalid glob"},
 		{name: "bad path glob", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {paths: [\"src/{a\"]}}}\n", want: "on.pull_request.paths[0]: invalid glob"},
 		{name: "empty glob", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {pathsIgnore: [\"\"]}}}\n", want: "empty pattern"},
@@ -325,6 +327,11 @@ pipelines:
   - {name: docs, pipelineRun: a.yaml, on: {push: {}}, concurrency: {group: "docs-{{ .Branch }}"}}
   - {name: deploy, pipelineRun: a.yaml, on: {push: {}}, concurrency: {group: "deploy", policy: supersede}}
   - {name: off, pipelineRun: a.yaml, on: {pull_request: {}}, concurrency: {group: "{{ if false }}x{{ end }}"}}
+  - {name: teardown, pipelineRun: a.yaml, on: {pull_request: {types: [closed, converted_to_draft]}, merge_group: {types: [destroyed]}}}
+  - name: environment-teardown
+    pipelineRun: a.yaml
+    on: {pull_request: {types: [closed]}}
+    concurrency: {group: "environment-{{ .PullRequest.Number }}", policy: latest}
 `)
 	tests := []struct {
 		pipeline, event    string
@@ -336,9 +343,20 @@ pipelines:
 		{"docs", "push", "docs-main", "docs-main", ci.Queue},
 		{"deploy", "push", "deploy", "deploy", ci.Supersede},
 		{"off", "pull_request", "", "", ""},
+		// An ending leaves the pull request's default group, but not a group the pipeline names.
+		{"ci", "pull_request/closed", "", "", ""},
+		{"ci", "pull_request/converted_to_draft", "", "", ""},
+		{"ci", "pull_request/reopened", "pr-1", "ci/pr-1", ci.Supersede},
+		{"teardown", "merge_group/destroyed", "", "", ""},
+		{"environment-teardown", "pull_request/closed", "environment-1", "environment-1", ci.Latest},
 	}
 	for _, tt := range tests {
-		got, err := cfg.Pipeline(tt.pipeline).ConcurrencyFor(SampleFor(tt.event))
+		event, action, _ := strings.Cut(tt.event, "/")
+		ctx := SampleFor(event)
+		if action != "" {
+			ctx.Action = action
+		}
+		got, err := cfg.Pipeline(tt.pipeline).ConcurrencyFor(ctx)
 		if err != nil || got.Group != tt.wantGroup || got.Key != tt.wantKey || got.Policy != tt.want {
 			t.Errorf("%s on %s: ConcurrencyFor = %+v, %v; want group %q key %q policy %q", tt.pipeline, tt.event, got, err, tt.wantGroup, tt.wantKey, tt.want)
 		}

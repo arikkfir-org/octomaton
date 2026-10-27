@@ -135,7 +135,7 @@ pipelines:
       revision: "{{ .Revision }}"
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
-      permissions: {contents: read}    # default
+      permissions: {contents: read}    # default; checks: write under the same rule as repositories: all
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
                                        # one; only when every trigger is comment, review_request or schedule, or in
                                        # an organization pipeline
@@ -202,7 +202,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
-| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
+| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. The same rule holds for `checks` above `read`: the App writes every check of the repository, required ones included, so such a token could rewrite any of them. |
 | `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
@@ -455,7 +455,9 @@ from forks get no answer at all ([Security](#security)).
   named with a random nonce so that no other pipeline can list them, which the guard allows in place of the names
   listed (and redaction covers, like every Secret the run references). Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
-  (`githubToken.repositories: all`), which follows the same rule as `secrets`.
+  (`githubToken.repositories: all`), which follows the same rule as `secrets`. So does a token that writes checks
+  (`checks` above `read`): the App writes every check of the repository, the required ones included, so a pull
+  request's own definitions could otherwise mark its required checks passed.
 - Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`
   that is not a plain name), because Octomaton can only check the definitions it can see. A reference by name is
   resolved to a file beside the PipelineRun file, in the same repository at the same commit, and inlined before the

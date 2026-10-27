@@ -214,6 +214,10 @@ func TestParseProblems(t *testing.T) {
 		{name: "token for every repository with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may have a token for every repository"},
 		{name: "token for every repository with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines"},
 		{name: "token for every repository with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, repositories: all}}\n", want: "githubToken.repositories: only organization pipelines"},
+		{name: "checks: write with a pull_request trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}, comment: {pattern: \"^/x\"}}, githubToken: {workspace: w, permissions: {contents: read, checks: write}}}\n", want: "githubToken.permissions: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may ask for checks: write"},
+		{name: "checks: write with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {tags: [\"v*\"]}}, githubToken: {workspace: w, permissions: {checks: write}}}\n", want: "may ask for checks: write"},
+		{name: "checks: write with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, permissions: {checks: write}}}\n", want: "may ask for checks: write"},
+		{name: "the organization repository's pipeline with checks: write on pull requests", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}}, githubToken: {workspace: w, permissions: {checks: write}}}\norganization:\n  pipelines: []\n", want: "pipelines[0] (ci): githubToken.permissions: only organization pipelines"},
 		{name: "bad timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: forever}\n", want: "is not a duration"},
 		{name: "zero timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: 0s}\n", want: "must be positive"},
 		{name: "concurrency without group", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, concurrency: {policy: queue}}\n", want: "concurrency.group is required"},
@@ -431,7 +435,8 @@ func TestPipelineRunRef(t *testing.T) {
 }
 
 // TestDefaultBranchTriggers covers the repository pipelines that may list Secrets and ask for a token for
-// every repository: those whose every trigger reads its definitions from the default branch.
+// every repository, or one that writes checks: those whose every trigger reads its definitions from the
+// default branch.
 func TestDefaultBranchTriggers(t *testing.T) {
 	tests := []struct {
 		name, on string
@@ -443,12 +448,12 @@ func TestDefaultBranchTriggers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key, bot.token], githubToken: {workspace: github-token, permissions: {contents: read, pull_requests: read}, repositories: all}}\n")
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: review, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key, bot.token], githubToken: {workspace: github-token, permissions: {contents: read, pull_requests: read, checks: write}, repositories: all}}\n")
 			p := cfg.Pipelines[0]
 			if got := p.Secrets; strings.Join(got, ",") != "api-key,bot.token" {
 				t.Fatalf("secrets = %v", got)
 			}
-			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read", "pull_requests": "read"}, AllRepositories: true}
+			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read", "pull_requests": "read", "checks": "write"}, AllRepositories: true}
 			if got := p.Token(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("Token() = %+v, want %+v", got, want)
 			}
@@ -456,9 +461,22 @@ func TestDefaultBranchTriggers(t *testing.T) {
 	}
 }
 
+// TestReadingChecksAtTheCommitUnderTest: definitions read at the commit under test may ask for checks: read,
+// which rewrites nothing.
+func TestReadingChecksAtTheCommitUnderTest(t *testing.T) {
+	for _, on := range []string{"{pull_request: {}}", "{merge_group: {}}", "{push: {branches: [main]}}"} {
+		t.Run(on, func(t *testing.T) {
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines:\n  - {name: ci, pipelineRun: a.yaml, on: "+on+", githubToken: {workspace: github-token, permissions: {contents: read, checks: read}}}\n")
+			if got := cfg.Pipelines[0].TokenPermissions(); !reflect.DeepEqual(got, map[string]string{"contents": "read", "checks": "read"}) {
+				t.Fatalf("TokenPermissions() = %v", got)
+			}
+		})
+	}
+}
+
 // TestOrganizationPipelinesReadAtTheDefaultBranch: an organization pipeline is read at the organization
 // repository's default branch whatever triggers it, so it may list Secrets and ask for a token for every
-// repository on pull requests, merge groups and pushes too.
+// repository, or one that writes checks, on pull requests, merge groups and pushes too.
 func TestOrganizationPipelinesReadAtTheDefaultBranch(t *testing.T) {
 	tests := []struct {
 		name, on string
@@ -469,12 +487,12 @@ func TestOrganizationPipelinesReadAtTheDefaultBranch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines: []\norganization:\n  pipelines:\n    - {name: linear, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key], githubToken: {workspace: github-token, permissions: {pull_requests: read}, repositories: all}}\n")
+			cfg := mustParse(t, "apiVersion: octomaton.dev/v1\npipelines: []\norganization:\n  pipelines:\n    - {name: linear, pipelineRun: a.yaml, on: "+tt.on+", secrets: [api-key], githubToken: {workspace: github-token, permissions: {pull_requests: read, checks: write}, repositories: all}}\n")
 			p := cfg.Organization.Pipelines[0]
 			if got := p.Secrets; strings.Join(got, ",") != "api-key" {
 				t.Fatalf("secrets = %v", got)
 			}
-			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"pull_requests": "read"}, AllRepositories: true}
+			want := &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"pull_requests": "read", "checks": "write"}, AllRepositories: true}
 			if got := p.Token(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("Token() = %+v, want %+v", got, want)
 			}

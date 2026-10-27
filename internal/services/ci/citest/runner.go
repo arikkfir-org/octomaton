@@ -36,6 +36,8 @@ type Runner struct {
 	copied  map[ci.RunID]int
 	details map[ci.RunID]ci.Details
 	logs    map[string]string
+	output  map[string][]Output
+	reads   [][]ci.OutputRead
 	errs    map[string]error
 	created int
 	freed   []time.Time
@@ -47,7 +49,7 @@ var _ ci.Runner = (*Runner)(nil)
 func NewRunner(now func() time.Time) *Runner {
 	return &Runner{
 		now: now, runs: map[ci.RunID]*ci.Run{}, specs: map[ci.RunID]ci.RunSpec{}, tokens: map[ci.RunID]ci.Token{}, copied: map[ci.RunID]int{},
-		details: map[ci.RunID]ci.Details{}, logs: map[string]string{}, errs: map[string]error{},
+		details: map[ci.RunID]ci.Details{}, logs: map[string]string{}, output: map[string][]Output{}, errs: map[string]error{},
 	}
 }
 
@@ -166,6 +168,26 @@ func (r *Runner) SetLogs(locator, logs string) {
 	r.logs[locator] = logs
 }
 
+// Output is an output line a step printed: its name and decoded value, at a time.
+type Output struct {
+	At          time.Time
+	Name, Value string
+}
+
+// Print records an output line printed by the step a Logs locator names, for TaskOutput.
+func (r *Runner) Print(locator string, o Output) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.output[locator] = append(r.output[locator], o)
+}
+
+// OutputReads returns what each call of TaskOutput read, in order.
+func (r *Runner) OutputReads() [][]ci.OutputRead {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.reads)
+}
+
 // SetToken stores a token for a run (as a run's start would).
 func (r *Runner) SetToken(_ context.Context, run ci.Run, t ci.Token) error {
 	if err := r.failure("SetToken"); err != nil {
@@ -245,7 +267,7 @@ func (r *Runner) Create(_ context.Context, spec ci.RunSpec, attempt int) (ci.Run
 	}
 	r.created++
 	run := &ci.Run{
-		ID: id, Trigger: t, Attempt: attempt, Policy: spec.Concurrency.Policy, Token: spec.Token, Secrets: spec.SecretSource(), TaskReports: spec.TaskReports,
+		ID: id, Trigger: t, Attempt: attempt, Policy: spec.Concurrency.Policy, Token: spec.Token, Secrets: spec.SecretSource(), TaskReports: spec.TaskReports, LiveTaskReports: spec.LiveTaskReports,
 		Phase: ci.Held, Created: r.now().Add(time.Duration(r.created) * time.Millisecond),
 	}
 	if spec.Concurrency.Key != "" {
@@ -410,6 +432,28 @@ func (r *Runner) StepLogs(_ context.Context, _ ci.RunID, step ci.Step, _, _ int6
 		return "", fmt.Errorf("no logs for step %s", step.Name)
 	}
 	return logs, nil
+}
+
+// TaskOutput returns the newest value of each of names that the steps printed (Print), each since
+// its time, in the order given.
+func (r *Runner) TaskOutput(_ context.Context, _ ci.RunID, reads []ci.OutputRead, names []string) (map[string]string, error) {
+	r.mu.Lock()
+	r.reads = append(r.reads, slices.Clone(reads))
+	r.mu.Unlock()
+	if err := r.failure("TaskOutput"); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]string{}
+	for _, read := range reads {
+		for _, o := range r.output[read.Step.Logs] {
+			if !o.At.Before(read.Since) && slices.Contains(names, o.Name) {
+				out[o.Name] = o.Value
+			}
+		}
+	}
+	return out, nil
 }
 
 // Link points at runs.example.

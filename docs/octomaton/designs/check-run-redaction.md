@@ -1,10 +1,12 @@
 # Check run redaction
 
 **Decision**: Octomaton removes a run's secrets from what it passes from the run to GitHub. From failed steps' log
-tails, the `check-title` and `check-summary` results and task failure messages, it removes every value of every Secret
-the PipelineRun references, also inside base64, and anything shaped like a well-known credential. From the run's own
+tails, the `check-title` and `check-summary` results, the text a running task prints for its live task check
+([live task checks](live-task-checks.md)) and task failure messages, it removes every value of every Secret the
+PipelineRun references, also inside base64, and anything shaped like a well-known credential. From the run's own
 failure message it removes credential shapes only. When it can't read a Secret, it withholds the logs, results and
-task messages instead of posting them unredacted, and still concludes the check. Ticket:
+task messages instead of posting them unredacted, and still concludes the check; for a live task check it reads
+nothing, and the check keeps the text it has. Ticket:
 [ENG-47](https://linear.app/arikkfir/issue/ENG-47). Pull request:
 [octomaton#17](https://github.com/arikkfir-org/octomaton/pull/17).
 
@@ -24,9 +26,11 @@ flowchart LR
   K[(Secrets in the ci-* namespace)] -->|values| A
   L[step log tail] --> A
   R[results, task messages] --> A
+  O["output lines of a running task<br/>(live task checks), decoded"] --> A
   A -->|1 values, line by line<br/>2 base64 holding a value or a credential<br/>3 credential formats| S[reports service]
   S --> GH[GitHub check run]
   A -. Secret unreadable .-> W[logs withheld:<br/>'Logs unavailable']
+  A -. Secret unreadable .-> N[live text not read:<br/>the check keeps its text]
 ```
 
 1. **By value.** The adapter walks the PipelineRun for every Secret it names (the same walk that enforces the

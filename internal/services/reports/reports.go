@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 
 	"octomaton.dev/internal/services/ci"
@@ -33,6 +34,11 @@ type Service struct {
 	HeldTooLong time.Duration
 	// Now returns the current time; nil means time.Now.
 	Now func() time.Time
+
+	liveMu sync.Mutex
+	// live holds what running tasks of runs with live task reports printed, and what their reports
+	// show (liveTaskReports).
+	live map[liveKey]live
 }
 
 var _ ci.Watcher = (*Service)(nil)
@@ -96,8 +102,10 @@ func (s *Service) header(run ci.Run) string { return Header(s.Runner.Link(run.ID
 func (s *Service) Reconcile(ctx context.Context, run ci.Run) (time.Duration, error) {
 	switch {
 	case run.Done:
+		s.forgetRun(run.ID)
 		return 0, nil
 	case run.Phase == ci.Finished:
+		s.forgetRun(run.ID)
 		return 0, s.finish(ctx, run.ID)
 	case run.Phase == ci.Held && !run.Deleting:
 		// A start takes seconds. A run held longer lost the rest of its start to a restart, or waits
@@ -123,7 +131,10 @@ func (s *Service) Reconcile(ctx context.Context, run ci.Run) (time.Duration, err
 		if err := s.progress(ctx, run, details); err != nil {
 			return 0, err
 		}
-		return 0, s.taskReports(ctx, run, &details, nil)
+		if err := s.taskReports(ctx, run, &details, nil); err != nil {
+			return 0, err
+		}
+		return s.liveTaskReports(ctx, run, details), nil
 	}
 	return 0, nil
 }
@@ -268,6 +279,7 @@ func (s *Service) reply(ctx context.Context, run ci.Run, o outcome) error {
 
 // Deleted reports a run deleted before it was reported: its report is concluded as cancelled.
 func (s *Service) Deleted(ctx context.Context, run ci.Run) error {
+	s.forgetRun(run.ID)
 	if run.Reported == ci.ReportedCompleted || !reportable(run) {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -270,6 +271,15 @@ func (c *kubeClient) DeletePVC(ctx context.Context, namespace, name string) erro
 		return fmt.Errorf("deleting PVC %s/%s: %w", namespace, name, err)
 	}
 	return nil
+}
+
+// PodLogStream streams a container's log from a time on (all of it when since is zero).
+func (c *kubeClient) PodLogStream(ctx context.Context, namespace, pod, container string, since time.Time) (io.ReadCloser, error) {
+	opts := &corev1.PodLogOptions{Container: container}
+	if !since.IsZero() {
+		opts.SinceTime = &metav1.Time{Time: since}
+	}
+	return c.Kube.CoreV1().Pods(namespace).GetLogs(pod, opts).Stream(ctx)
 }
 
 // PodLogs returns the last lines of a container's log.

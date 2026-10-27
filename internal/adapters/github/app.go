@@ -213,7 +213,9 @@ func CheckPermissions(permissions map[string]string) error {
 }
 
 // parsePermissions converts a permission map such as {"contents": "read"} into the API type.
-// Unknown names are errors, because the API type would silently drop them.
+// Unknown names are errors, because the API type would silently drop them, and so are names spelt
+// other than GitHub spells them ("Checks"), which JSON decoding would match all the same: a check of
+// one name must see the permission GitHub grants.
 func parsePermissions(m map[string]string) (*github.InstallationPermissions, error) {
 	names := make([]string, 0, len(m))
 	for name, level := range m {
@@ -234,6 +236,19 @@ func parsePermissions(m map[string]string) (*github.InstallationPermissions, err
 	var perms github.InstallationPermissions
 	if err := dec.Decode(&perms); err != nil {
 		return nil, fmt.Errorf("invalid permissions %v: %w", names, err)
+	}
+	data, err = json.Marshal(&perms)
+	if err != nil {
+		return nil, err
+	}
+	var granted map[string]string
+	if err := json.Unmarshal(data, &granted); err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		if granted[name] != m[name] {
+			return nil, fmt.Errorf("permission %q is not spelt as GitHub spells it (lower case, such as pull_requests)", name)
+		}
 	}
 	return &perms, nil
 }

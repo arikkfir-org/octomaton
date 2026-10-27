@@ -42,17 +42,24 @@ type pipelineRunStatus struct {
 	SkippedTasks    []skippedTask    `json:"skippedTasks,omitempty"`
 }
 
+// stepRunning describes a running step container.
+type stepRunning struct {
+	StartedAt metav1.Time `json:"startedAt,omitempty"`
+}
+
 // stepTerminated describes a finished step container.
 type stepTerminated struct {
-	ExitCode int32  `json:"exitCode"`
-	Reason   string `json:"reason,omitempty"`
-	Message  string `json:"message,omitempty"`
+	ExitCode   int32       `json:"exitCode"`
+	Reason     string      `json:"reason,omitempty"`
+	Message    string      `json:"message,omitempty"`
+	FinishedAt metav1.Time `json:"finishedAt,omitempty"`
 }
 
 // stepState is the state of one TaskRun step.
 type stepState struct {
 	Name       string          `json:"name,omitempty"`
 	Container  string          `json:"container,omitempty"`
+	Running    *stepRunning    `json:"running,omitempty"`
 	Terminated *stepTerminated `json:"terminated,omitempty"`
 }
 

@@ -125,6 +125,9 @@ type Run struct {
 	Secrets *SecretSource
 	// TaskReports is set when each task of the run is reported on its own.
 	TaskReports bool
+	// LiveTaskReports is set when a running task's report shows the title and summary the task
+	// prints (Runner.TaskOutput).
+	LiveTaskReports bool
 	// Tasks lists the pipeline's tasks in order, when the runner knows them.
 	Tasks []string
 
@@ -171,9 +174,10 @@ type RunSpec struct {
 	// SecretsFrom, when set, is the repository whose namespace holds the Secrets: an organization
 	// pipeline's organization repository. The runner copies them into the run's namespace, owned by
 	// the run, and the run mounts the copies.
-	SecretsFrom *Repository
-	TaskReports bool
-	Concurrency Concurrency
+	SecretsFrom     *Repository
+	TaskReports     bool
+	LiveTaskReports bool
+	Concurrency     Concurrency
 }
 
 // SecretSource returns the Secrets a run of the spec gets copies of, or nil when its Secrets are its
@@ -257,15 +261,19 @@ type Task struct {
 	Message string
 	// FailedSteps are the task's steps that exited with an error.
 	FailedSteps []Step
-	Results     map[string]string
+	// Steps are a running task's steps that started, in order.
+	Steps   []Step
+	Results map[string]string
 }
 
 // Step is one step of a task.
 type Step struct {
 	Name     string
 	ExitCode int32
-	// Logs locates the step's logs for Runner.StepLogs; "" when there are none.
+	// Logs locates the step's logs for Runner.StepLogs and Runner.TaskOutput; "" when there are none.
 	Logs string
+	// Finished is when the step ended; zero while it runs.
+	Finished time.Time
 }
 
 // Details are what a run's tasks did.

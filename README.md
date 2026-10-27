@@ -135,7 +135,7 @@ pipelines:
       revision: "{{ .Revision }}"
     githubToken:                       # optional installation token for this repository, refreshed while the run lives
       workspace: github-token          # bound as a Secret workspace (key: token)
-      permissions: {contents: read}    # default
+      permissions: {contents: read}    # default; checks: write under the same rule as repositories: all
       # repositories: all              # optional: every repository the App is installed on in the owner, not just this
                                        # one; only when every trigger is comment, review_request or schedule, or in
                                        # an organization pipeline
@@ -148,6 +148,7 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+    liveTaskChecks: false              # optional: a running task's check shows what the task prints
 commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
   rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
     allow: {users: [octocat], teams: [maintainers]}
@@ -202,11 +203,12 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `displayName` | The name of the pipeline's check on GitHub, which required checks match (for example `Continuous Integration`); `name` when omitted. At most 100 characters, no control characters or surrounding spaces; unique among the pipelines' check names, organization pipelines included; `octomaton` is reserved. |
 | `pipelineRun` | Repository-relative path of a file holding exactly one `tekton.dev/v1` `PipelineRun`, or `{repository, path}` for a file in another repository of the same owner (read at its default branch; the App must be installed there). Its `metadata.name`/`generateName` are replaced; a `metadata.namespace` other than the repository's namespace is refused. The PipelineRun holds its definitions, or references them by name in files beside it ([below](#pipeline-task-and-stepaction-files)); any other remote reference is refused (see [Security](#security)). |
 | `params` | Sets `spec.params` entries by name (existing entries are overridden, new ones appended). Values are Go `text/template`s over the context below; a missing value fails the check with the rendering error. |
-| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. |
+| `githubToken` | Mints an installation token restricted to this repository with `permissions` (default `contents: read`), stores it in Secret `<run>-github-token` (key `token`, owned by the run) and binds it to `workspace`. The token is refreshed while the run lives; read it from the file each time you need it. `repositories: all` mints it for every repository the App is installed on in the owner instead, with the same `permissions`; only an organization pipeline or a pipeline whose every trigger is `comment`, `review_request` or `schedule` may ask for it, as for `secrets`. The same rule holds for `checks` above `read`: the App writes every check of the repository, required ones included, so such a token could rewrite any of them. |
 | `secrets` | Names of Secrets its runs may mount, besides the token. In a repository pipeline they are Secrets of the run's namespace. In an organization pipeline they are Secrets of the organization repository's namespace (`ci-<organization repository>` with the default namespace template): at run creation each is read there (a missing one fails the check) and copied into the run's namespace as a Secret owned by the run, named `<run>-<name>-<nonce>` (a random nonce, recorded on the run, so that no other pipeline of the namespace can list the copy: a run's name is public, and a copy lives as long as its run), with the source's type and data, and every reference to it in the PipelineRun is rewritten to the copy. The copy is a point-in-time read and goes with the run. Only an organization pipeline, or a pipeline whose every trigger is `comment`, `review_request` or `schedule`, may list any: a `push` trigger may admit branches, and a branch's push, a pull request and a merge group run definitions read at the commit under test. |
 | `timeout` | Go duration, sets `spec.timeouts.pipeline`. |
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
+| `liveTaskChecks` | While a task runs, its check shows the title and summary the task prints on output lines ([Check runs](#check-runs)). Needs `taskChecks: true`. |
 
 **Concurrency.** Groups are rendered from the `group` template and scoped to the repository, so two pipelines naming
 the same group share it (include `{{ .Pipeline }}` to keep them apart).
@@ -398,14 +400,30 @@ event with placeholder values, so a template that only works for one event is re
   `PipelineRunTimeout` → `timed_out`; any other failure → `failure`, with the last 50 lines of each failed step's log
   (ANSI colour codes stripped: GitHub shows them as bytes; the Dashboard keeps them). A check without logs has no
   details section.
-- Nothing from a run reaches GitHub with its secrets: failed steps' logs, `check-title`/`check-summary` and task
-  failure messages lose every value of every Secret the PipelineRun references (its token Secret included), raw or
+- Nothing from a run reaches GitHub with its secrets: failed steps' logs, `check-title`/`check-summary`, the text of
+  live task checks (below) and task failure messages lose every value of every Secret the PipelineRun references (its token Secret included), raw or
   base64-encoded, alone or inside a longer value, and anything shaped like a well-known credential (GitHub tokens,
   private keys, Google keys and tokens, `sk-` API keys, JWTs, AWS and Slack keys, `Authorization` headers, passwords
   in URLs). Values shorter than 8 characters are left to those patterns. When a Secret can't be read, the logs,
   results and task messages are withheld, and the check still concludes. A credential a step fetches itself in another
   format, or prints transformed (split, encrypted, partly), is not caught: never print secrets.
 - A pipeline or task result named `check-title` or `check-summary` replaces the check's title or Markdown summary.
+- **Live task checks** (`liveTaskChecks: true`): a running task tells its own check how it is going by printing, to
+  stdout or stderr, a line `octomaton:check-title <base64>` or `octomaton:check-summary <base64>`, the text (Markdown
+  for the summary) in standard base64 so that it fits on one line. The line starts with `octomaton:`, ends with a
+  newline and holds at most 128 KiB; any other line is the task's own log. At most every 15 seconds, the leader reads
+  what the task's steps printed since its last look (their containers' logs; the first look reads all of them) and, when
+  the newest title or summary changed, writes them to that task's check, with the link to the task: the check stays
+  `in_progress`, and the text loses the run's secrets as results do (when a Secret can't be read, nothing is read). A
+  task that printed no title shows "Running". Print the whole text each time: the newest line of each wins, and a title
+  or summary printed once stays until another replaces it. When the task ends, its `check-title` and `check-summary`
+  results, or the default text, replace what it printed, as without `liveTaskChecks`. A live check is best effort: a
+  read or write that fails is logged and tried again at the next look, and never holds the run's other checks. Only the
+  task's own check changes: no other check, and not the pipeline's. In a shell step:
+
+  ```sh
+  printf 'octomaton:check-title %s\n' "$(printf '%s' "12 of 40 passed" | base64 | tr -d '\n')"
+  ```
 - Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
   refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's check otherwise.
 - Every check stores its trigger context in a hidden marker in its summary, so **Re-run** works even after the
@@ -455,7 +473,9 @@ from forks get no answer at all ([Security](#security)).
   named with a random nonce so that no other pipeline can list them, which the guard allows in place of the names
   listed (and redaction covers, like every Secret the run references). Tokens are scoped to the
   event's repository with least permissions, unless the pipeline asks for every repository
-  (`githubToken.repositories: all`), which follows the same rule as `secrets`.
+  (`githubToken.repositories: all`), which follows the same rule as `secrets`. So does a token that writes checks
+  (`checks` above `read`): the App writes every check of the repository, the required ones included, so a pull
+  request's own definitions could otherwise mark its required checks passed.
 - Remote Tekton references are refused (a `resolver` or `bundle` anywhere; a `pipelineRef`, `taskRef` or step `ref`
   that is not a plain name), because Octomaton can only check the definitions it can see. A reference by name is
   resolved to a file beside the PipelineRun file, in the same repository at the same commit, and inlined before the

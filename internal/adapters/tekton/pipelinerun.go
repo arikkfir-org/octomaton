@@ -95,6 +95,8 @@ const (
 	// annotationToken holds the GitHub token settings (JSON) for resuming and refreshing.
 	annotationToken      = "octomaton.dev/token"
 	annotationTaskChecks = "octomaton.dev/task-checks"
+	// annotationLiveTaskChecks is set when a running task's check shows what the task prints.
+	annotationLiveTaskChecks = "octomaton.dev/live-task-checks"
 	// annotationReported records what was last reported: queued, in_progress, concluded or completed.
 	annotationReported        = "octomaton.dev/reported"
 	annotationProgress        = "octomaton.dev/progress"

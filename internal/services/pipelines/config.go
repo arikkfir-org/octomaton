@@ -134,6 +134,8 @@ type Pipeline struct {
 	Timeout     string       `yaml:"timeout"`
 	Concurrency *Concurrency `yaml:"concurrency"`
 	TaskChecks  bool         `yaml:"taskChecks"`
+	// LiveTaskChecks has a running task's check show the title and summary the task prints.
+	LiveTaskChecks bool `yaml:"liveTaskChecks"`
 
 	timeout      time.Duration
 	params       map[string]*template.Template
@@ -725,6 +727,13 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 				add("githubToken.permissions: %v", err)
 			}
 		}
+		// The App writes every check of the repository, required ones included, and a token with checks
+		// above read may rewrite any of them. Names are matched in any case, as a code host may read them.
+		for _, name := range sortedKeys(gt.Permissions) {
+			if level := gt.Permissions[name]; strings.EqualFold(name, "checks") && level != "read" && headDefinitions {
+				add("githubToken.permissions: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may ask for %s: %s: a push, pull_request or merge_group trigger may run definitions read at the commit under test, and the token could rewrite any check of the App's on the repository, required ones included", name, level)
+			}
+		}
 		switch gt.Repositories {
 		case "":
 		case AllRepositories:
@@ -748,6 +757,10 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 			add("secrets[%d]: duplicate Secret %q", i, name)
 		}
 		seenSecrets[name] = true
+	}
+
+	if p.LiveTaskChecks && !p.TaskChecks {
+		add("liveTaskChecks needs taskChecks: true: it shows a running task's output on the task's own check")
 	}
 
 	if p.Timeout != "" {

@@ -321,11 +321,11 @@ func TestStartAbortsWhenTheTokenCannotBeMinted(t *testing.T) {
 
 func TestTaskReportsAreOpened(t *testing.T) {
 	h := newHarness(t)
-	h.files(sha1, strings.Replace(ciConfig, "githubToken: {workspace: github-token}", "taskChecks: true", 1), ciRun)
+	h.files(sha1, strings.Replace(ciConfig, "githubToken: {workspace: github-token}", "taskChecks: true\n    liveTaskChecks: true", 1), ciRun)
 	h.evaluate(branchPR(sha1), EvalOptions{})
 	build, test := h.onlyReport("ci / build"), h.onlyReport("ci / test")
 	run := h.run("demo-ci-1111111-1")
-	if run.TaskReportIDs["build"] != build.ID || run.TaskReportIDs["test"] != test.ID || run.Phase != ci.Released {
+	if run.TaskReportIDs["build"] != build.ID || run.TaskReportIDs["test"] != test.ID || run.Phase != ci.Released || !run.LiveTaskReports {
 		t.Fatalf("run = %+v", run)
 	}
 	if build.ExternalID != "ci-demo/demo-ci-1111111-1" || build.URL != "https://runs.example/ci-demo/demo-ci-1111111-1/build" || build.Trigger == nil {

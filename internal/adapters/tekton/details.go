@@ -138,19 +138,47 @@ func fillTask(t *ci.Task, tr *unstructured.Unstructured) {
 		t.Finished = ts.CompletionTime.Time.UTC()
 	}
 	t.Results = resultsOf(tr)
+	if t.State == ci.TaskRunning {
+		t.Steps = startedSteps(ts)
+	}
 	if t.State != ci.TaskFailed && t.State != ci.TaskTimedOut {
 		return
 	}
 	t.Message = message
 	for _, step := range ts.Steps {
 		if step.Terminated != nil && step.Terminated.ExitCode != 0 && step.Container != "" {
-			logs := ""
-			if ts.PodName != "" {
-				logs = ts.PodName + "/" + step.Container
-			}
-			t.FailedSteps = append(t.FailedSteps, ci.Step{Name: step.Name, ExitCode: step.Terminated.ExitCode, Logs: logs})
+			t.FailedSteps = append(t.FailedSteps, ci.Step{Name: step.Name, ExitCode: step.Terminated.ExitCode, Logs: stepLogs(ts, step)})
 		}
 	}
+}
+
+// startedSteps lists a TaskRun's steps that started, running or ended, in order.
+func startedSteps(ts taskRunStatus) []ci.Step {
+	var steps []ci.Step
+	for _, step := range ts.Steps {
+		if step.Container == "" || step.Running == nil && step.Terminated == nil {
+			continue
+		}
+		s := ci.Step{Name: step.Name, Logs: stepLogs(ts, step)}
+		if step.Terminated != nil {
+			s.ExitCode = step.Terminated.ExitCode
+			// An end Tekton did not record reads as now: the step is over.
+			s.Finished = step.Terminated.FinishedAt.Time.UTC()
+			if s.Finished.IsZero() {
+				s.Finished = time.Now().UTC()
+			}
+		}
+		steps = append(steps, s)
+	}
+	return steps
+}
+
+// stepLogs locates a step's logs: its pod and container; "" without a pod.
+func stepLogs(ts taskRunStatus, step stepState) string {
+	if ts.PodName == "" {
+		return ""
+	}
+	return ts.PodName + "/" + step.Container
 }
 
 // taskResult matches a pipeline result that is exactly one task's result.
@@ -207,6 +235,42 @@ func (r *Runner) StepLogs(ctx context.Context, id ci.RunID, step ci.Step, tailLi
 		return "", err
 	}
 	return red.Redact(logs), nil
+}
+
+// TaskOutput reads the output lines (ci.OutputPrefix) steps of a running task printed, each since its
+// time, from their containers' logs, in the order given: the newest value of each of names wins. The
+// values lose the run's secrets, as check-summary results do; when the secrets can't be read,
+// nothing is read.
+func (r *Runner) TaskOutput(ctx context.Context, id ci.RunID, reads []ci.OutputRead, names []string) (map[string]string, error) {
+	c := r.client()
+	pr, err := c.Get(ctx, id.Tenant, id.Name)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, ci.ErrNotFound
+	}
+	red, err := c.redactorFor(ctx, pr)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, read := range reads {
+		step := read.Step
+		pod, container, ok := strings.Cut(step.Logs, "/")
+		if !ok || pod == "" {
+			return nil, fmt.Errorf("step %s has no pod", step.Name)
+		}
+		logs, err := c.PodLogStream(ctx, id.Tenant, pod, container, read.Since)
+		if err != nil {
+			return nil, fmt.Errorf("reading the logs of step %s: %w", step.Name, err)
+		}
+		// A failed close may mean a read cut short.
+		if err := errors.Join(scanOutput(logs, names, out), logs.Close()); err != nil {
+			return nil, fmt.Errorf("reading the logs of step %s: %w", step.Name, err)
+		}
+	}
+	return redactValues(red, out), nil
 }
 
 // SetToken stores a run's token in its token Secret, which the run owns: it is created the first

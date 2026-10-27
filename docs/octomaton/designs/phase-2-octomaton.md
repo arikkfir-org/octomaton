@@ -78,7 +78,7 @@ The full schema and template context are in the
 | Newer commit on the same pull request or branch | Concurrency groups decide: `supersede` cancels older runs (the default for pull requests), `queue` runs one at a time, `latest` keeps only the newest waiting run |
 | `/command` comment on a pull request | Pipelines with a matching `on.comment.pattern` run (definitions from the default branch, code from the pull request); the commenter must be in the command's `allow` list, as a user or through a team; the built-in `/rerun` re-runs the failed or named checks ([comment commands](comment-commands.md)); 👀 when started, a reply with the result when done |
 | Cron schedule | Pipelines with `on.schedule` run at the default branch head, once per slot |
-| Long run | The installation token is refreshed while the run lives; a live task table and per-task checks (`taskChecks`) show progress |
+| Long run | The installation token is refreshed while the run lives; a live task table and per-task checks (`taskChecks`) show progress, and with `liveTaskChecks` each task's check shows what the task prints about its own ([live task checks](live-task-checks.md)) |
 | Octomaton restarts mid-dispatch | Runs are created held (`PipelineRunPending`) and released only once their check and token exist; held runs are resumed |
 | Pull request closed or made a draft | Pipelines that list the action run at its head commit, each event as a run of its own, outside the pull request's default concurrency group; closing cancels none of its runs ([pull request endings](pull-request-endings.md)) |
 | Merge group destroyed | Its `checks_requested` runs are cancelled, then the pipelines that list `destroyed` run |

@@ -35,15 +35,18 @@ type PullRequest struct {
 	HeadSHA string
 	BaseRef string
 	BaseSHA string
+	Merged  bool // the pull request was closed by merging it
 }
 
 // MergeGroup holds merge_group-specific values; it is nil for other events.
 // HeadRef and BaseRef are full refs (refs/heads/...), as GitHub sends them.
 type MergeGroup struct {
-	HeadRef string
-	HeadSHA string
-	BaseRef string
-	BaseSHA string
+	HeadRef           string
+	HeadSHA           string
+	BaseRef           string
+	BaseSHA           string
+	PullRequestNumber int    // the pull request whose queue entry the group is, from its branch's name; 0 when it holds none
+	Reason            string // why the queue destroyed the group (merged, invalidated or dequeued); empty until then
 }
 
 // Comment holds the comment command that started a run; it is nil for other events.
@@ -147,7 +150,7 @@ func Sample() TemplateContext {
 		Pipeline:      "ci",
 		Push:          &Push{Before: "1111111111111111111111111111111111111111", After: "0123456789abcdef0123456789abcdef01234567"},
 		PullRequest:   &PullRequest{Number: 1, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "2222222222222222222222222222222222222222"},
-		MergeGroup:    &MergeGroup{HeadRef: "refs/heads/gh-readonly-queue/main/pr-1-2222222222222222222222222222222222222222", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "refs/heads/main", BaseSHA: "2222222222222222222222222222222222222222"},
+		MergeGroup:    &MergeGroup{HeadRef: "refs/heads/gh-readonly-queue/main/pr-1-2222222222222222222222222222222222222222", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "refs/heads/main", BaseSHA: "2222222222222222222222222222222222222222", PullRequestNumber: 1},
 		Comment:       &Comment{ID: 1, Author: "octocat", Command: "/deploy", Arguments: "staging"},
 		ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},
 		Schedule:      &Schedule{Cron: "0 3 * * *", Slot: "2026-01-01T03:00:00Z"},

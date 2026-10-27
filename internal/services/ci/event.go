@@ -18,11 +18,10 @@ type TriggerEvent struct {
 	PendingReviewers []string
 }
 
-// MergeGroupDestroyed cancels the unfinished runs of a merge group the queue dropped.
+// MergeGroupDestroyed cancels the unfinished runs of a merge group the queue dropped, then runs the
+// pipelines that list its destruction. Trigger.MergeGroup.Reason says why the queue dropped it.
 type MergeGroupDestroyed struct {
 	Trigger Trigger
-	// Reason is why the queue dropped the group, e.g. "dequeued" or "merged".
-	Reason string
 }
 
 // CommandEvent is a pull request comment that may be a command, such as "/deploy staging".

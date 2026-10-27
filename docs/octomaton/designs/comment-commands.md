@@ -42,4 +42,4 @@ sequenceDiagram
 
 ## Rollout
 
-The `allow` field is required, so every repository with a `comment` trigger must add one in the same change that deploys this; the hub's repositories had none. A `commands` section is an unknown field to the Octomaton running before this, which refuses the whole file, so a repository enables `/rerun` only once this is deployed: Octomaton's own (`arikkfir`) in a follow-up pull request, and org-wide from the organization repository's `organization.commands`. The App needs Members: read before any `teams` entry works.
+The `allow` field is required, so every repository with a `comment` trigger must add one in the same change that deploys this; the hub's repositories had none. A `commands` section is an unknown field to the Octomaton running before this, which refuses the whole file, so a repository enables `/rerun` only once this is deployed: Octomaton's own repository in a follow-up pull request, and org-wide from the organization repository's `organization.commands`. The App needs Members: read before any `teams` entry works.

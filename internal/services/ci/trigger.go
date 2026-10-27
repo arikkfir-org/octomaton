@@ -52,6 +52,8 @@ type PullRequest struct {
 	HeadRepo string `json:"headRepo,omitempty"`
 	Author   string `json:"author,omitempty"`
 	HTMLURL  string `json:"htmlURL,omitempty"`
+	// Merged is set when the pull request was closed by merging it.
+	Merged bool `json:"merged,omitempty"`
 }
 
 // FromFork reports whether the pull request's head branch lives outside repository (the full name
@@ -67,6 +69,11 @@ type MergeGroup struct {
 	HeadSHA string `json:"headSHA"`
 	BaseRef string `json:"baseRef"`
 	BaseSHA string `json:"baseSHA"`
+	// PullRequestNumber is the pull request whose queue entry the group is, as its branch names it;
+	// 0 when the name holds none.
+	PullRequestNumber int `json:"pullRequestNumber,omitempty"`
+	// Reason is why the queue destroyed the group: merged, invalidated or dequeued; "" until then.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Comment is the comment command that started a run.
@@ -161,6 +168,26 @@ func (t Trigger) ChangesPullRequest() bool {
 	return t.Event == EventPullRequest && pullRequestChanges[t.Action]
 }
 
+// endings are, by event, the actions that end a pull request's review (it is closed, or becomes a
+// draft) or a merge group's time in the queue.
+var endings = map[string]map[string]bool{
+	EventPullRequest: {"closed": true, "converted_to_draft": true},
+	EventMergeGroup:  {"destroyed": true},
+}
+
+// IsEnding reports whether an event's action is an ending (see Trigger.Ends).
+func IsEnding(event, action string) bool { return endings[event][action] }
+
+// Ends reports whether t ends a pull request's review or a merge group's time in the queue. A
+// pipeline it triggers runs at the commit as it was then, as a run of its own, outside the pull
+// request's default concurrency group: nothing newer is left to supersede it.
+func (t Trigger) Ends() bool { return IsEnding(t.Event, t.Action) }
+
+// OwnRun reports whether each delivery of t runs a pipeline it triggers as a run of its own, even at
+// a commit the pipeline already ran, so that only its redeliveries find that run: t changes the pull
+// request, not its commit, or ends it.
+func (t Trigger) OwnRun() bool { return t.ChangesPullRequest() || t.Ends() }
+
 // ShortSHA abbreviates a commit SHA for display.
 func ShortSHA(sha string) string {
 	if len(sha) > 7 {
@@ -186,8 +213,20 @@ func (t Trigger) Describe() string {
 		if t.Action != "" {
 			fmt.Fprintf(&b, ", %s", t.Action)
 		}
+		if t.Action == "closed" && t.PullRequest.Merged {
+			b.WriteString(" (merged)")
+		}
 	case t.MergeGroup != nil:
 		fmt.Fprintf(&b, "Merge queue into `%s`", strings.TrimPrefix(t.MergeGroup.BaseRef, "refs/heads/"))
+		if t.MergeGroup.PullRequestNumber != 0 {
+			fmt.Fprintf(&b, " for pull request #%d", t.MergeGroup.PullRequestNumber)
+		}
+		if t.Ends() {
+			b.WriteString(", destroyed")
+			if t.MergeGroup.Reason != "" {
+				fmt.Fprintf(&b, " (%s)", t.MergeGroup.Reason)
+			}
+		}
 	case t.Tag != "":
 		fmt.Fprintf(&b, "Push of tag `%s`", t.Tag)
 	case t.Event != "":

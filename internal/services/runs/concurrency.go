@@ -306,9 +306,9 @@ func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 	return s.release(ctx, run)
 }
 
-// CancelMergeGroup cancels the unfinished runs of a merge group the queue dropped. The error is as
-// Handle's.
-func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger, reason string) error {
+// CancelMergeGroup cancels the unfinished runs of a merge group the queue dropped (t), but those of
+// its destruction itself. The error is as Handle's.
+func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger) error {
 	log := s.logFor(t)
 	runs, err := s.Runner.List(ctx, ci.RunQuery{Repository: &t.Repository, Event: ci.EventMergeGroup, Revision: t.Revision})
 	if err != nil {
@@ -316,12 +316,12 @@ func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger, reason str
 		return err
 	}
 	why := "merge group destroyed"
-	if reason != "" {
-		why += " (" + reason + ")"
+	if t.MergeGroup != nil && t.MergeGroup.Reason != "" {
+		why += " (" + t.MergeGroup.Reason + ")"
 	}
 	var errs []error
 	for _, r := range runs {
-		if r.Phase == ci.Finished || r.CancelRequested {
+		if r.Phase == ci.Finished || r.CancelRequested || r.Trigger.Ends() {
 			continue
 		}
 		if err := s.Runner.Cancel(ctx, r.ID, ci.Cancellation{Reason: why}); err != nil {
@@ -329,7 +329,7 @@ func (s *Service) CancelMergeGroup(ctx context.Context, t ci.Trigger, reason str
 			errs = append(errs, err)
 			continue
 		}
-		log.InfoContext(ctx, "Cancelled the merge group's run", "run", r.ID.String(), "reason", reason)
+		log.InfoContext(ctx, "Cancelled the merge group's run", "run", r.ID.String(), "reason", why)
 	}
 	return errors.Join(errs...)
 }

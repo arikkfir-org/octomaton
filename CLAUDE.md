@@ -6,6 +6,11 @@
   conventional directories (`.tekton/` is only a path users choose), no defaults that assume a layout, no knowledge of
   specific repositories. The organization repository, whose `.octomaton.yaml` may declare the organization pipelines
   every repository runs, is a server setting (`OCTOMATON_ORGANIZATION_REPOSITORY`), never a name in the code.
+- Vendor- and user-neutral: nothing of Octomaton's (code, comments, tests, docs, commit messages, pull requests) names
+  a customer, a vendor or a person, nor their repositories, hosts, Apps or tickets. Describe a need by its use, another
+  installation as a second host, a person by their role, and use placeholder logins (`octocat`, `alice`) in examples
+  and tests. The hub's installation (`delivery`, `infra`, `tooling`, its registry and its review bot) stays named, as
+  the rules below name it.
 - The only repository files Octomaton reads are the root `.octomaton.yaml` (the repository's own, and its owner's
   organization repository's), the PipelineRun files they reference, and the Pipeline, Task and StepAction files a
   PipelineRun references by name beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`, `<name>.step.yaml`), which

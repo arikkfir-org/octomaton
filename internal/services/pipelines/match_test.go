@@ -3,6 +3,8 @@ package pipelines
 import (
 	"strings"
 	"testing"
+
+	"octomaton.dev/internal/services/ci"
 )
 
 const matchConfig = `
@@ -16,6 +18,8 @@ pipelines:
   - {name: prs-main, pipelineRun: a.yaml, on: {pull_request: {branches: [main], types: [opened, closed]}}}
   - {name: no-drafts, pipelineRun: a.yaml, on: {pull_request: {drafts: false}}}
   - {name: queue, pipelineRun: a.yaml, on: {merge_group: {branches: [main]}}}
+  - {name: teardown, pipelineRun: a.yaml, on: {pull_request: {types: [closed, converted_to_draft], drafts: false}, merge_group: {types: [destroyed]}}}
+  - {name: queue-both, pipelineRun: a.yaml, on: {merge_group: {types: [checks_requested, destroyed]}}}
   - {name: deploy, pipelineRun: a.yaml, on: {comment: {pattern: "^/deploy(\\s|$)", allow: {users: [maintainer]}, branches: [main]}}}
   - {name: review, pipelineRun: a.yaml, on: {review_request: {reviewers: [Octo-Reviewer, second-bot]}}}
   - {name: review-main, pipelineRun: a.yaml, on: {review_request: {reviewers: [octo-reviewer], branches: [main]}}}
@@ -51,8 +55,14 @@ func TestMatch(t *testing.T) {
 		{"custom PR types", "prs-main", Event{Name: "pull_request", Action: "closed", Branch: "main"}, true},
 		{"custom PR types exclude defaults", "prs-main", Event{Name: "pull_request", Action: "synchronize", Branch: "main"}, false},
 		{"PR base branch filter", "prs-main", Event{Name: "pull_request", Action: "opened", Branch: "dev"}, false},
-		{"merge group base branch", "queue", Event{Name: "merge_group", Branch: "main"}, true},
-		{"merge group other base", "queue", Event{Name: "merge_group", Branch: "dev"}, false},
+		{"merge group base branch", "queue", Event{Name: "merge_group", Action: "checks_requested", Branch: "main"}, true},
+		{"merge group other base", "queue", Event{Name: "merge_group", Action: "checks_requested", Branch: "dev"}, false},
+		{"default merge group types: destroyed is not included", "queue", Event{Name: "merge_group", Action: "destroyed", Branch: "main"}, false},
+		{"merge group types: destroyed", "teardown", Event{Name: "merge_group", Action: "destroyed", Branch: "main"}, true},
+		{"merge group types exclude the default", "teardown", Event{Name: "merge_group", Action: "checks_requested", Branch: "main"}, false},
+		{"merge group types: both", "queue-both", Event{Name: "merge_group", Action: "destroyed"}, true},
+		{"drafts: false does not skip a draft's closing", "teardown", Event{Name: "pull_request", Action: "closed", Draft: true}, true},
+		{"drafts: false does not skip becoming a draft", "teardown", Event{Name: "pull_request", Action: "converted_to_draft", Draft: true}, true},
 		{"comment trigger does not match events", "deploy", Event{Name: "push", Branch: "main"}, false},
 		{"review requested from a listed reviewer", "review", Event{Name: "review_request", Action: "review_requested", Reviewer: "second-bot", Branch: "dev"}, true},
 		{"reviewers match case-insensitively", "review", Event{Name: "review_request", Reviewer: "octo-reviewer"}, true},
@@ -69,6 +79,30 @@ func TestMatch(t *testing.T) {
 				t.Fatalf("Match(%+v) = %v, want %v", tt.ev, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResumes: reopening a pull request runs a pipeline again at a commit it already ran, and so does
+// marking it ready for a pipeline that skipped it as a draft.
+func TestResumes(t *testing.T) {
+	cfg := mustParse(t, matchConfig)
+	tests := []struct {
+		pipeline, event, action string
+		want                    bool
+	}{
+		{"prs", "pull_request", "reopened", true},
+		{"no-drafts", "pull_request", "reopened", true},
+		{"prs", "pull_request", "ready_for_review", false},
+		{"no-drafts", "pull_request", "ready_for_review", true},
+		{"no-drafts", "pull_request", "synchronize", false},
+		{"no-drafts", "pull_request", "opened", false},
+		{"queue", "merge_group", "checks_requested", false},
+		{"review", "review_request", "review_requested", false},
+	}
+	for _, tt := range tests {
+		if got := cfg.Pipeline(tt.pipeline).Resumes(ci.Trigger{Event: tt.event, Action: tt.action}); got != tt.want {
+			t.Errorf("%s on %s %s: Resumes() = %v, want %v", tt.pipeline, tt.event, tt.action, got, tt.want)
+		}
 	}
 }
 

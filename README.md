@@ -213,9 +213,9 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 
 | Policy | Behaviour |
 | --- | --- |
-| `supersede` | The newest commit wins: older live runs in the group are cancelled and their checks concluded `skipped` ("Superseded"); one that finishes first is left as it is. A run whose commit is no longer the head of its branch or pull request stands itself down. |
+| `supersede` | The newest commit wins: older live runs in the group are cancelled and their checks concluded `skipped` ("Superseded"); one that finishes first, or that can't be cancelled (the cluster refuses, or the call fails), runs on, and the newer run goes all the same. A run whose commit is no longer the head of its branch or pull request stands itself down. |
 | `queue` (default) | One run at a time, oldest first. |
-| `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled. |
+| `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled (one that can't be cancelled keeps its turn). |
 
 Without `concurrency`, pull request and review request runs of the same pipeline and pull request share the group
 `pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained, and so are the runs of a pull

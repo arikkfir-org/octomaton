@@ -55,7 +55,7 @@ func (s *Service) get(ctx context.Context, id ci.RunID) (ci.Run, bool, error) {
 // stops the head's run (whose "skipped" report would read as passed). Of one commit's runs, the one
 // that runs is the one whose report the code host shows: the newest report, then the later attempt.
 // A rival still opening its report cannot be ranked yet, so the run waits, held, and the rival
-// decides for both when it goes.
+// decides for both when it goes. A rival that cannot be stood down runs on (standDown).
 func (s *Service) supersede(ctx context.Context, id ci.RunID) error {
 	run, found, err := s.get(ctx, id)
 	if err != nil || !found || run.CancelRequested || run.Phase == ci.Finished {
@@ -99,9 +99,7 @@ func (s *Service) supersede(ctx context.Context, id ci.RunID) error {
 		return nil
 	}
 	for _, r := range rivals {
-		if err := s.supersededBy(ctx, r.ID, ci.Cancellation{SupersededBy: run.ID.Name}); err != nil {
-			return fmt.Errorf("superseding %s: %w", r.ID, err)
-		}
+		s.standDown(ctx, r.ID, run.ID)
 	}
 	return s.Runner.Release(ctx, run.ID)
 }
@@ -159,9 +157,7 @@ func (s *Service) keepLatest(ctx context.Context, id ci.RunID) (bool, error) {
 		if r.ReportID == 0 {
 			continue
 		}
-		if err := s.supersededBy(ctx, r.ID, ci.Cancellation{SupersededBy: run.ID.Name}); err != nil {
-			return false, fmt.Errorf("superseding %s: %w", r.ID, err)
-		}
+		s.standDown(ctx, r.ID, run.ID)
 	}
 	return true, nil
 }
@@ -197,6 +193,18 @@ func createdBefore(a, b ci.Run) bool {
 		return a.Created.Before(b.Created)
 	}
 	return a.ID.Name < b.ID.Name
+}
+
+// standDown supersedes rival, which run outranks, as far as the runner lets it. A rival it fails to
+// cancel, whatever the reason (a cluster may refuse to change a running run, a call may fail), is
+// left as it is: a running one runs to its end and its report concludes with it, a held one waits its
+// turn. run goes on all the same: its report is the newer one, which the code host shows, and failing
+// it over the rival would put a failure nobody caused on the check that counts. The cancel is not
+// tried again: a missed one costs the rival's run time, not a report anyone reads.
+func (s *Service) standDown(ctx context.Context, rival, run ci.RunID) {
+	if err := s.supersededBy(ctx, rival, ci.Cancellation{SupersededBy: run.Name}); err != nil {
+		s.Logger.WarnContext(ctx, "Could not supersede the run; leaving it as it is", "run", rival.String(), "supersededBy", run.Name, "error", err)
+	}
 }
 
 func (s *Service) supersededBy(ctx context.Context, id ci.RunID, why ci.Cancellation) error {

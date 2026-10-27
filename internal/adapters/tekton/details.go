@@ -265,9 +265,8 @@ func (r *Runner) TaskOutput(ctx context.Context, id ci.RunID, reads []ci.OutputR
 		if err != nil {
 			return nil, fmt.Errorf("reading the logs of step %s: %w", step.Name, err)
 		}
-		err = scanOutput(logs, names, out)
-		logs.Close()
-		if err != nil {
+		// A failed close may mean a read cut short.
+		if err := errors.Join(scanOutput(logs, names, out), logs.Close()); err != nil {
 			return nil, fmt.Errorf("reading the logs of step %s: %w", step.Name, err)
 		}
 	}

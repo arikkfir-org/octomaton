@@ -4,7 +4,8 @@ A running task can tell its own check how it is going: a long test suite shows i
 while it runs, not only when it ends. The task prints a line to its log, and the leader, which already reads tenant
 pods' logs for failed steps, writes the text to that task's check. Nothing new is granted: no credential, endpoint or
 cluster permission. Linear: [ENG-206](https://linear.app/arikkfir/issue/ENG-206), and
-[ENG-205](https://linear.app/arikkfir/issue/ENG-205) for the token it makes unnecessary.
+[ENG-205](https://linear.app/arikkfir/issue/ENG-205) for the token it makes unnecessary; pull request:
+[#60](https://github.com/arikkfir-org/octomaton/pull/60).
 
 ## Context
 

@@ -26,6 +26,7 @@ pipelines:
       pr: "{{ if .PullRequest }}{{ .PullRequest.Number }}{{ end }}"
     githubToken: {workspace: github-token}
     taskChecks: true
+    liveTaskChecks: true
 `
 
 // renderer stands in for the runner's: it fails definitions and specs as told, and renders the rest
@@ -161,7 +162,7 @@ func TestLintRendersWithPlaceholders(t *testing.T) {
 	}
 	spec := r.specs[0]
 	if spec.Trigger.Repository.Name != "octo-repo" || spec.Trigger.Pipeline != "ci" || spec.Trigger.Event != ci.EventPullRequest ||
-		spec.Params["pr"] != "1" || spec.Token == nil || spec.Token.Workspace != "github-token" || !spec.TaskReports || spec.Path != ".tekton/ci.yaml" {
+		spec.Params["pr"] != "1" || spec.Token == nil || spec.Token.Workspace != "github-token" || !spec.TaskReports || !spec.LiveTaskReports || spec.Path != ".tekton/ci.yaml" {
 		t.Fatalf("spec = %+v", spec)
 	}
 	if r.specs[1].Params["pr"] != "" {

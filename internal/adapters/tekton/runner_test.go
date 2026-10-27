@@ -102,7 +102,7 @@ func demoSpec(t ci.Trigger) ci.RunSpec {
 		Trigger: t, Definition: []byte(demoDef), Path: ".tekton/ci.yaml",
 		Params: map[string]string{"revision": t.Revision}, Timeout: time.Hour,
 		Token:       &ci.TokenSettings{Workspace: "github-token", Permissions: map[string]string{"contents": "read"}},
-		TaskReports: true,
+		TaskReports: true, LiveTaskReports: true,
 		Concurrency: ci.Concurrency{Group: "main", Key: "main", Policy: ci.Queue},
 	}
 }
@@ -158,7 +158,7 @@ func TestCreateRecordsTheRun(t *testing.T) {
 	for key, want := range map[string]string{
 		annotationRepository: "octo-org/demo", annotationSHA: shaA, annotationInstallationID: "7", annotationDeliveryID: "d-1111",
 		annotationHead: "main", annotationAttempt: "1", annotationConcurrencyGroup: "main", annotationConcurrencyPolicy: "queue",
-		annotationToken: `{"workspace":"github-token","permissions":{"contents":"read"}}`, annotationTaskChecks: "true",
+		annotationToken: `{"workspace":"github-token","permissions":{"contents":"read"}}`, annotationTaskChecks: "true", annotationLiveTaskChecks: "true",
 	} {
 		if a[key] != want {
 			t.Errorf("annotation %s = %q, want %q", key, a[key], want)
@@ -174,7 +174,7 @@ func TestCreateRecordsTheRun(t *testing.T) {
 
 	want := ci.Run{
 		ID: ci.RunID{Tenant: demoNS, Name: "demo-ci-1111111-1"}, Trigger: spec.Trigger, Attempt: 1,
-		Group: groupLabel("octo-org/demo", "main"), Policy: ci.Queue, Token: spec.Token, TaskReports: true,
+		Group: groupLabel("octo-org/demo", "main"), Policy: ci.Queue, Token: spec.Token, TaskReports: true, LiveTaskReports: true,
 		Tasks: []string{"build", "test"}, Phase: ci.Held, Created: pr.GetCreationTimestamp().Time.UTC(),
 	}
 	if !reflect.DeepEqual(run, want) {

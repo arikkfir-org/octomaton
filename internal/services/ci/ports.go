@@ -131,6 +131,10 @@ type Runner interface {
 	Details(ctx context.Context, id RunID) (Details, error)
 	// StepLogs returns the last lines of a step's logs, at most limitBytes of them.
 	StepLogs(ctx context.Context, id RunID, step Step, tailLines, limitBytes int64) (string, error)
+	// TaskOutput reads the output lines (OutputPrefix) steps of a running task printed, each since
+	// its time (everything when it is zero), in the order given: the newest value of each of names,
+	// decoded and without the run's secrets. A name no line printed is missing.
+	TaskOutput(ctx context.Context, id RunID, reads []OutputRead, names []string) (map[string]string, error)
 	// Link tells where people see a run.
 	Link(id RunID) RunLink
 	// TaskURL is where people see one task of a run; "" when the runner has no dashboard.
@@ -142,6 +146,17 @@ type Runner interface {
 	// Watch hands w every live run, again whenever it changes and after the delay w asks for,
 	// until ctx ends.
 	Watch(ctx context.Context, w Watcher) error
+}
+
+// OutputPrefix starts an output line, which a running task prints on a line of its own to tell
+// Octomaton something: "octomaton:<name> <the value, base64-encoded>".
+const OutputPrefix = "octomaton:"
+
+// OutputRead is what Runner.TaskOutput reads of one step: what it printed since a time, or
+// everything when Since is zero.
+type OutputRead struct {
+	Step  Step
+	Since time.Time
 }
 
 // Watcher follows runs: Runner.Watch calls it.

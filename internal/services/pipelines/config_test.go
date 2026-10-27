@@ -63,6 +63,7 @@ pipelines:
       group: "publish"                 # Go template, scoped to the repository
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
+    liveTaskChecks: false              # optional: a running task's check shows what the task prints
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
 `
@@ -102,8 +103,8 @@ func TestParseReferenceExample(t *testing.T) {
 	if p.TimeoutDuration() != time.Hour || p.TokenWorkspace() != "github-token" || p.TokenPermissions()["contents"] != "read" || p.Token().AllRepositories {
 		t.Fatalf("pipeline settings: timeout %v, workspace %q, token %+v", p.TimeoutDuration(), p.TokenWorkspace(), p.Token())
 	}
-	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks {
-		t.Fatalf("concurrency %+v, taskChecks %v", p.Concurrency, p.TaskChecks)
+	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks || p.LiveTaskChecks {
+		t.Fatalf("concurrency %+v, taskChecks %v, liveTaskChecks %v", p.Concurrency, p.TaskChecks, p.LiveTaskChecks)
 	}
 	if p.Name != "ci" || p.CheckName() != "Continuous Integration" {
 		t.Fatalf("name %q, check name %q", p.Name, p.CheckName())
@@ -218,6 +219,8 @@ func TestParseProblems(t *testing.T) {
 		{name: "checks: write with a push trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {tags: [\"v*\"]}}, githubToken: {workspace: w, permissions: {checks: write}}}\n", want: "may ask for checks: write"},
 		{name: "checks: write with a merge_group trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {merge_group: {}}, githubToken: {workspace: w, permissions: {checks: write}}}\n", want: "may ask for checks: write"},
 		{name: "the organization repository's pipeline with checks: write on pull requests", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}}, githubToken: {workspace: w, permissions: {checks: write}}}\norganization:\n  pipelines: []\n", want: "pipelines[0] (ci): githubToken.permissions: only organization pipelines"},
+		{name: "live task checks without task checks", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, liveTaskChecks: true}\n", want: "liveTaskChecks needs taskChecks: true"},
+		{name: "live task checks with task checks off", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, taskChecks: false, liveTaskChecks: true}\n", want: "liveTaskChecks needs taskChecks: true"},
 		{name: "bad timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: forever}\n", want: "is not a duration"},
 		{name: "zero timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: 0s}\n", want: "must be positive"},
 		{name: "concurrency without group", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, concurrency: {policy: queue}}\n", want: "concurrency.group is required"},

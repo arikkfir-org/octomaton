@@ -160,8 +160,9 @@ type Runner interface {
 	Record(ctx context.Context, id RunID, r Record) error // what was reported, report IDs, progress, …
 	SetToken(ctx context.Context, run Run, t Token) error
 	TokenExpiry(ctx context.Context, id RunID) (expires time.Time, ok bool, err error)
-	Details(ctx context.Context, id RunID) (Details, error) // tasks, results, failed steps
+	Details(ctx context.Context, id RunID) (Details, error) // tasks, results, failed steps, a running task's steps
 	StepLogs(ctx context.Context, id RunID, step Step, tailLines, limitBytes int64) (string, error)
+	TaskOutput(ctx context.Context, id RunID, reads []OutputRead, names []string) (map[string]string, error) // output lines
 	Link(id RunID) RunLink               // where people watch a run
 	TaskURL(id RunID, task string) string // and one of its tasks
 	FreeResources(ctx context.Context, finishedBefore time.Time) (int, error)

@@ -134,6 +134,8 @@ type Pipeline struct {
 	Timeout     string       `yaml:"timeout"`
 	Concurrency *Concurrency `yaml:"concurrency"`
 	TaskChecks  bool         `yaml:"taskChecks"`
+	// LiveTaskChecks has a running task's check show the title and summary the task prints.
+	LiveTaskChecks bool `yaml:"liveTaskChecks"`
 
 	timeout      time.Duration
 	params       map[string]*template.Template
@@ -753,6 +755,10 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 			add("secrets[%d]: duplicate Secret %q", i, name)
 		}
 		seenSecrets[name] = true
+	}
+
+	if p.LiveTaskChecks && !p.TaskChecks {
+		add("liveTaskChecks needs taskChecks: true: it shows a running task's output on the task's own check")
 	}
 
 	if p.Timeout != "" {

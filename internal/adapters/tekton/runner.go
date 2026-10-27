@@ -265,6 +265,9 @@ func runAnnotations(spec ci.RunSpec, attempt int, secrets *ci.SecretSource) map[
 	if spec.TaskReports {
 		a[annotationTaskChecks] = "true"
 	}
+	if spec.LiveTaskReports {
+		a[annotationLiveTaskChecks] = "true"
+	}
 	if secrets != nil {
 		if data, err := json.Marshal(secrets); err == nil {
 			a[annotationSecrets] = string(data)

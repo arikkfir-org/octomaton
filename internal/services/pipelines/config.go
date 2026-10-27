@@ -728,9 +728,11 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 			}
 		}
 		// The App writes every check of the repository, required ones included, and a token with checks
-		// above read may rewrite any of them.
-		if level, ok := gt.Permissions["checks"]; ok && level != "read" && headDefinitions {
-			add("githubToken.permissions: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may ask for checks: %s: a push, pull_request or merge_group trigger may run definitions read at the commit under test, and the token could rewrite any check of the App's on the repository, required ones included", level)
+		// above read may rewrite any of them. Names are matched in any case, as a code host may read them.
+		for _, name := range sortedKeys(gt.Permissions) {
+			if level := gt.Permissions[name]; strings.EqualFold(name, "checks") && level != "read" && headDefinitions {
+				add("githubToken.permissions: only organization pipelines and pipelines whose every trigger is comment, review_request or schedule may ask for %s: %s: a push, pull_request or merge_group trigger may run definitions read at the commit under test, and the token could rewrite any check of the App's on the repository, required ones included", name, level)
+			}
 		}
 		switch gt.Repositories {
 		case "":

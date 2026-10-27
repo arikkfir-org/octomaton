@@ -208,6 +208,8 @@ func TestCheckPermissions(t *testing.T) {
 		{name: "several", in: map[string]string{"contents": "write", "pull_requests": "read", "checks": "write"}},
 		{name: "unknown permission", in: map[string]string{"contnets": "read"}, wantErr: "contnets"},
 		{name: "bad level", in: map[string]string{"contents": "all"}, wantErr: "access level"},
+		{name: "a name in capitals", in: map[string]string{"Checks": "write"}, wantErr: `permission "Checks" is not spelt as GitHub spells it`},
+		{name: "a name in capitals beside its own", in: map[string]string{"checks": "read", "CHECKS": "write"}, wantErr: `permission "CHECKS" is not spelt`},
 	}
 	app, _ := newApp(t)
 	for _, tt := range tests {

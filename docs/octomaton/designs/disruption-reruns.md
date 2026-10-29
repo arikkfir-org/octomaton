@@ -3,7 +3,8 @@
 A run whose tasks lost their pods because the cluster took them away (a machine shut down or reclaimed, an eviction,
 a preemption) runs again, up to a number of times its pipeline sets, while its check stays in progress. A run that
 failed by itself never does. Before this, such a run failed its check like any other: a merge queue entry left the
-queue, and a person pressed Re-run. Linear: [ENG-210](https://linear.app/arikkfir/issue/ENG-210).
+queue, and a person pressed Re-run. Linear: [ENG-210](https://linear.app/arikkfir/issue/ENG-210); pull request:
+[#61](https://github.com/arikkfir-org/octomaton/pull/61).
 
 ## Context
 

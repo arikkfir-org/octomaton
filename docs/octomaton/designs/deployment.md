@@ -81,7 +81,7 @@ What each grant is for: the README's [deployment](https://github.com/arikkfir-or
 | --- | --- |
 | ClusterRole `octomaton`, bound to ServiceAccount `octomaton/octomaton` by ClusterRoleBinding `octomaton` | PipelineRuns and TaskRuns: get, list, watch; Namespaces: get |
 | Role `octomaton`, bound by RoleBinding `octomaton`, in namespace `octomaton` | Leases: get, list, watch, create, update, patch (Lease `octomaton`, the leader's) |
-| ClusterRole `octomaton-tenant`, bound to `octomaton/octomaton` in each tenant namespace by the host's RoleBinding `octomaton` | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
+| ClusterRole `octomaton-tenant`, bound to `octomaton/octomaton` in each tenant namespace by the host's RoleBinding `octomaton` | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete; Pods: get, list, watch; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
 
 ## Configuration
 

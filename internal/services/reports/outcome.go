@@ -70,7 +70,9 @@ func conclusionOf(run ci.Run) ci.Conclusion {
 	return run.Outcome.Conclusion
 }
 
-func (s *Service) outcome(ctx context.Context, run ci.Run, details ci.Details) outcome {
+// outcome is how a finished run's report concludes; rerun, when set, says why a run that lost tasks
+// to disruptions was not rerun.
+func (s *Service) outcome(ctx context.Context, run ci.Run, details ci.Details, rerun string) outcome {
 	c := conclusionOf(run)
 	o := outcome{conclusion: c, title: Title(c, elapsed(run.Started, run.Finished, s.now()))}
 	if t := strings.TrimSpace(details.Results[ResultTitle]); t != "" {
@@ -105,6 +107,18 @@ func (s *Service) outcome(ctx context.Context, run ci.Run, details ci.Details) o
 	if len(failed) > 0 {
 		fmt.Fprintf(&b, "\nFailed: %s.\n", strings.Join(failed, ", "))
 	}
+	var lost []ci.Disruption
+	for _, t := range details.Tasks {
+		if t.State == ci.TaskFailed && t.Disruption != nil {
+			d := *t.Disruption
+			d.Task = t.Name
+			lost = append(lost, d)
+		}
+	}
+	if len(lost) > 0 {
+		fmt.Fprintf(&b, "\nLost their pods to disruptions: %s.\n", lostTasks(lost))
+	}
+	b.WriteString(rerun)
 	if len(details.Tasks) > 0 {
 		b.WriteString(table(details.Tasks, s.now()))
 	}
@@ -121,8 +135,11 @@ func table(tasks []ci.Task, now time.Time) string {
 	b.WriteString("\n| Task | State | Time |\n| --- | --- | --- |\n")
 	for _, t := range tasks {
 		state := stateLabels[t.State]
-		if t.Note != "" {
+		switch {
+		case t.Note != "":
 			state += " (" + t.Note + ")"
+		case t.Disruption != nil:
+			state += " (lost its pod)"
 		}
 		took := ""
 		if t.State.Finished() && !t.Started.IsZero() {

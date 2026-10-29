@@ -136,11 +136,24 @@ type Pipeline struct {
 	TaskChecks  bool         `yaml:"taskChecks"`
 	// LiveTaskChecks has a running task's check show the title and summary the task prints.
 	LiveTaskChecks bool `yaml:"liveTaskChecks"`
+	// Disruptions reruns a run that failed only because tasks lost their pods to disruptions.
+	Disruptions *Disruptions `yaml:"disruptions"`
 
 	timeout      time.Duration
 	params       map[string]*template.Template
 	organization bool
 }
+
+// Disruptions is what a pipeline does about runs whose tasks lost their pods to disruptions: the
+// cluster stopped or removed them (their machine shut down or went away, an eviction, a
+// preemption), so the tasks did not fail by themselves.
+type Disruptions struct {
+	// Reruns is how many times a run that failed only because of them is rerun.
+	Reruns int `yaml:"reruns"`
+}
+
+// MaxDisruptionReruns bounds disruptions.reruns.
+const MaxDisruptionReruns = 5
 
 // Organization reports whether the pipeline is an organization pipeline, added by ForRepository.
 func (p *Pipeline) Organization() bool { return p.organization }
@@ -762,6 +775,9 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 	if p.LiveTaskChecks && !p.TaskChecks {
 		add("liveTaskChecks needs taskChecks: true: it shows a running task's output on the task's own check")
 	}
+	if d := p.Disruptions; d != nil && (d.Reruns < 1 || d.Reruns > MaxDisruptionReruns) {
+		add("disruptions.reruns must be 1 to %d (omit disruptions to never rerun)", MaxDisruptionReruns)
+	}
 
 	if p.Timeout != "" {
 		d, err := time.ParseDuration(p.Timeout)
@@ -852,6 +868,14 @@ func (p *Pipeline) RenderParams(ctx TemplateContext) (map[string]string, error) 
 		out[name] = v
 	}
 	return out, nil
+}
+
+// Reruns returns how a first run of the pipeline reruns after disruptions; nil when it never does.
+func (p *Pipeline) Reruns() *ci.Reruns {
+	if p.Disruptions == nil {
+		return nil
+	}
+	return &ci.Reruns{Left: p.Disruptions.Reruns}
 }
 
 // TimeoutDuration returns the configured pipeline timeout, or zero.

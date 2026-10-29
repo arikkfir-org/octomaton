@@ -283,6 +283,9 @@ func (s *Service) Resume(ctx context.Context, run ci.Run) error {
 		}
 	}
 	if run.TaskReports {
+		if err := s.takeOverTaskReports(ctx, gh, run); err != nil {
+			return fmt.Errorf("taking over the task reports: %w", err)
+		}
 		if err := s.openTaskReports(ctx, gh, run, true); err != nil {
 			return fmt.Errorf("opening the task reports: %w", err)
 		}

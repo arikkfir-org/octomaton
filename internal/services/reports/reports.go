@@ -30,6 +30,10 @@ type Service struct {
 	Resume func(ctx context.Context, run ci.Run) error
 	// ReleaseNext lets the next held run of a finished run's group go (runs.Service.ReleaseNext).
 	ReleaseNext func(ctx context.Context, run ci.Run) error
+	// RerunLost starts the next attempt of a run that failed only because tasks lost their pods to
+	// disruptions, which takes over its reports (runs.Service.RerunLost); a *ci.Refusal says why it
+	// did not.
+	RerunLost func(ctx context.Context, run ci.Run, lost []ci.Disruption) (ci.Run, error)
 	// HeldTooLong is how long a run may be held before it is resumed (default 5m).
 	HeldTooLong time.Duration
 	// Now returns the current time; nil means time.Now.
@@ -71,6 +75,40 @@ func Header(link ci.RunLink, t ci.Trigger) string {
 	return b.String()
 }
 
+// RunHeader is Header for a run, followed by the earlier attempts it reruns after they lost tasks
+// to disruptions.
+func RunHeader(link ci.RunLink, run ci.Run) string {
+	h := Header(link, run.Trigger)
+	if run.Reruns == nil || len(run.Reruns.Lost) == 0 {
+		return h
+	}
+	var b strings.Builder
+	b.WriteString(h + "\n**Rerun** after earlier attempts lost tasks to disruptions:\n\n")
+	for _, a := range run.Reruns.Lost {
+		fmt.Fprintf(&b, "- Attempt %d (`%s`): %s\n", a.Attempt, a.Run, lostTasks(a.Tasks))
+	}
+	return b.String()
+}
+
+// lostTasks lists tasks that lost their pods, where and why.
+func lostTasks(lost []ci.Disruption) string {
+	parts := make([]string, 0, len(lost))
+	for _, d := range lost {
+		parts = append(parts, "`"+d.Task+"`"+lostWhere(d))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// lostWhere says where and why a task lost its pod.
+func lostWhere(d ci.Disruption) string {
+	var b strings.Builder
+	if d.Node != "" {
+		fmt.Fprintf(&b, " on node `%s`", cell(d.Node))
+	}
+	fmt.Fprintf(&b, " (%s)", cell(d.Reason))
+	return b.String()
+}
+
 // TaskName names the report of one task of a pipeline.
 func TaskName(check, task string) string { return check + " / " + task }
 
@@ -95,7 +133,7 @@ func (s *Service) installation(run ci.Run) ci.Installation {
 	return s.Host.Installation(run.Trigger.InstallationID)
 }
 
-func (s *Service) header(run ci.Run) string { return Header(s.Runner.Link(run.ID), run.Trigger) }
+func (s *Service) header(run ci.Run) string { return RunHeader(s.Runner.Link(run.ID), run) }
 
 // Reconcile brings a run's reports up to date. It returns when to look at the run again: for held
 // runs, when they will have been held too long.
@@ -204,7 +242,14 @@ func (s *Service) finish(ctx context.Context, id ci.RunID) error {
 	if err != nil {
 		return err
 	}
-	o := s.outcome(ctx, run, details)
+	note := ""
+	if run.Reported != ci.ReportedConcluded {
+		var rerun bool
+		if rerun, note, err = s.rerunLost(ctx, run, details); err != nil || rerun {
+			return err
+		}
+	}
+	o := s.outcome(ctx, run, details, note)
 	if run.Reported != ci.ReportedConcluded {
 		if err := s.conclude(ctx, run, details, o); err != nil {
 			return err
@@ -214,6 +259,62 @@ func (s *Service) finish(ctx context.Context, id ci.RunID) error {
 		return err
 	}
 	return s.letGo(ctx, run)
+}
+
+// rerunLost reruns a run that failed only because tasks lost their pods to disruptions, and lets the
+// run go: the next attempt takes over its reports, and the comment command it answers. When the run
+// is not rerun, note says why, for its summary.
+func (s *Service) rerunLost(ctx context.Context, run ci.Run, details ci.Details) (rerun bool, note string, err error) {
+	lost := lostOnly(run, details)
+	switch {
+	case len(lost) == 0:
+		return false, "", nil
+	case run.Reruns.Left <= 0:
+		return false, "\nNot rerun: its pipeline's `disruptions.reruns` are used up.\n", nil
+	case s.RerunLost == nil:
+		return false, "", nil
+	}
+	next, err := s.RerunLost(ctx, run, lost)
+	var refusal *ci.Refusal
+	if errors.As(err, &refusal) {
+		s.Logger.InfoContext(ctx, "Not rerunning a run that lost tasks to disruptions", "run", run.ID.String(), "reason", refusal.Reason)
+		return false, fmt.Sprintf("\nNot rerun: %s.\n", strings.TrimSuffix(refusal.Reason, ".")), nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	if s.ReleaseNext != nil {
+		if err := s.ReleaseNext(ctx, run); err != nil {
+			return false, "", err
+		}
+	}
+	s.Logger.InfoContext(ctx, "Run lost tasks to disruptions; rerun", "run", run.ID.String(), "rerun", next.ID.String(),
+		"repository", run.Trigger.Repository.FullName, "pipeline", run.Trigger.Pipeline, "sha", run.Trigger.Revision)
+	return true, "", s.letGo(ctx, run)
+}
+
+// lostOnly returns the tasks of a run with Reruns that lost their pods to disruptions, when nothing
+// else failed it: it failed, every failed task lost its pod, and no task timed out or was cancelled.
+// It returns nil otherwise.
+func lostOnly(run ci.Run, details ci.Details) []ci.Disruption {
+	if run.Reruns == nil || run.Outcome.Conclusion != ci.Failure || run.CancelRequested || !known(run.Trigger) {
+		return nil
+	}
+	var lost []ci.Disruption
+	for _, t := range details.Tasks {
+		switch {
+		case t.State == ci.TaskTimedOut || t.State == ci.TaskCancelled:
+			return nil
+		case t.State != ci.TaskFailed:
+		case t.Disruption == nil:
+			return nil
+		default:
+			d := *t.Disruption
+			d.Task = t.Name
+			lost = append(lost, d)
+		}
+	}
+	return lost
 }
 
 func (s *Service) conclude(ctx context.Context, run ci.Run, details ci.Details, o outcome) error {
@@ -349,6 +450,10 @@ func (s *Service) taskReport(run ci.Run, task string, t *ci.Task, final *outcome
 		link = fmt.Sprintf("[The task on the Dashboard](%s).", u)
 	}
 	var start time.Time
+	if t != nil && final == nil && t.State == ci.TaskFailed && t.Disruption != nil && run.Reruns != nil && run.Reruns.Left > 0 {
+		// Its run may rerun it: its report stays open until the run ends, as the run's own does.
+		return ci.Report{}
+	}
 	if t != nil {
 		start = t.Started
 		conclusion, title := ci.Success, "Succeeded"
@@ -368,6 +473,9 @@ func (s *Service) taskReport(run ci.Run, task string, t *ci.Task, final *outcome
 			}
 			if t.State != ci.TaskSucceeded && t.Message != "" {
 				fmt.Fprintf(&b, "%s.\n\n", strings.TrimSuffix(oneLine(t.Message), "."))
+			}
+			if d := t.Disruption; d != nil {
+				fmt.Fprintf(&b, "Its pod was taken away%s.\n\n", lostWhere(*d))
 			}
 			b.WriteString(link)
 			if custom := strings.TrimSpace(t.Results[ResultTitle]); custom != "" {

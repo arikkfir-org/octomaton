@@ -111,6 +111,7 @@ func (a *app) wireServices() {
 		Logger:      component("reports"),
 		Resume:      a.runs.Resume,
 		ReleaseNext: a.runs.ReleaseNext,
+		RerunLost:   a.runs.RerunLost,
 	}
 	a.upkeep = &upkeep.Service{Host: a.github, Runner: a.runner, Logger: component("upkeep")}
 }

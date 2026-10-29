@@ -56,6 +56,7 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 	spec := ci.RunSpec{
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
 		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, LiveTaskReports: p.LiveTaskChecks, Concurrency: conc,
+		Reruns: p.Reruns(),
 	}
 	if p.Organization() && len(p.Secrets) > 0 {
 		// An organization pipeline's Secrets live with its definition, in the organization repository's namespace.
@@ -154,7 +155,22 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 		return refuse(r)
 	}
 
-	reportID, err := s.openReport(ctx, gh, run, 0)
+	if err := s.launch(ctx, gh, run); err != nil {
+		return ci.Run{}, err
+	}
+	log.InfoContext(ctx, "Started pipeline", "run", run.ID.String(), "attempt", run.Attempt,
+		"concurrencyGroup", spec.Concurrency.Group, "policy", spec.Concurrency.Policy)
+	return run, nil
+}
+
+// launch finishes starting a run it created: its report (or the one it takes over), its task
+// reports, its token and its Secrets' copies, then lets it go per its concurrency policy. A failure
+// cancels the run and fails its report.
+func (s *Service) launch(ctx context.Context, gh ci.Installation, run ci.Run) error {
+	reportID, err := s.openReport(ctx, gh, run, run.ReportID)
+	if err == nil && run.TaskReports {
+		err = s.takeOverTaskReports(ctx, gh, run)
+	}
 	if err == nil && run.TaskReports {
 		err = s.openTaskReports(ctx, gh, run, false)
 	}
@@ -170,12 +186,10 @@ func (s *Service) start(ctx context.Context, gh ci.Installation, t ci.Trigger, p
 	if err != nil {
 		s.Metrics.RunCreated(ctx, metrics.RunError)
 		s.abort(ctx, gh, run, reportID, err)
-		return ci.Run{}, err
+		return err
 	}
 	s.Metrics.RunCreated(ctx, metrics.RunCreated)
-	log.InfoContext(ctx, "Started pipeline", "run", run.ID.String(), "reportID", reportID, "attempt", run.Attempt,
-		"concurrencyGroup", spec.Concurrency.Group, "policy", spec.Concurrency.Policy)
-	return run, nil
+	return nil
 }
 
 // sameRun reports whether a run is the one a start for t would create: the run of the same comment
@@ -241,16 +255,20 @@ func outranks(a, b ci.Run) bool {
 
 // queuedSummary links a run and describes its trigger.
 func (s *Service) queuedSummary(run ci.Run) string {
-	return strings.TrimSuffix(reports.Header(s.Runner.Link(run.ID), run.Trigger), "\n")
+	return strings.TrimSuffix(reports.RunHeader(s.Runner.Link(run.ID), run), "\n")
 }
 
 // openReport opens the run's report (or takes over one the code host already has, id) and records
-// it on the run.
+// it on the run. A rerun's report, taken over from the attempt it reruns, stays in progress: a
+// merge queue reads a pending check as still running, and a report never goes back to queued.
 func (s *Service) openReport(ctx context.Context, gh ci.Installation, run ci.Run, id ci.ReportID) (ci.ReportID, error) {
 	t := run.Trigger
 	r := ci.Report{
 		Name: t.ReportName(), Revision: t.Revision, Status: ci.StatusQueued, ExternalID: run.ID.String(), URL: s.Runner.Link(run.ID).URL,
 		Title: "Queued", Summary: s.queuedSummary(run), Trigger: &t,
+	}
+	if reruns(run) {
+		r.Status = ci.StatusInProgress
 	}
 	if id == 0 {
 		var err error
@@ -302,6 +320,33 @@ func (s *Service) openTaskReports(ctx context.Context, gh ci.Installation, run c
 	return errors.Join(err, s.Runner.Record(ctx, run.ID, ci.Record{TaskReportIDs: ids}))
 }
 
+// reruns reports whether a run reruns an attempt that lost tasks, and so took over its reports.
+func reruns(run ci.Run) bool { return run.Reruns != nil && run.Reruns.Of != "" }
+
+// takeOverTaskReports has the task reports a rerun took over from the attempt it reruns, which are
+// still open, say that the task waits for the new attempt; the others are opened afresh. A task
+// report it already moved is left alone.
+func (s *Service) takeOverTaskReports(ctx context.Context, gh ci.Installation, run ci.Run) error {
+	if !reruns(run) {
+		return nil
+	}
+	t := run.Trigger
+	for _, task := range run.Tasks {
+		id := run.TaskReportIDs[task]
+		if id == 0 || run.TaskReportStates[task] != "" {
+			continue
+		}
+		r := ci.Report{
+			Status: ci.StatusInProgress, ExternalID: run.ID.String(), URL: s.Runner.TaskURL(run.ID, task),
+			Title: "Queued", Summary: fmt.Sprintf("Task `%s` of %s.", task, s.queuedSummary(run)), Trigger: &t,
+		}
+		if err := gh.UpdateReport(ctx, t.Repository, id, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // mintToken mints the run's token and stores it where the run reads it.
 func (s *Service) mintToken(ctx context.Context, run ci.Run) error {
 	tok, err := run.Token.Mint(ctx, s.Host, run.Trigger)
@@ -335,9 +380,32 @@ func (s *Service) abort(ctx context.Context, gh ci.Installation, run ci.Run, rep
 		// Its report could not be opened: open the failure instead, with retries of its own.
 		s.openCompleted(ctx, gh, run.Trigger, run.Trigger.ReportName(), ci.Failure, "The run could not be started", summary)
 	}
+	s.abortTaskReports(ctx, gh, run.ID)
 	// The failure is reported: the run is let go, so its cancellation is not reported over it.
 	if err := s.Runner.Record(ctx, run.ID, ci.Record{Reported: new(ci.ReportedCompleted), Done: true}); err != nil {
 		log.ErrorContext(ctx, "Could not let the run go", "error", err)
+	}
+}
+
+// abortTaskReports concludes the open task reports of a run that could not be started: none of its
+// tasks runs. Failures are only logged.
+func (s *Service) abortTaskReports(ctx context.Context, gh ci.Installation, id ci.RunID) {
+	run, found, err := s.get(ctx, id)
+	if err != nil || !found {
+		return
+	}
+	log := s.logFor(run.Trigger).With("run", id.String())
+	for task, reportID := range run.TaskReportIDs {
+		if run.TaskReportStates[task] == ci.StatusCompleted {
+			continue
+		}
+		r := ci.Report{
+			Status: ci.StatusCompleted, Conclusion: ci.Cancelled, Completed: s.now(), Title: "Not run",
+			Summary: "The run could not be started.", Trigger: &run.Trigger,
+		}
+		if err := gh.UpdateReport(ctx, run.Trigger.Repository, reportID, r); err != nil {
+			log.ErrorContext(ctx, "Could not conclude the task report", "task", task, "reportID", reportID, "error", err)
+		}
 	}
 }
 

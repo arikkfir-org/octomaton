@@ -64,6 +64,8 @@ pipelines:
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
     liveTaskChecks: false              # optional: a running task's check shows what the task prints
+    disruptions:                       # optional: rerun a run that failed only because pods lost their machine
+      reruns: 2                        # at most this many times (1-5)
 organization:                          # only in the organization repository: pipelines for every repository
   pipelines: []                        # same fields as pipelines; read at its default branch
 `
@@ -105,6 +107,9 @@ func TestParseReferenceExample(t *testing.T) {
 	}
 	if ci.Policy(p.Concurrency.Policy) != ci.Latest || p.TaskChecks || p.LiveTaskChecks {
 		t.Fatalf("concurrency %+v, taskChecks %v, liveTaskChecks %v", p.Concurrency, p.TaskChecks, p.LiveTaskChecks)
+	}
+	if r := p.Reruns(); r == nil || r.Left != 2 || r.Of != "" {
+		t.Fatalf("reruns %+v", r)
 	}
 	if p.Name != "ci" || p.CheckName() != "Continuous Integration" {
 		t.Fatalf("name %q, check name %q", p.Name, p.CheckName())
@@ -222,6 +227,10 @@ func TestParseProblems(t *testing.T) {
 		{name: "the organization repository's pipeline with checks: write on pull requests", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {}}, githubToken: {workspace: w, permissions: {checks: write}}}\norganization:\n  pipelines: []\n", want: "pipelines[0] (ci): githubToken.permissions: only organization pipelines"},
 		{name: "live task checks without task checks", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, liveTaskChecks: true}\n", want: "liveTaskChecks needs taskChecks: true"},
 		{name: "live task checks with task checks off", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, taskChecks: false, liveTaskChecks: true}\n", want: "liveTaskChecks needs taskChecks: true"},
+		{name: "no disruption reruns", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, disruptions: {}}\n", want: "disruptions.reruns must be 1 to 5"},
+		{name: "too many disruption reruns", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, disruptions: {reruns: 6}}\n", want: "disruptions.reruns must be 1 to 5"},
+		{name: "negative disruption reruns", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, disruptions: {reruns: -1}}\n", want: "disruptions.reruns must be 1 to 5"},
+		{name: "unknown disruptions field", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, disruptions: {retries: 2}}\n", want: "field retries not found"},
 		{name: "bad timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: forever}\n", want: "is not a duration"},
 		{name: "zero timeout", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, timeout: 0s}\n", want: "must be positive"},
 		{name: "concurrency without group", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, concurrency: {policy: queue}}\n", want: "concurrency.group is required"},

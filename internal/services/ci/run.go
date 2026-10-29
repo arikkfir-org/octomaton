@@ -128,6 +128,9 @@ type Run struct {
 	// LiveTaskReports is set when a running task's report shows the title and summary the task
 	// prints (Runner.TaskOutput).
 	LiveTaskReports bool
+	// Reruns, when set, has the run rerun when it fails only because tasks lost their pods to
+	// disruptions (Task.Disruption).
+	Reruns *Reruns
 	// Tasks lists the pipeline's tasks in order, when the runner knows them.
 	Tasks []string
 
@@ -178,6 +181,42 @@ type RunSpec struct {
 	TaskReports     bool
 	LiveTaskReports bool
 	Concurrency     Concurrency
+	// Reruns, when set, has the run rerun when it fails only because tasks lost their pods to
+	// disruptions.
+	Reruns *Reruns
+	// ReportID and TaskReportIDs are reports of an earlier attempt the run takes over (a rerun's),
+	// rather than open its own.
+	ReportID      ReportID
+	TaskReportIDs map[string]ReportID
+}
+
+// Reruns is how a run reruns when it fails only because tasks lost their pods to disruptions:
+// the next attempt takes over its reports, which stay open.
+type Reruns struct {
+	// Left is how many more times the run may be rerun.
+	Left int `json:"left"`
+	// Of names the run this one reruns; "" for the first attempt.
+	Of string `json:"of,omitempty"`
+	// Lost lists the earlier attempts that lost tasks, oldest first.
+	Lost []LostAttempt `json:"lost,omitempty"`
+}
+
+// LostAttempt is an attempt that failed only because tasks lost their pods to disruptions.
+type LostAttempt struct {
+	Attempt int          `json:"attempt"`
+	Run     string       `json:"run"`
+	Tasks   []Disruption `json:"tasks"`
+}
+
+// Disruption is how the cluster took a task's pod away while the task ran: its machine shut down
+// or went away, or the pod was evicted or preempted. The task did not fail by itself.
+type Disruption struct {
+	Task string `json:"task"`
+	// Node is the machine the pod ran on.
+	Node string `json:"node,omitempty"`
+	// Reason is the cluster's, e.g. TerminationByKubelet.
+	Reason  string `json:"reason"`
+	Message string `json:"message,omitempty"`
 }
 
 // SecretSource returns the Secrets a run of the spec gets copies of, or nil when its Secrets are its
@@ -264,6 +303,9 @@ type Task struct {
 	// Steps are a running task's steps that started, in order.
 	Steps   []Step
 	Results map[string]string
+	// Disruption, for a failed task of a run with Reruns, is how the cluster took its pod away; nil
+	// when the task failed by itself.
+	Disruption *Disruption
 }
 
 // Step is one step of a task.

@@ -149,6 +149,8 @@ pipelines:
       policy: latest                   # supersede | queue | latest
     taskChecks: false                  # optional: also report each pipeline task as "<check> / <task>"
     liveTaskChecks: false              # optional: a running task's check shows what the task prints
+    disruptions:                       # optional: rerun a run that failed only because pods lost their machine
+      reruns: 2                        # at most this many times (1-5)
 commands:                              # optional: Octomaton's built-in comment commands, each enabled by its allow-list
   rerun:                               # "/rerun [check...]" re-runs the failed checks, or the named ones
     allow: {users: [octocat], teams: [maintainers]}
@@ -209,6 +211,7 @@ stops every pipeline of the repository, reported on the `octomaton` check.
 | `concurrency` | Limits runs sharing a group (below). |
 | `taskChecks` | Also reports every task of the PipelineRun's own `spec.pipelineSpec` as a check named `<check> / <task>`, where `<check>` is the pipeline's check name. |
 | `liveTaskChecks` | While a task runs, its check shows the title and summary the task prints on output lines ([Check runs](#check-runs)). Needs `taskChecks: true`. |
+| `disruptions` | `reruns: N` (1 to 5) reruns a run that failed only because the cluster took its tasks' pods away (a machine shut down or reclaimed, an eviction, a preemption), up to N times, while its check stays `in_progress` ([Check runs](#check-runs)). Without it, such a run fails like any other. |
 
 **Concurrency.** Groups are rendered from the `group` template and scoped to the repository, so two pipelines naming
 the same group share it (include `{{ .Pipeline }}` to keep them apart).
@@ -424,6 +427,20 @@ event with placeholder values, so a template that only works for one event is re
   ```sh
   printf 'octomaton:check-title %s\n' "$(printf '%s' "12 of 40 passed" | base64 | tr -d '\n')"
   ```
+- **Disruption reruns** (`disruptions: {reruns: N}`): Tekton records that a task failed, not why, so while a run of
+  such a pipeline lives, the leader watches its pods and records on the run each one whose `DisruptionTarget` condition
+  says the cluster took it away: the kubelet stopped it for a node shutdown or node pressure
+  (`TerminationByKubelet`), its node is gone (`DeletionByPodGC`, `DeletionByTaintManager`), it was evicted
+  (`EvictionByEvictionAPI`) or preempted (`PreemptionByScheduler`). A pod the kubelet evicts for exceeding its own
+  limits has no such condition. When the run fails, and every task that failed lost its pod that way (none failed by
+  itself, timed out or was cancelled, and the run was not cancelled), Octomaton starts the next attempt from the stored
+  trigger, under the pipeline's concurrency, and lets the failed one go: the check stays `in_progress` and passes to
+  the new attempt, whose summary lists the earlier attempts and the tasks they lost; the check of a task that lost its
+  pod stays open until then, and a concluded task check gets a new one. A merge queue entry thus keeps its pending
+  check instead of leaving the queue. The rerun reads the pipeline's configuration again; when the run isn't rerun (its
+  reruns are used up, its merge group is gone, the pipeline isn't defined anymore) the check fails, saying why. A run
+  that lost a pod while no leader was watching, and whose pod is gone by the time one looks, fails as before
+  ([design](docs/octomaton/designs/disruption-reruns.md)).
 - Problems that prevent a run (an invalid `.octomaton.yaml`, a missing namespace or file, a template error, a
   refused Secret) are reported as failed checks: `octomaton` for configuration errors, the pipeline's check otherwise.
 - Every check stores its trigger context in a hidden marker in its summary, so **Re-run** works even after the
@@ -613,7 +630,7 @@ the leader, the PipelineRun informer synced).
 
 | Scope | Permissions |
 | --- | --- |
-| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete (`get` also reads an organization pipeline's Secrets in the organization repository's namespace, a tenant like the others); Pods: get, list; `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
+| Tenant namespaces (ClusterRole `octomaton-tenant`, RoleBinding `octomaton` in each `ci-<repository>`) | PipelineRuns: create, get, list, watch, patch, update, delete; TaskRuns: get, list, watch; Secrets: create, get, patch, update, delete (`get` also reads an organization pipeline's Secrets in the organization repository's namespace, a tenant like the others); Pods: get, list, watch (the leader watches the pods of live runs that rerun after disruptions); `pods/log`: get; PersistentVolumeClaims: get, list, delete; ServiceAccounts: get |
 | Cluster (ClusterRole and ClusterRoleBinding `octomaton`) | PipelineRuns and TaskRuns: get, list, watch (the leader watches PipelineRuns in every namespace, for reports, token refresh and retention); Namespaces: get (optional; without it a missing namespace surfaces as the creation error) |
 | `octomaton` namespace (Role and RoleBinding `octomaton`) | Leases: get, list, watch, create, update, patch (leader election) |
 
@@ -626,7 +643,8 @@ webhook request.
 
 **Bookkeeping:** objects Octomaton creates carry the label `app.kubernetes.io/managed-by: octomaton` and labels and
 annotations under `octomaton.dev/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
-`repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, …). They are never read as
+`repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, `reruns`, `disrupted-<hash>`
+(one per pod the cluster took away from a run that reruns after disruptions), …). They are never read as
 configuration.
 
 ## Development

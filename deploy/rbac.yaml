@@ -122,6 +122,8 @@ rules:
       - get
       - list
       - delete
+  # Watched in namespaces whose live runs rerun after disruptions, to tell a pod the cluster took
+  # away from one that failed.
   - apiGroups:
       - ""
     resources:
@@ -129,6 +131,7 @@ rules:
     verbs:
       - get
       - list
+      - watch
   - apiGroups:
       - ""
     resources:

@@ -45,6 +45,8 @@ type Runner struct {
 	synced  atomic.Bool
 	mu      sync.Mutex
 	deleted map[string]*unstructured.Unstructured
+	// podWatch watches pods for disruptions while Watch runs.
+	podWatch atomic.Pointer[podWatch]
 }
 
 var _ ci.Runner = (*Runner)(nil)
@@ -267,6 +269,19 @@ func runAnnotations(spec ci.RunSpec, attempt int, secrets *ci.SecretSource) map[
 	}
 	if spec.LiveTaskReports {
 		a[annotationLiveTaskChecks] = "true"
+	}
+	if spec.Reruns != nil {
+		if data, err := json.Marshal(spec.Reruns); err == nil {
+			a[annotationReruns] = string(data)
+		}
+	}
+	// A rerun takes over the reports of the attempt it reruns.
+	if spec.ReportID != 0 {
+		a[annotationCheckRunID] = strconv.FormatInt(int64(spec.ReportID), 10)
+	}
+	if len(spec.TaskReportIDs) > 0 {
+		data, _ := json.Marshal(spec.TaskReportIDs)
+		a[annotationTaskCheckIDs] = string(data)
 	}
 	if secrets != nil {
 		if data, err := json.Marshal(secrets); err == nil {

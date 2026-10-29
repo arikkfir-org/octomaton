@@ -268,6 +268,7 @@ func (r *Runner) Create(_ context.Context, spec ci.RunSpec, attempt int) (ci.Run
 	r.created++
 	run := &ci.Run{
 		ID: id, Trigger: t, Attempt: attempt, Policy: spec.Concurrency.Policy, Token: spec.Token, Secrets: spec.SecretSource(), TaskReports: spec.TaskReports, LiveTaskReports: spec.LiveTaskReports,
+		Reruns: spec.Reruns, ReportID: spec.ReportID, TaskReportIDs: maps.Clone(spec.TaskReportIDs),
 		Phase: ci.Held, Created: r.now().Add(time.Duration(r.created) * time.Millisecond),
 	}
 	if spec.Concurrency.Key != "" {

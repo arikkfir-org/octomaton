@@ -22,6 +22,7 @@ func runOf(pr *unstructured.Unstructured) ci.Run {
 		Secrets:          secretSourceOf(a[annotationSecrets]),
 		TaskReports:      a[annotationTaskChecks] == "true",
 		LiveTaskReports:  a[annotationLiveTaskChecks] == "true",
+		Reruns:           rerunsOf(a[annotationReruns]),
 		Tasks:            taskNames(pr),
 		Phase:            phaseOf(pr),
 		CancelRequested:  cancelRequested(pr),

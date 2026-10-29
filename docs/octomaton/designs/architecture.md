@@ -77,14 +77,16 @@ internal/services/
   ci/                     vocabulary (Repository, Trigger, Event, Run, Outcome, Report) and ports (CodeHost, Runner)
     citest/               in-memory CodeHost and Runner for the services' tests
   pipelines/              .octomaton.yaml: schema, event matching, templates
-  runs/                   events to runs: evaluation, start, concurrency, re-runs, comment commands
+  runs/                   events to runs: evaluation, start, concurrency, re-runs, comment commands,
+                          reruns after disruptions
   reports/                run state to reports: titles, task tables, failure logs, task checks
   schedules/              cron triggers to runs
   upkeep/                 token refresh, retention of finished runs' resources
   lint/                   validating a repository's configuration, rendering through a Renderer
 internal/adapters/
   github/                 CodeHost: App auth, REST calls, check-run markers (+ githubtest); webhook payloads to ci.Event
-  tekton/                 Runner: PipelineRun rendering, bookkeeping labels and annotations, status to ci.Run, Watch;
+  tekton/                 Runner: PipelineRun rendering, bookkeeping labels and annotations, status to ci.Run, Watch
+                          (and the pods of runs that rerun after disruptions);
                           Renderer for the linter; the repository-to-namespace mapping
   kube/                   Kubernetes clients
   leader/                 Lease election; cmd/octomaton runs the leader's jobs through it

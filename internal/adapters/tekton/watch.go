@@ -52,6 +52,12 @@ func (r *Runner) Watch(ctx context.Context, w ci.Watcher) error {
 
 	factory.Start(ctx.Done())
 	defer factory.Shutdown()
+	pods := newPodWatch(ctx, r, informer.GetIndexer())
+	r.podWatch.Store(pods)
+	defer func() {
+		r.podWatch.Store(nil)
+		pods.stop()
+	}()
 	log := r.logger()
 	log.Info("Waiting for the PipelineRun informer to sync")
 	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
@@ -174,6 +180,9 @@ func (r *Runner) handOver(ctx context.Context, key string, indexer cache.Indexer
 	pr, ok := obj.(*unstructured.Unstructured)
 	if !ok {
 		return 0, nil
+	}
+	if pods := r.podWatch.Load(); pods != nil && wantsDisruptions(pr) {
+		pods.watch(pr.GetNamespace())
 	}
 	return w.Reconcile(ctx, runOf(pr))
 }

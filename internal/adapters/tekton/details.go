@@ -42,7 +42,7 @@ func (r *Runner) Details(ctx context.Context, id ci.RunID) (ci.Details, error) {
 		r.logger().WarnContext(ctx, "Withholding a run's results and task messages", "run", id.String(), "error", err)
 		red = &redactor{withhold: true}
 	}
-	tasks := tasksOf(pr, taskRuns)
+	tasks := tasksOf(pr, taskRuns, r.disruptionLookup(pr))
 	for i := range tasks {
 		tasks[i].Message = red.Redact(tasks[i].Message)
 		redactValues(red, tasks[i].Results)
@@ -60,8 +60,8 @@ func redactValues(red *redactor, m map[string]string) map[string]string {
 
 // tasksOf lists a run's tasks in pipeline order, then any other task (finally tasks, and tasks of a
 // pipeline Tekton has not resolved into the status yet), then skipped ones. A task's latest TaskRun
-// tells its state.
-func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured) []ci.Task {
+// tells its state, and disrupted how the cluster took its pod away, if it did.
+func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured, disrupted func(pod string) *ci.Disruption) []ci.Task {
 	byTask := map[string]*unstructured.Unstructured{}
 	var others []string
 	for i := range taskRuns {
@@ -90,7 +90,7 @@ func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured
 		seen[name] = true
 		t := ci.Task{Name: name, State: ci.TaskPending}
 		if tr := byTask[name]; tr != nil {
-			fillTask(&t, tr)
+			fillTask(&t, tr, disrupted)
 		} else if reason, ok := skipped[name]; ok {
 			t.State, t.Note = ci.TaskSkipped, reason
 		}
@@ -111,7 +111,7 @@ func tasksOf(pr *unstructured.Unstructured, taskRuns []unstructured.Unstructured
 	return tasks
 }
 
-func fillTask(t *ci.Task, tr *unstructured.Unstructured) {
+func fillTask(t *ci.Task, tr *unstructured.Unstructured, disrupted func(pod string) *ci.Disruption) {
 	ts, err := getTaskRunStatus(tr)
 	if err != nil {
 		return
@@ -145,6 +145,10 @@ func fillTask(t *ci.Task, tr *unstructured.Unstructured) {
 		return
 	}
 	t.Message = message
+	if t.State == ci.TaskFailed {
+		// The pod that failed it: Tekton's retries of a task each get a pod of their own.
+		t.Disruption = disrupted(ts.PodName)
+	}
 	for _, step := range ts.Steps {
 		if step.Terminated != nil && step.Terminated.ExitCode != 0 && step.Container != "" {
 			t.FailedSteps = append(t.FailedSteps, ci.Step{Name: step.Name, ExitCode: step.Terminated.ExitCode, Logs: stepLogs(ts, step)})

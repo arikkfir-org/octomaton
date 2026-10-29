@@ -15,9 +15,9 @@
   organization repository's), the PipelineRun files they reference, and the Pipeline, Task and StepAction files a
   PipelineRun references by name beside it (`<name>.pipeline.yaml`, `<name>.task.yaml`, `<name>.step.yaml`), which
   it inlines before it checks the run.
-- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the pair
-  of annotations `octomaton.dev/branches` and `octomaton.dev/tags` on a tenant ServiceAccount, which the cluster's
-  owner sets to restrict it to branches and to tags. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
+- Configuration lives only in `.octomaton.yaml`, never in Tekton labels or annotations. The one exception is the
+  annotations `octomaton.dev/branches`, `octomaton.dev/tags` and `octomaton.dev/organization-pipelines` on a tenant
+  ServiceAccount, which the cluster's owner sets to restrict it to branches, to tags and to organization pipelines. Other labels and annotations under `octomaton.dev/` (and `app.kubernetes.io/managed-by`) are bookkeeping
   Octomaton writes on its own objects.
 - PipelineRun files, and the files they reference, stay plain Tekton YAML, valid against Tekton's schemas: no
   templating inside them, no syntax of Octomaton's own. Context goes in only through `params` (Go templates over the

@@ -274,6 +274,86 @@ organization:
 	}
 }
 
+// TestOrganizationPipelinesOnBranchPushes: an organization pipeline that runs on every branch's push
+// is read at the organization repository's default branch, also on that repository's own branches,
+// which cannot change it, and its runs are marked as an organization pipeline's, which a
+// ServiceAccount's octomaton.dev/organization-pipelines admits whatever the branch. A repository's own
+// pipeline on the same push is not.
+func TestOrganizationPipelinesOnBranchPushes(t *testing.T) {
+	const (
+		pagesRun   = "kind: PipelineRun\nmetadata: {name: pages}\n"
+		pagesV2Run = "kind: PipelineRun\nmetadata: {name: pages-v2}\n"
+	)
+	heading := "organization:\n  pipelines:\n"
+	orgCfg := strings.Replace(orgConfig, heading, heading+"    - {name: pages, pipelineRun: .tekton/pages.yaml, on: {push: {branches: [\"**\"], paths: [docs/**]}}}\n", 1)
+	// A branch of the organization repository that points pages at another file, on every push.
+	rewritten := "apiVersion: octomaton.dev/v1\norganization:\n  pipelines:\n    - {name: pages, pipelineRun: .tekton/pages-v2.yaml, on: {push: {}}}\n"
+	anyBranch := strings.Replace(ciConfig, "push: {branches: [main]}", "push: {branches: [\"**\"]}", 1)
+	docs := ci.ChangedFiles{Files: []string{"docs/walkthrough.md"}, Complete: true}
+	type run struct {
+		name, path, definition string
+		organization           bool
+	}
+	tests := []struct {
+		name    string
+		repo    ci.Repository
+		branch  string
+		created bool // the push creates the branch
+		changed ci.ChangedFiles
+		setup   func(h *harness)
+		want    []run
+	}{
+		{name: "a branch of another repository", repo: repo, branch: "feat/x", changed: docs,
+			want: []run{{"demo-pages-1111111-1", "tooling:.tekton/pages.yaml", pagesRun, true}}},
+		{name: "main", repo: repo, branch: "main", changed: docs,
+			want: []run{{"demo-pages-1111111-1", "tooling:.tekton/pages.yaml", pagesRun, true}}},
+		{name: "a new branch's first push, which counts as changing every path", repo: repo, branch: "feat/x", created: true,
+			want: []run{{"demo-pages-1111111-1", "tooling:.tekton/pages.yaml", pagesRun, true}}},
+		{name: "a push that changes no docs", repo: repo, branch: "feat/x", changed: ci.ChangedFiles{Files: []string{"main.go"}, Complete: true}},
+		{name: "beside the repository's own pipeline", repo: repo, branch: "feat/x", changed: docs,
+			setup: func(h *harness) { h.files(sha1, anyBranch, ciRun) },
+			want: []run{
+				{"demo-ci-1111111-1", ".tekton/ci.yaml", ciRun, false},
+				{"demo-pages-1111111-1", "tooling:.tekton/pages.yaml", pagesRun, true},
+			}},
+		{name: "a branch of the organization repository that rewrites the pipeline", repo: orgRepo, branch: "feat/x", changed: docs,
+			setup: func(h *harness) {
+				h.host.SetFile(orgRepo, sha1, ".octomaton.yaml", rewritten)
+				h.host.SetFile(orgRepo, sha1, ".tekton/pages.yaml", pagesV2Run)
+				h.host.SetFile(orgRepo, sha1, ".tekton/pages-v2.yaml", pagesV2Run)
+			},
+			want: []run{{"tooling-pages-1111111-1", "tooling:.tekton/pages.yaml", pagesRun, true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			setupOrganization(h)
+			h.host.SetFile(orgRepo, "", ".octomaton.yaml", orgCfg)
+			h.host.SetFile(orgRepo, "", ".tekton/pages.yaml", pagesRun)
+			if tt.setup != nil {
+				tt.setup(h)
+			}
+			tr := pushTrigger(sha1, tt.branch)
+			tr.Repository = tt.repo
+			if tt.created {
+				tr.Push.Before, tr.Push.Created = strings.Repeat("0", 40), true
+			} else {
+				h.host.SetComparison(tt.repo, baseSHA, sha1, tt.changed)
+			}
+			h.evaluate(tr, EvalOptions{ReportConfigErrors: true})
+
+			var got []run
+			for _, r := range h.runner.Runs() {
+				spec := h.runner.Spec(r.ID)
+				got = append(got, run{r.ID.Name, spec.Path, string(spec.Definition), spec.Organization})
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("runs = %+v\nwant %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOrganizationConfigProblems(t *testing.T) {
 	const invalidOrg = "apiVersion: octomaton.dev/v1\norganization:\n  pipelines:\n    - {bogus: 1}\n"
 	tests := []struct {

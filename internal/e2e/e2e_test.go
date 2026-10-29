@@ -511,24 +511,8 @@ func TestServiceAccountBranchesEndToEnd(t *testing.T) {
 	if rec := e.deliver("pull_request", "sa-1", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
 		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var check *githubtest.CheckRun
-		for _, c := range e.gh.CheckRuns() {
-			if c.Name == "ci" && c.Status == "completed" {
-				check = &c
-			}
-		}
-		if check != nil {
-			if check.Conclusion != "failure" || !strings.Contains(check.Summary+check.Text, "may use (its `octomaton.dev/branches` annotation), and this run is on branch \"feature\"") {
-				t.Fatalf("check run = %+v, want a failure that names the annotation", *check)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no completed check run: %+v", e.gh.CheckRuns())
-		}
-		time.Sleep(20 * time.Millisecond)
+	if check := e.completedCheck("ci"); check.Conclusion != "failure" || !strings.Contains(check.Summary+check.Text, "may use (its `octomaton.dev/branches` annotation), and this run is on branch \"feature\"") {
+		t.Fatalf("check run = %+v, want a failure that names the annotation", check)
 	}
 	runs, err := e.dyn.Resource(tekton.PipelineRuns).Namespace(ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -536,5 +520,44 @@ func TestServiceAccountBranchesEndToEnd(t *testing.T) {
 	}
 	if len(runs.Items) != 0 {
 		t.Fatalf("the refused run created %d PipelineRuns", len(runs.Items))
+	}
+}
+
+// TestOrganizationPipelineOnAMainOnlyServiceAccountEndToEnd: a ServiceAccount restricted to main that
+// lists an organization pipeline lets that pipeline's run on a pull request's branch use it, and
+// still refuses the repository's own pipeline there.
+func TestOrganizationPipelineOnAMainOnlyServiceAccountEndToEnd(t *testing.T) {
+	e := setup(t)
+	e.gh.AddFile(owner+"/tooling", "", ".octomaton.yaml", orgYAML)
+	e.gh.AddFile(owner+"/tooling", "", ".tekton/lint.yaml", strings.Replace(ciYAML, "generateName: ci-", "generateName: lint-", 1))
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "pipeline", Namespace: ns, Annotations: map[string]string{
+		"octomaton.dev/branches": "main", "octomaton.dev/organization-pipelines": "lint",
+	}}}
+	if _, err := e.runner.Kube.CoreV1().ServiceAccounts(ns).Create(context.Background(), sa, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.deliver("pull_request", "sa-2", pullRequestPayload("opened"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request: %d %s", rec.Code, rec.Body.String())
+	}
+	e.waitForRun("octomaton-lint-abcdef0-1")
+	if check := e.completedCheck("ci"); check.Conclusion != "failure" || !strings.Contains(check.Summary+check.Text, "and this run of repository pipeline `ci` is on branch \"feature\"") {
+		t.Fatalf("check run = %+v, want the repository's own pipeline refused", check)
+	}
+}
+
+// completedCheck waits for the check run called name to complete, and returns it.
+func (e *env) completedCheck(name string) githubtest.CheckRun {
+	e.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		for _, c := range e.gh.CheckRuns() {
+			if c.Name == name && c.Status == "completed" {
+				return c
+			}
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("no completed check run %s: %+v", name, e.gh.CheckRuns())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

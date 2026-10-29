@@ -38,7 +38,7 @@ sequenceDiagram
   N->>K: pod build-pod: DisruptionTarget=True, TerminationByKubelet
   K-->>W: pod changed
   W->>W: remember it (memory)
-  W->>K: merge-patch the run: disrupted.octomaton.dev/build-pod
+  W->>K: merge-patch the run: octomaton.dev/disrupted-<hash of build-pod>
   N->>K: containers stopped (143); TaskRun build failed
   K-->>R: run finished: Failed
   R->>R: Details: build failed, lost its pod; nothing else failed
@@ -83,7 +83,7 @@ flowchart LR
   subgraph runs["services/runs"]
     RL["RerunLost: prepare, Create, launch"]
   end
-  PW -->|"disrupted.octomaton.dev/&lt;pod&gt;"| D
+  PW -->|"octomaton.dev/disrupted-&lt;hash&gt;"| D
   D --> FI
   FI -->|"RerunLost hook"| RL
   RL --> C
@@ -95,8 +95,10 @@ flowchart LR
 - **The watch.** When the leader first sees a live run with reruns in a namespace, it starts an informer on that
   namespace's pods that carry Tekton's `tekton.dev/pipelineRun` label, keeping only their labels, node and conditions.
   On every change of a pod with `DisruptionTarget=True`, whose run is live and has reruns, it remembers the pod (24
-  hours) and records it on the run as `disrupted.octomaton.dev/<pod>` (`ci.Disruption`: task, node, reason, message),
-  a key of its own per pod, merge-patched without reading the others. The record outlives the pod and the leader.
+  hours) and records it on the run as `octomaton.dev/disrupted-<hash>`, where `<hash>` is the first 16 hex digits of
+  the SHA-256 of the pod's name: pod, task, node, reason and message, as JSON. A key of its own per pod is
+  merge-patched without reading the others, and the record outlives the pod and the leader. The watch stops when the
+  leader's `Watch` ends, without holding its lock, since handlers still running take it.
 - **The verdict.** `Details` marks a failed task with its pod's disruption: from the run's record, then from what the
   leader remembers or its informer still holds. When the run ends, `lostOnly` reruns it only when it failed, was not
   cancelled, no task timed out or was cancelled, and every task that failed lost its pod.
@@ -119,6 +121,7 @@ flowchart LR
 | The pod's `DisruptionTarget` condition | The one record Kubernetes keeps of why a pod went, set before its containers stop; every form in the table above is told apart | Tekton's reasons, exit codes and messages: each also comes from a task that failed by itself. Kubernetes events: best effort, and gone after an hour |
 | Record each disrupted pod on its run as it happens | The pod is often deleted before its run ends; the record survives that and a new leader | Reading the pods when the run ends: they may be gone |
 | One annotation per pod | Pods change concurrently; a key of its own needs no read before its write, so no write loses another | One JSON annotation of every pod: read, merge, write, with conflicts |
+| Keyed by a hash of the pod's name, under `octomaton.dev/` | Octomaton's bookkeeping stays under one prefix, and an annotation's name holds 63 characters, which a pod's name may take whole; the value names the pod | The pod's name under a prefix of its own (`disrupted.octomaton.dev/<pod>`): a second prefix for one record |
 | One informer per namespace, started with its first run that reruns, pods with Tekton's label only, slimmed | Only tenants that ask pay; memory holds labels, node and conditions | A cluster-wide pod watch: a cluster role on every pod, and every pod in memory |
 | The whole run again, as a new attempt | Tekton can't resume a PipelineRun, and a lost task's workspace may have gone with its machine; the same path as Re-run, concurrency included | Rerunning only the lost tasks. Tekton's `retries`: reruns real failures too |
 | Only when every failed task lost its pod | A task that failed by itself fails the run, even beside a lost one: the rerun would hide it | Rerunning when any task lost its pod |

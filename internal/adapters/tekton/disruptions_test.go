@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/tools/cache"
 	"octomaton.dev/internal/services/ci"
 )
 
@@ -49,6 +53,28 @@ func TestDisruptionOf(t *testing.T) {
 				t.Fatalf("disruptionOf = %+v, %v; want %+v", got, ok, tt.want)
 			}
 		})
+	}
+}
+
+func TestDisruptedKey(t *testing.T) {
+	longest := strings.Repeat("p", 63)
+	tests := []struct {
+		name string
+		pod  string
+	}{
+		{name: "a pod", pod: "demo-ci-1111111-1-build-pod"},
+		{name: "a pod whose name takes 63 characters", pod: longest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := disruptedKey(tt.pod)
+			if errs := validation.IsQualifiedName(key); len(errs) > 0 || !strings.HasPrefix(key, "octomaton.dev/") {
+				t.Fatalf("%q: %v", key, errs)
+			}
+		})
+	}
+	if disruptedKey("build-pod") == disruptedKey("test-pod") || disruptedKey("build-pod") != disruptedKey("build-pod") {
+		t.Fatalf("one key per pod")
 	}
 }
 
@@ -95,7 +121,8 @@ func TestDetailsTellsLostTasks(t *testing.T) {
 		{name: "sidecar failed", status: failure("SidecarFailed", `sidecar "docker" exited with code 1`, 0)},
 	}
 	lost := ci.Disruption{Task: "build", Node: "node-1", Reason: "TerminationByKubelet", Message: "Pod was terminated in response to imminent node shutdown."}
-	recorded, _ := json.Marshal(lost)
+	recorded, _ := json.Marshal(disruptionRecord{Pod: "build-pod", Disruption: lost})
+	other, _ := json.Marshal(disruptionRecord{Pod: "other-pod", Disruption: lost})
 	for _, form := range forms {
 		for _, tt := range []struct {
 			name     string
@@ -117,8 +144,8 @@ func TestDetailsTellsLostTasks(t *testing.T) {
 				if tt.recorded {
 					pr := h.object(id)
 					a := pr.GetAnnotations()
-					a[disruptedPrefix+"build-pod"] = string(recorded)
-					a[disruptedPrefix+"other-pod"] = string(recorded)
+					a[disruptedKey("build-pod")] = string(recorded)
+					a[disruptedKey("other-pod")] = string(other)
 					pr.SetAnnotations(a)
 					h.update(pr)
 				}
@@ -165,11 +192,14 @@ func TestWatchRecordsDisruptedPods(t *testing.T) {
 		}
 	}
 	recorded := func(id ci.RunID, pod string) ci.Disruption {
-		var d ci.Disruption
-		if raw := h.object(id).GetAnnotations()[disruptedPrefix+pod]; raw != "" {
-			_ = json.Unmarshal([]byte(raw), &d)
+		var rec disruptionRecord
+		if raw := h.object(id).GetAnnotations()[disruptedKey(pod)]; raw != "" {
+			_ = json.Unmarshal([]byte(raw), &rec)
 		}
-		return d
+		if rec.Pod != pod {
+			return ci.Disruption{}
+		}
+		return rec.Disruption
 	}
 	eventually("a pod disrupted before the watch is recorded on its run", func() bool {
 		return recorded(reruns.ID, "build-pod").Reason == "TerminationByKubelet"
@@ -196,7 +226,7 @@ func TestWatchRecordsDisruptedPods(t *testing.T) {
 		t.Fatalf("a recorded pod that is gone: %+v", d)
 	}
 
-	if a := h.object(plain.ID).GetAnnotations(); a[disruptedPrefix+"plain-pod"] != "" {
+	if a := h.object(plain.ID).GetAnnotations(); a[disruptedKey("plain-pod")] != "" {
 		t.Fatalf("a run without reruns records no pod: %v", a)
 	}
 	cancel()
@@ -229,5 +259,59 @@ func TestPodWatchRemembers(t *testing.T) {
 	}
 	if got := h.r.disruptionLookup(h.object(run.ID))(""); got != nil {
 		t.Fatalf("no pod: %+v", got)
+	}
+}
+
+// heldRuns holds the first lookup of a run until released, as a pod's handler would be held when
+// the watch stops.
+type heldRuns struct {
+	cache.Indexer
+	once              sync.Once
+	entered, released chan struct{}
+}
+
+func (r *heldRuns) GetByKey(key string) (any, bool, error) {
+	r.once.Do(func() {
+		close(r.entered)
+		<-r.released
+	})
+	return r.Indexer.GetByKey(key)
+}
+
+// TestPodWatchStopsWhileHandlingAPod stops the watch while a pod's handler runs: the handler goes on
+// to take the watch's lock, so stopping must not hold it.
+func TestPodWatchStopsWhileHandlingAPod(t *testing.T) {
+	h := newRunnerHarness(t)
+	spec := demoSpec(pushTrigger(shaA))
+	spec.Reruns = &ci.Reruns{Left: 1}
+	run := h.create(spec, 1)
+	runs := &heldRuns{Indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}), entered: make(chan struct{}), released: make(chan struct{})}
+	if err := runs.Add(h.object(run.ID)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pw := newPodWatch(ctx, h.r, runs)
+	pw.watch(demoNS)
+	pod := disruptedPod("build-pod", run.ID.Name, "build", "node-1", "True", "TerminationByKubelet")
+	if _, err := h.kube.CoreV1().Pods(demoNS).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	<-runs.entered
+	cancel()
+	stopped := make(chan struct{})
+	go func() { pw.stop(); close(stopped) }()
+	time.Sleep(50 * time.Millisecond)
+	close(runs.released)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("stop waits on a pod's handler that waits on stop")
+	}
+	if _, ok := pw.pod(demoNS, "build-pod"); !ok {
+		t.Fatalf("the handler ran to its end")
+	}
+	pw.watch(demoNS + "-other")
+	if pw.factories[demoNS+"-other"] != nil {
+		t.Fatalf("a stopped watch watches no new namespace")
 	}
 }

@@ -2,6 +2,8 @@ package tekton
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
@@ -18,10 +20,11 @@ const (
 	// annotationReruns holds how a run reruns after disruptions (ci.Reruns, JSON).
 	annotationReruns = "octomaton.dev/reruns"
 	// disruptedPrefix starts the annotation that records, one per pod, a pod of the run that the
-	// cluster took away: disrupted.octomaton.dev/<pod> holds its ci.Disruption (JSON). A key of its
-	// own per pod lets each be written without reading the others; Tekton keeps pod names within 63
-	// characters, an annotation name's limit.
-	disruptedPrefix = "disrupted.octomaton.dev/"
+	// cluster took away: octomaton.dev/disrupted-<hash> holds its disruptionRecord (JSON), <hash>
+	// being the first 16 hex digits of the SHA-256 of the pod's name. A key of its own per pod lets
+	// each be written without reading the others; the hash keeps it within an annotation name's 63
+	// characters, which a pod's name may take whole.
+	disruptedPrefix = "octomaton.dev/disrupted-"
 	// labelPipelineRun names the PipelineRun a TaskRun or pod belongs to; Tekton sets it.
 	labelPipelineRun = "tekton.dev/pipelineRun"
 	// podsSyncLimit bounds the wait for a namespace's pods to be read the first time.
@@ -32,6 +35,18 @@ const (
 	// is long over, and its record is on the run.
 	rememberedFor = 24 * time.Hour
 )
+
+// disruptionRecord is a disrupted pod's record on its run.
+type disruptionRecord struct {
+	Pod string `json:"pod"`
+	ci.Disruption
+}
+
+// disruptedKey is the annotation that records a disrupted pod on its run.
+func disruptedKey(pod string) string {
+	sum := sha256.Sum256([]byte(pod))
+	return disruptedPrefix + hex.EncodeToString(sum[:8])
+}
 
 // disruptionOf returns how the cluster took a pod away, when its DisruptionTarget condition says it
 // did: the kubelet stopped it for a node shutdown or node pressure, it was evicted, preempted, or
@@ -58,6 +73,7 @@ type podWatch struct {
 	runs cache.Indexer
 
 	mu        sync.Mutex
+	stopped   bool
 	factories map[string]informers.SharedInformerFactory
 	indexers  map[string]cache.Indexer
 	// seen remembers the disrupted pods seen, by namespace/pod, until their record is on their run.
@@ -80,7 +96,7 @@ func newPodWatch(ctx context.Context, r *Runner, runs cache.Indexer) *podWatch {
 // (or podsSyncLimit passed), so that the disrupted pods there are known.
 func (d *podWatch) watch(namespace string) {
 	d.mu.Lock()
-	if _, ok := d.factories[namespace]; ok {
+	if _, ok := d.factories[namespace]; ok || d.stopped {
 		d.mu.Unlock()
 		return
 	}
@@ -115,11 +131,17 @@ func (d *podWatch) watch(namespace string) {
 	d.runner.logger().Info("Watching pods for disruptions", "namespace", namespace)
 }
 
-// stop stops watching pods, once Watch's context ended.
+// stop stops watching pods, once Watch's context ended. It waits for the handlers of pods still
+// running, which take d.mu, so it shuts the informers down without holding it.
 func (d *podWatch) stop() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.stopped = true
+	factories := make([]informers.SharedInformerFactory, 0, len(d.factories))
 	for _, f := range d.factories {
+		factories = append(factories, f)
+	}
+	d.mu.Unlock()
+	for _, f := range factories {
 		f.Shutdown()
 	}
 }
@@ -160,11 +182,11 @@ func (d *podWatch) saw(obj any) {
 		return
 	}
 	d.remember(pod, disruption)
-	key := disruptedPrefix + pod.Name
+	key := disruptedKey(pod.Name)
 	if pr.GetAnnotations()[key] != "" {
 		return
 	}
-	data, err := json.Marshal(disruption)
+	data, err := json.Marshal(disruptionRecord{Pod: pod.Name, Disruption: disruption})
 	if err != nil {
 		return
 	}
@@ -229,10 +251,10 @@ func (r *Runner) disruptionLookup(pr *unstructured.Unstructured) func(pod string
 		if pod == "" {
 			return nil
 		}
-		if raw := a[disruptedPrefix+pod]; raw != "" {
-			var d ci.Disruption
-			if err := json.Unmarshal([]byte(raw), &d); err == nil {
-				return &d
+		if raw := a[disruptedKey(pod)]; raw != "" {
+			var rec disruptionRecord
+			if err := json.Unmarshal([]byte(raw), &rec); err == nil && rec.Pod == pod {
+				return &rec.Disruption
 			}
 		}
 		if watcher == nil {

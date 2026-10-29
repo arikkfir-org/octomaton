@@ -643,9 +643,9 @@ webhook request.
 
 **Bookkeeping:** objects Octomaton creates carry the label `app.kubernetes.io/managed-by: octomaton` and labels and
 annotations under `octomaton.dev/` (`pipeline`, `event`, `repository-id`, `sha`, `concurrency-group`, `done`,
-`repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, `reruns`, …), and, on a run
-whose pipeline reruns after disruptions, `disrupted.octomaton.dev/<pod>` for each of its pods the cluster took away.
-They are never read as configuration.
+`repository`, `check-run-id`, `installation-id`, `delivery-id`, `context`, `reported`, `reruns`, `disrupted-<hash>`
+(one per pod the cluster took away from a run that reruns after disruptions), …). They are never read as
+configuration.
 
 ## Development
 

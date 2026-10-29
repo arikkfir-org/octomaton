@@ -153,7 +153,8 @@ subjects:
 Runs execute as Tekton's default ServiceAccount of the namespace unless their PipelineRun names another. The
 namespace is the isolation boundary: give its ServiceAccounts only what that repository's pipelines need, and
 annotate one that publishes or deploys with `octomaton.dev/branches: main` (and `octomaton.dev/tags: v*` for a
-pipeline that releases from version tags), so that no other branch's run can use it
+pipeline that releases from version tags), so that no other branch's run can use it, and with
+`octomaton.dev/organization-pipelines` for an organization pipeline that may use it from any branch
 ([security](https://github.com/arikkfir-org/octomaton#security)). Secrets a pipeline mounts live in this namespace too.
 
 ## 6. Declare a pipeline

@@ -20,6 +20,11 @@ const annotationBranches = "octomaton.dev/branches"
 // ServiceAccount. A pipeline that runs on version tags names a ServiceAccount carrying it.
 const annotationTags = "octomaton.dev/tags"
 
+// annotationOrganizationPipelines lists the organization pipelines (comma-separated names) whose runs
+// may use the ServiceAccount whatever their branch or tag: what such a run executes is read at a
+// default branch, so a branch can only bring it data. A repository pipeline never matches it.
+const annotationOrganizationPipelines = "octomaton.dev/organization-pipelines"
+
 // serviceAccountNames lists the ServiceAccounts a PipelineRun names for its tasks: the template's and
 // each task's override, without duplicates.
 func serviceAccountNames(pr *unstructured.Unstructured) ([]string, error) {
@@ -70,16 +75,30 @@ func refGlobs(value string) ([]string, error) {
 	return globs, nil
 }
 
-// checkServiceAccounts refuses a run that names a ServiceAccount whose octomaton.dev/branches or
-// octomaton.dev/tags annotation has no glob matching the run's branch or tag. A ServiceAccount with
-// either annotation is restricted: a branch's run must match a branch glob and a tag push a tag glob,
-// so one annotated with branches only refuses every tag push, and the other way round. A
-// ServiceAccount that doesn't exist is left to Tekton, which fails the run.
-func checkServiceAccounts(ctx context.Context, c *kubeClient, ns, path string, pr *unstructured.Unstructured, branch, tag string) error {
+// listNames parses an octomaton.dev/organization-pipelines value: the names it lists, without the
+// spaces around them.
+func listNames(value string) []string {
+	var names []string
+	for n := range strings.SplitSeq(value, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// checkServiceAccounts refuses a run that names a ServiceAccount restricted by its annotations unless
+// one of them admits the run: octomaton.dev/branches by a glob matching the run's branch,
+// octomaton.dev/tags by one matching its tag, octomaton.dev/organization-pipelines by naming the
+// run's pipeline, when that is an organization pipeline. A ServiceAccount with any of them is
+// restricted, so one annotated with branches only refuses every tag push, and the other way round.
+// A ServiceAccount that doesn't exist is left to Tekton, which fails the run.
+func checkServiceAccounts(ctx context.Context, c *kubeClient, ns string, spec ci.RunSpec, pr *unstructured.Unstructured) error {
 	names, err := serviceAccountNames(pr)
 	if err != nil {
-		return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("`%s`: %v.", path, err)}
+		return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("`%s`: %v.", spec.Path, err)}
 	}
+	t := spec.Trigger
 	for _, name := range names {
 		sa, err := c.ServiceAccount(ctx, ns, name)
 		if err != nil {
@@ -90,26 +109,28 @@ func checkServiceAccounts(ctx context.Context, c *kubeClient, ns, path string, p
 		if sa == nil {
 			continue
 		}
-		branches, onBranches := sa.Annotations[annotationBranches]
-		tags, onTags := sa.Annotations[annotationTags]
-		if !onBranches && !onTags {
+		restricted := carried(sa.Annotations)
+		if len(restricted) == 0 {
 			continue
 		}
-		branchGlobs, err := refGlobs(branches)
+		branchGlobs, err := refGlobs(sa.Annotations[annotationBranches])
 		if err != nil {
 			return invalidAnnotation(ns, name, annotationBranches, err)
 		}
-		tagGlobs, err := refGlobs(tags)
+		tagGlobs, err := refGlobs(sa.Annotations[annotationTags])
 		if err != nil {
 			return invalidAnnotation(ns, name, annotationTags, err)
 		}
-		if matchesAny(branchGlobs, branch) || matchesAny(tagGlobs, tag) {
+		orgPipelines := listNames(sa.Annotations[annotationOrganizationPipelines])
+		if matchesAny(branchGlobs, t.Branch) || matchesAny(tagGlobs, t.Tag) || spec.Organization && slices.Contains(orgPipelines, t.Pipeline) {
 			continue
 		}
-		if len(branchGlobs) == 0 && len(tagGlobs) == 0 {
-			return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("The PipelineRun names ServiceAccount `%s`, whose `%s` %s no %s, so no run may use it.", name, restriction(onBranches, onTags), lists(onBranches && onTags), refKinds(onBranches, onTags))}
+		annotations, kinds := describe(restricted)
+		if len(branchGlobs) == 0 && len(tagGlobs) == 0 && len(orgPipelines) == 0 {
+			return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("The PipelineRun names ServiceAccount `%s`, whose %s %s no %s, so no run may use it.", name, annotations, plural(len(restricted), "annotation lists", "annotations list"), kinds)}
 		}
-		return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("The PipelineRun names ServiceAccount `%s`, which only runs %s may use (its `%s` annotation%s), and %s.", name, allowed(branchGlobs, tagGlobs), restriction(onBranches, onTags), plural(onBranches && onTags), on(branch, tag))}
+		_, listsPipelines := sa.Annotations[annotationOrganizationPipelines]
+		return &ci.Refusal{Title: "Refused", Reason: fmt.Sprintf("The PipelineRun names ServiceAccount `%s`, which only runs %s may use (its %s %s), and %s.", name, allowed(branchGlobs, tagGlobs, orgPipelines), annotations, plural(len(restricted), "annotation", "annotations"), on(spec, listsPipelines))}
 	}
 	return nil
 }
@@ -123,46 +144,73 @@ func matchesAny(globs []string, ref string) bool {
 	return ref != "" && slices.ContainsFunc(globs, func(g string) bool { ok, _ := doublestar.Match(g, ref); return ok })
 }
 
-// restriction names the annotations a ServiceAccount carries, for a refusal.
-func restriction(onBranches, onTags bool) string {
+// restriction is an annotation that restricts a ServiceAccount, and what it lists, for a refusal.
+type restriction struct{ annotation, lists string }
+
+var restrictions = []restriction{
+	{annotationBranches, "branch"}, {annotationTags, "tag"}, {annotationOrganizationPipelines, "organization pipeline"},
+}
+
+// carried returns the restrictions among a ServiceAccount's annotations, in order.
+func carried(annotations map[string]string) []restriction {
+	var out []restriction
+	for _, r := range restrictions {
+		if _, ok := annotations[r.annotation]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// describe names restrictions' annotations, in code, and what they list: "`a` and `b`", "branch or
+// tag".
+func describe(restricted []restriction) (annotations, kinds string) {
+	var names, lists []string
+	for _, r := range restricted {
+		names, lists = append(names, "`"+r.annotation+"`"), append(lists, r.lists)
+	}
+	return joinList(names, "and"), joinList(lists, "or")
+}
+
+// joinList joins items as a sentence does: "a", "a and b", "a, b and c".
+func joinList(items []string, conjunction string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " " + conjunction + " " + items[len(items)-1]
+}
+
+func plural(n int, one, more string) string {
+	if n > 1 {
+		return more
+	}
+	return one
+}
+
+// on describes the run being refused: its branch or tag and, when the ServiceAccount lists
+// organization pipelines, its pipeline.
+func on(spec ci.RunSpec, withPipeline bool) string {
+	t := spec.Trigger
+	run := "this run"
+	if withPipeline {
+		kind := "repository pipeline"
+		if spec.Organization {
+			kind = "organization pipeline"
+		}
+		run = fmt.Sprintf("this run of %s `%s`", kind, t.Pipeline)
+	}
 	switch {
-	case onBranches && onTags:
-		return annotationBranches + "` and `" + annotationTags
-	case onTags:
-		return annotationTags
+	case t.Tag != "":
+		return fmt.Sprintf("%s is of tag %q", run, t.Tag)
+	case t.Branch != "":
+		return fmt.Sprintf("%s is on branch %q", run, t.Branch)
 	default:
-		return annotationBranches
+		return run + " has no branch"
 	}
 }
 
-// refKinds names what the annotations a ServiceAccount carries list.
-func refKinds(onBranches, onTags bool) string {
-	switch {
-	case onBranches && onTags:
-		return "branch or tag"
-	case onTags:
-		return "tag"
-	default:
-		return "branch"
-	}
-}
-
-func lists(both bool) string {
-	if both {
-		return "annotations list"
-	}
-	return "annotation lists"
-}
-
-func plural(both bool) string {
-	if both {
-		return "s"
-	}
-	return ""
-}
-
-// allowed describes the runs a ServiceAccount's globs let through.
-func allowed(branchGlobs, tagGlobs []string) string {
+// allowed describes the runs a ServiceAccount's globs and organization pipelines let through.
+func allowed(branchGlobs, tagGlobs, orgPipelines []string) string {
 	var parts []string
 	if len(branchGlobs) > 0 {
 		parts = append(parts, "on branches matching "+quoteAll(branchGlobs))
@@ -170,17 +218,17 @@ func allowed(branchGlobs, tagGlobs []string) string {
 	if len(tagGlobs) > 0 {
 		parts = append(parts, "of tags matching "+quoteAll(tagGlobs))
 	}
+	if len(orgPipelines) > 0 {
+		parts = append(parts, "of organization "+plural(len(orgPipelines), "pipeline ", "pipelines ")+codeList(orgPipelines))
+	}
 	return strings.Join(parts, " or ")
 }
 
-// on describes the run being refused.
-func on(branch, tag string) string {
-	switch {
-	case tag != "":
-		return fmt.Sprintf("this run is of tag %q", tag)
-	case branch != "":
-		return fmt.Sprintf("this run is on branch %q", branch)
-	default:
-		return "this run has no branch"
+// codeList lists items in code: "`a`, `b`".
+func codeList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = "`" + item + "`"
 	}
+	return strings.Join(quoted, ", ")
 }

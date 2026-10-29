@@ -177,7 +177,11 @@ type RunSpec struct {
 	// SecretsFrom, when set, is the repository whose namespace holds the Secrets: an organization
 	// pipeline's organization repository. The runner copies them into the run's namespace, owned by
 	// the run, and the run mounts the copies.
-	SecretsFrom     *Repository
+	SecretsFrom *Repository
+	// Organization is set for an organization pipeline: its settings were read at the organization
+	// repository's default branch and its definition at a default branch, so nothing of the run's
+	// branch or tag changes what it runs.
+	Organization    bool
 	TaskReports     bool
 	LiveTaskReports bool
 	Concurrency     Concurrency

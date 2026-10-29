@@ -116,8 +116,8 @@ pipelines:
         branches: [main]
         types: [checks_requested]      # default; or destroyed
       push:
-        branches: [main]               # branch globs
-        tags: ["v*"]                   # tag globs
+        branches: [main]               # branch globs; "**" = every branch
+        tags: ["v*"]                   # tag globs; omitting both = every push, tags included
         paths: []                      # optional
       comment:                         # pull request comment command, e.g. "/deploy staging"
         pattern: "^/deploy\\b"         # regexp on the comment's first line
@@ -191,7 +191,8 @@ file of the organization repository. Their runs belong to the repository: its na
 token. A repository pipeline with the name or check name of an organization pipeline is a configuration error of that
 repository, so no repository can replace one. Organization pipelines can't use `schedule`. Since they are read at the
 organization repository's default branch whatever triggers them, they may list `secrets` and ask for a token for every
-repository on any trigger. Their Secrets live with their definition: `secrets` names Secrets of the organization
+repository on any trigger, and a ServiceAccount restricted to other branches may admit them by name
+(`octomaton.dev/organization-pipelines`, [Security](#security)). Their Secrets live with their definition: `secrets` names Secrets of the organization
 repository's namespace, which each run gets copies of ([Pipeline settings](#pipeline-settings)). `organization` in any other repository, or when the setting is unset, is a
 configuration error. Without the setting, the file or the section, there are no organization pipelines. A repository
 without its own `.octomaton.yaml` still runs them, and an unreadable or invalid organization repository configuration
@@ -511,17 +512,27 @@ from forks get no answer at all ([Security](#security)).
 - A tag push runs the definitions of the default branch, never the tagged commit's: pushing a tag takes only write
   access and can name any commit, so a tag could otherwise run an unreviewed pipeline, with the identities the
   tenant's ServiceAccounts admit for tags.
-- A ServiceAccount in a tenant namespace may carry the annotations `octomaton.dev/branches` and `octomaton.dev/tags`:
-  comma-separated branch globs, as in `on.push.branches`, and tag globs, as in `on.push.tags`. A run that names it
-  (`spec.taskRunTemplate.serviceAccountName` or `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch
-  matches a branch glob or, for a tag push, its tag matches a tag glob. The run's branch is the branch whose code runs:
-  the pushed branch, a pull request's head branch (also for comment commands and review requests), the merge group's
-  branch, or the default branch for schedules; a tag push has none, so a ServiceAccount annotated with branches alone
-  refuses every tag push, and one annotated with tags alone every branch's run. Without either annotation, every run
-  may use the ServiceAccount; an empty or invalid one lets none. The check fails closed: a named ServiceAccount
-  Octomaton can't read (other than one that doesn't exist, which Tekton fails) refuses the run too. A run that names no
-  ServiceAccount runs as Tekton's default, which is never checked. These are the only settings outside
-  `.octomaton.yaml`: they sit on the identity, where the repository can't change them.
+- A ServiceAccount in a tenant namespace may carry the annotations `octomaton.dev/branches`, `octomaton.dev/tags` and
+  `octomaton.dev/organization-pipelines`: comma-separated branch globs, as in `on.push.branches`, tag globs, as in
+  `on.push.tags`, and organization pipeline names. A run that names it (`spec.taskRunTemplate.serviceAccountName` or
+  `spec.taskRunSpecs[].serviceAccountName`) is refused unless its branch matches a branch glob, its tag (for a tag
+  push) matches a tag glob, or it is a run of an organization pipeline the third annotation lists, whatever its branch
+  or tag. The run's branch is the branch whose code runs: the pushed branch, a pull request's head branch (also for
+  comment commands and review requests), the merge group's branch, or the default branch for schedules; a tag push has
+  none, so a ServiceAccount annotated with branches alone refuses every tag push, and one annotated with tags alone
+  every branch's run. Without any of the annotations, every run may use the ServiceAccount; an empty or invalid one
+  lets none. The check fails closed: a named ServiceAccount Octomaton can't read (other than one that doesn't exist,
+  which Tekton fails) refuses the run too. A run that names no ServiceAccount runs as Tekton's default, which is never
+  checked. These are the only settings outside `.octomaton.yaml`: they sit on the identity, where the repository can't
+  change them.
+- `octomaton.dev/organization-pipelines` lets a branch reach an account restricted to `main` only through organization
+  pipelines, whose definitions come from default branches; a repository's own pipeline never matches it, whatever its
+  name. What a branch still controls is data: the repository at the commit, and the run's context (the branch's name,
+  commit messages, a pull request's title). So list only a pipeline that treats them as data: its params reach its
+  steps through `env`, never substituted into a `script` (Tekton pastes `$(params.…)` into the script's text, and a
+  branch may be called `a$(curl…|sh)`), it runs nothing of the repository under test (no build, plugin, hook or tool
+  configuration it holds), and it restores no cache a branch's run can write
+  ([design](docs/octomaton/designs/organization-pipeline-accounts.md)).
 - Namespaces, not pipelines, are the isolation boundary: pull requests can change their own pipeline files and thereby
   use their namespace's service accounts, except those restricted to other branches.
 

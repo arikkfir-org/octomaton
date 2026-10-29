@@ -55,8 +55,8 @@ func (s *Service) prepare(ctx context.Context, gh ci.Installation, t ci.Trigger,
 	}
 	spec := ci.RunSpec{
 		Trigger: t, Definition: data, Path: p.PipelineRun.String(), Params: params, Timeout: p.TimeoutDuration(),
-		Token: p.Token(), Secrets: p.Secrets, TaskReports: p.TaskChecks, LiveTaskReports: p.LiveTaskChecks, Concurrency: conc,
-		Reruns: p.Reruns(),
+		Token: p.Token(), Secrets: p.Secrets, Organization: p.Organization(), TaskReports: p.TaskChecks, LiveTaskReports: p.LiveTaskChecks,
+		Concurrency: conc, Reruns: p.Reruns(),
 	}
 	if p.Organization() && len(p.Secrets) > 0 {
 		// An organization pipeline's Secrets live with its definition, in the organization repository's namespace.

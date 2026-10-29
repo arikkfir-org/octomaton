@@ -87,7 +87,7 @@ The full schema and template context are in the
 
 ## Tenancy and identity
 
-**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it (and `octomaton.dev/tags: v*` where it also releases versions, [versioned releases](releases.md)). The annotations sit on the identity, in `delivery`, where a pull request can't change them, and they are the only Octomaton settings outside `.octomaton.yaml`.
+**Decision**: each repository runs in a namespace of its own, `ci-<repository>`. Tekton's default ServiceAccount there, `pipeline`, holds no Google Cloud role. A pipeline that needs Google Cloud names a ServiceAccount of its own, whose Workload Identity principal holds the roles, and one that publishes is annotated `octomaton.dev/branches: main`, which Octomaton enforces: no other branch's run may use it (and `octomaton.dev/tags: v*` where it also releases versions, [versioned releases](releases.md); `octomaton.dev/organization-pipelines` where an organization pipeline may use it from any branch, [organization pipelines on restricted ServiceAccounts](organization-pipeline-accounts.md)). The annotations sit on the identity, in `delivery`, where a pull request can't change them, and they are the only Octomaton settings outside `.octomaton.yaml`.
 
 ```mermaid
 flowchart LR
@@ -130,10 +130,10 @@ Fin's `ci-fin-preview` and `ci-fin-ci`, and `ci-octomaton-ci`, carry no annotati
 
 | Item | Value |
 | --- | --- |
-| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none. `octomaton.dev/tags` does the same for tag pushes, added with [versioned releases](releases.md) |
-| Check | Before creating a run, Octomaton reads each ServiceAccount its PipelineRun names: `spec.taskRunTemplate.serviceAccountName` and `spec.taskRunSpecs[].serviceAccountName`, the only fields that name one in a `tekton.dev/v1` PipelineRun, the one version Octomaton accepts. When one carries the annotation and the run's branch matches none of its globs, the run is refused: no PipelineRun, and its check fails with the reason |
-| Fails closed | A named ServiceAccount Octomaton can't read (a missing permission, an API error), an empty or invalid annotation, and a name that isn't a string refuse the run the same way. A run goes through only when every named ServiceAccount was read and is unannotated or matches |
-| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch: it matches a glob of `octomaton.dev/tags` or nothing |
+| Annotation | `octomaton.dev/branches` on a ServiceAccount in a tenant namespace: comma-separated branch globs, as in `on.push.branches`. Without it, every branch may use the ServiceAccount; an empty or invalid one lets none. `octomaton.dev/tags` does the same for tag pushes, added with [versioned releases](releases.md), and `octomaton.dev/organization-pipelines` names organization pipelines that may use it on any branch or tag ([organization pipelines on restricted ServiceAccounts](organization-pipeline-accounts.md)) |
+| Check | Before creating a run, Octomaton reads each ServiceAccount its PipelineRun names: `spec.taskRunTemplate.serviceAccountName` and `spec.taskRunSpecs[].serviceAccountName`, the only fields that name one in a `tekton.dev/v1` PipelineRun, the one version Octomaton accepts. When one carries any of the annotations and none admits the run (no branch glob matches its branch, no tag glob its tag, and it is not a run of an organization pipeline the account lists), the run is refused: no PipelineRun, and its check fails with the reason |
+| Fails closed | A named ServiceAccount Octomaton can't read (a missing permission, an API error), an empty or invalid annotation, and a name that isn't a string refuse the run the same way. A run goes through only when every named ServiceAccount was read and is unannotated or admits it |
+| Run's branch | The branch whose code runs: the pushed branch (`push`); the head branch (`pull_request`, `comment`, `review_request`); the merge group's branch, `gh-readonly-queue/…` (`merge_group`); the default branch (`schedule`). A tag push has no branch: it matches a glob of `octomaton.dev/tags` or nothing. A run of a listed organization pipeline is admitted whatever its branch or tag |
 | Not checked | A PipelineRun that names no ServiceAccount: it runs as Tekton's default, which must never carry the annotation or a role. A ServiceAccount that doesn't exist: Tekton fails the run |
 | Permission | ClusterRole `octomaton-tenant` gets `get` on `serviceaccounts` |
 
@@ -218,7 +218,8 @@ flowchart LR
   garbage-collected with the run.
 - Pull requests can change their own pipeline files, so they can name any ServiceAccount in their namespace. Namespaces
   separate repositories, and within a namespace a ServiceAccount annotated `octomaton.dev/branches` is refused to every
-  other branch ([ServiceAccount branches](#serviceaccount-branches)). A new ServiceAccount, annotated or not, has no
+  other branch's run but those of the organization pipelines its `octomaton.dev/organization-pipelines` lists, which
+  are read at default branches ([ServiceAccount branches](#serviceaccount-branches)). A new ServiceAccount, annotated or not, has no
   role until `infra` grants one, since roles bind to named principals.
 
 ## Rollout

@@ -544,7 +544,7 @@ The server takes no arguments: environment variables configure it, and it exits 
 | --- | --- | --- |
 | `OCTOMATON_GITHUB_APP_ID` | required | the GitHub App's ID |
 | `OCTOMATON_GITHUB_PRIVATE_KEY` | required | the App's PEM private key (PKCS#1 or PKCS#8) |
-| `OCTOMATON_GITHUB_WEBHOOK_SECRET` | required | the App's webhook secret |
+| `OCTOMATON_GITHUB_WEBHOOK_SECRET` | required | the App's webhook secret, or several, one per line; a delivery signed with any one of them is accepted |
 | `OCTOMATON_GITHUB_ALLOWED_OWNERS` | required | users and organizations whose installations are served, comma-separated; installations on any other owner are ignored |
 | `OCTOMATON_TEKTON_DASHBOARD_URL` | none | Tekton Dashboard base URL that check runs link to |
 | `OCTOMATON_NAMESPACE_TEMPLATE` | `ci-{{ .Repository.Name }}` | namespace of a repository's runs, rendered then sanitized |
@@ -563,8 +563,15 @@ The server takes no arguments: environment variables configure it, and it exits 
   every run of characters outside `[a-z0-9-]` replaced by `-`, leading and trailing `-` trimmed, cut to 63 characters.
   Overrides (`owner/name`, case-insensitive) win. A namespace that does not exist fails the check with "repository not
   onboarded".
+- `OCTOMATON_GITHUB_WEBHOOK_SECRET` holds one secret per line, each trimmed of surrounding whitespace (a trailing
+  `\r` included), as a single secret always was; empty lines are skipped, and a value of empty lines alone is missing.
+  A secret may contain spaces. Several secrets let a host rotate the App's webhook secret without dropping
+  deliveries, since GitHub switches at once and the servers read the setting only at startup: store the new secret on
+  a line beside the old one and roll the servers, switch the App to the new secret once every replica holds both, then
+  store the new secret alone and roll again.
 - `OCTOMATON_RELAY_URLS` receive the original body and GitHub headers (signatures included), asynchronously, with a
-  10 s timeout.
+  10 s timeout. A receiver that verifies the signature does so with its own copy of the secret, which a rotation
+  must update too.
 
 Telemetry follows where the server runs. On GKE (a Kubernetes pod with a GCP metadata server), logs are JSON on stdout
 with the fields Cloud Logging reads, including the links to traces, and metrics and traces go to Cloud Monitoring and

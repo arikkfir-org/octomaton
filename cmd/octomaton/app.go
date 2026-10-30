@@ -139,7 +139,7 @@ func (a *app) wireServer() {
 func (a *app) wireWebhook() http.Handler {
 	a.pool = octohttp.NewPool(a.cfg.Webhook.Workers, a.cfg.Webhook.QueueSize, webhookJobTimeout, component("webhook"), a.metrics)
 	hook := &octohttp.Handler{
-		Secret:  []byte(a.cfg.GitHub.WebhookSecret),
+		Secrets: a.cfg.GitHub.WebhookSecrets(),
 		Decoder: a.github,
 		Events:  a.runs,
 		Pool:    a.pool,

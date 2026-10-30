@@ -134,7 +134,7 @@ func setup(t *testing.T) *env {
 	svc := &runs.Service{Host: app, Runner: runner, OrganizationRepository: "tooling", Logger: logger, Metrics: m}
 	pool := octohttp.NewPool(2, 16, time.Minute, logger, m)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
-	handler := &octohttp.Handler{Secret: []byte(secret), Decoder: app, Events: svc, Pool: pool, Dedupe: octohttp.NewDedupe(100, time.Hour), Metrics: m, Logger: logger}
+	handler := &octohttp.Handler{Secrets: [][]byte{[]byte(secret)}, Decoder: app, Events: svc, Pool: pool, Dedupe: octohttp.NewDedupe(100, time.Hour), Metrics: m, Logger: logger}
 	rep := &reports.Service{Host: app, Runner: runner, Logger: logger, Resume: svc.Resume, ReleaseNext: svc.ReleaseNext}
 	return &env{t: t, gh: gh, dyn: dyn, runner: runner, handler: handler, reports: rep}
 }

@@ -44,7 +44,8 @@ type Forwarder interface {
 // being handled or was handled; one whose handling failed is forgotten, so its redelivery (GitHub
 // keeps the delivery's ID) is handled again.
 type Handler struct {
-	Secret  []byte
+	// Secrets are the App's webhook secrets: a delivery signed with any one of them is accepted.
+	Secrets [][]byte
 	Decoder Decoder
 	Events  EventHandler
 	Pool    *Pool
@@ -95,7 +96,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if !VerifySignature(h.Secret, body, r.Header.Get(SignatureHeader)) {
+	if !VerifySignature(h.Secrets, body, r.Header.Get(SignatureHeader)) {
 		reject(http.StatusUnauthorized, "signature", "invalid signature")
 		return
 	}

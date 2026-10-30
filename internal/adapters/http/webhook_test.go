@@ -26,27 +26,33 @@ var testSecret = []byte("s3cr3t")
 func TestVerifySignature(t *testing.T) {
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	valid := Sign(testSecret, body)
+	other := []byte("other")
 	tests := []struct {
-		name   string
-		secret []byte
-		body   []byte
-		header string
-		want   bool
+		name    string
+		secrets [][]byte
+		body    []byte
+		header  string
+		want    bool
 	}{
-		{name: "valid", secret: testSecret, body: body, header: valid, want: true},
-		{name: "wrong secret", secret: []byte("other"), body: body, header: valid},
-		{name: "tampered body", secret: testSecret, body: []byte(`{"zen":"x"}`), header: valid},
-		{name: "missing header", secret: testSecret, body: body, header: ""},
-		{name: "sha1 prefix", secret: testSecret, body: body, header: strings.Replace(valid, "sha256=", "sha1=", 1)},
-		{name: "prefix only", secret: testSecret, body: body, header: "sha256="},
-		{name: "not hex", secret: testSecret, body: body, header: "sha256=zzzz"},
-		{name: "truncated digest", secret: testSecret, body: body, header: valid[:len(valid)-2]},
-		{name: "uppercase prefix", secret: testSecret, body: body, header: strings.Replace(valid, "sha256=", "SHA256=", 1)},
-		{name: "empty secret never verifies", secret: nil, body: body, header: Sign(nil, body)},
+		{name: "valid", secrets: [][]byte{testSecret}, body: body, header: valid, want: true},
+		{name: "wrong secret", secrets: [][]byte{other}, body: body, header: valid},
+		{name: "first of two secrets", secrets: [][]byte{testSecret, other}, body: body, header: valid, want: true},
+		{name: "second of two secrets", secrets: [][]byte{other, testSecret}, body: body, header: valid, want: true},
+		{name: "neither of two secrets", secrets: [][]byte{other, []byte("another")}, body: body, header: valid},
+		{name: "tampered body", secrets: [][]byte{testSecret}, body: []byte(`{"zen":"x"}`), header: valid},
+		{name: "missing header", secrets: [][]byte{testSecret}, body: body, header: ""},
+		{name: "sha1 prefix", secrets: [][]byte{testSecret}, body: body, header: strings.Replace(valid, "sha256=", "sha1=", 1)},
+		{name: "prefix only", secrets: [][]byte{testSecret}, body: body, header: "sha256="},
+		{name: "not hex", secrets: [][]byte{testSecret}, body: body, header: "sha256=zzzz"},
+		{name: "truncated digest", secrets: [][]byte{testSecret}, body: body, header: valid[:len(valid)-2]},
+		{name: "uppercase prefix", secrets: [][]byte{testSecret}, body: body, header: strings.Replace(valid, "sha256=", "SHA256=", 1)},
+		{name: "no secrets never verify", body: body, header: Sign(nil, body)},
+		{name: "empty secret never verifies", secrets: [][]byte{nil}, body: body, header: Sign(nil, body)},
+		{name: "empty secret beside another never verifies", secrets: [][]byte{testSecret, {}}, body: body, header: Sign(nil, body)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := VerifySignature(tt.secret, tt.body, tt.header); got != tt.want {
+			if got := VerifySignature(tt.secrets, tt.body, tt.header); got != tt.want {
 				t.Fatalf("VerifySignature() = %v, want %v", got, tt.want)
 			}
 		})
@@ -177,7 +183,7 @@ func newHandler(t *testing.T, decoder Decoder, events EventHandler, queue int) (
 	pool := NewPool(1, queue, time.Second, discardLogger(), m.Metrics)
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 	relay := &stubRelay{}
-	return &Handler{Secret: testSecret, Decoder: decoder, Events: events, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m.Metrics, Logger: discardLogger(), Relay: relay}, relay, m
+	return &Handler{Secrets: [][]byte{testSecret}, Decoder: decoder, Events: events, Pool: pool, Dedupe: NewDedupe(100, time.Hour), Metrics: m.Metrics, Logger: discardLogger(), Relay: relay}, relay, m
 }
 
 func post(h http.Handler, event, delivery string, body []byte, sign bool) *httptest.ResponseRecorder {
@@ -252,6 +258,34 @@ func TestHandler(t *testing.T) {
 			relay.mu.Unlock()
 			if relayed != tt.wantRelay {
 				t.Fatalf("relayed = %v, want %v", relayed, tt.wantRelay)
+			}
+		})
+	}
+}
+
+func TestHandlerAcceptsAnyOfItsSecrets(t *testing.T) {
+	previous, next := []byte("previous"), []byte("next")
+	tests := []struct {
+		name       string
+		secret     []byte
+		wantStatus int
+	}{
+		{name: "signed with the first secret", secret: previous, wantStatus: http.StatusOK},
+		{name: "signed with the second secret", secret: next, wantStatus: http.StatusOK},
+		{name: "signed with neither", secret: testSecret, wantStatus: http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, _ := newHandler(t, stubDecoder{}, make(handled, 1), 10)
+			h.Secrets = [][]byte{previous, next}
+			body := `{"zen":"z"}`
+			req := httptest.NewRequest(http.MethodPost, "/github/hooks", strings.NewReader(body))
+			req.Header.Set("X-GitHub-Event", "ping")
+			req.Header.Set(SignatureHeader, Sign(tt.secret, []byte(body)))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d (%s), want %d", rec.Code, rec.Body.String(), tt.wantStatus)
 			}
 		})
 	}

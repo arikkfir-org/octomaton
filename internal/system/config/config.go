@@ -58,14 +58,18 @@ type Webhook struct {
 type GitHub struct {
 	AppID AppID `envconfig:"APP_ID"`
 	// PrivateKey is the App's PEM-encoded RSA private key (PKCS#1, as GitHub issues it, or PKCS#8).
-	PrivateKey    string `envconfig:"PRIVATE_KEY"`
+	PrivateKey string `envconfig:"PRIVATE_KEY"`
+	// WebhookSecret holds the App's webhook secrets, one per line: a delivery signed with any one of
+	// them is accepted, so a host can rotate the App's secret without dropping deliveries. Each line
+	// is trimmed of surrounding whitespace, as a single secret always was, and empty lines are skipped.
 	WebhookSecret string `envconfig:"WEBHOOK_SECRET"`
 	// AllowedOwners are the users and organizations whose installations are served. At least one is
 	// required: an installation on any other owner is ignored, and a server with none would run the
 	// pipelines of anyone who installs the App.
 	AllowedOwners []string `envconfig:"ALLOWED_OWNERS"`
 
-	key *rsa.PrivateKey
+	key     *rsa.PrivateKey
+	secrets [][]byte
 }
 
 // AppID is a GitHub App ID. Surrounding whitespace, like the newline a secret often ends with, is
@@ -192,7 +196,7 @@ func (g *GitHub) validate() []string {
 	} else {
 		g.key = key
 	}
-	if g.WebhookSecret = strings.TrimSpace(g.WebhookSecret); g.WebhookSecret == "" {
+	if g.secrets = webhookSecrets(g.WebhookSecret); len(g.secrets) == 0 {
 		problems = append(problems, "OCTOMATON_GITHUB_WEBHOOK_SECRET is required")
 	}
 	if len(g.AllowedOwners) == 0 {
@@ -209,6 +213,23 @@ func (g *GitHub) validate() []string {
 // Key returns the App's parsed private key.
 func (g *GitHub) Key() *rsa.PrivateKey {
 	return g.key
+}
+
+// WebhookSecrets returns the App's webhook secrets, one for each non-empty line of WebhookSecret.
+func (g *GitHub) WebhookSecrets() [][]byte {
+	return g.secrets
+}
+
+// webhookSecrets splits value into its lines, trimming each (a trailing \r included) and skipping
+// empty ones.
+func webhookSecrets(value string) [][]byte {
+	var secrets [][]byte
+	for line := range strings.Lines(value) {
+		if line = strings.TrimSpace(line); line != "" {
+			secrets = append(secrets, []byte(line))
+		}
+	}
+	return secrets
 }
 
 func (p *Pod) setDefaults() {

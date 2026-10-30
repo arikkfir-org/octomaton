@@ -11,11 +11,10 @@ import (
 const SignatureHeader = "X-Hub-Signature-256"
 
 // VerifySignature reports whether header ("sha256=<hex>") is the HMAC-SHA256 of
-// body keyed with secret. The comparison is constant-time.
-func VerifySignature(secret, body []byte, header string) bool {
-	if len(secret) == 0 {
-		return false
-	}
+// body keyed with any one of secrets, so deliveries signed with an old or a new
+// secret both pass while the App's secret is rotated. Every secret is tried,
+// each compared in constant time; an empty secret never verifies.
+func VerifySignature(secrets [][]byte, body []byte, header string) bool {
 	const prefix = "sha256="
 	if !strings.HasPrefix(header, prefix) {
 		return false
@@ -24,9 +23,18 @@ func VerifySignature(secret, body []byte, header string) bool {
 	if err != nil || len(got) != sha256.Size {
 		return false
 	}
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(body)
-	return hmac.Equal(got, mac.Sum(nil))
+	ok := false
+	for _, secret := range secrets {
+		if len(secret) == 0 {
+			continue
+		}
+		mac := hmac.New(sha256.New, secret)
+		mac.Write(body)
+		if hmac.Equal(got, mac.Sum(nil)) {
+			ok = true
+		}
+	}
+	return ok
 }
 
 // Sign returns the X-Hub-Signature-256 header value for body (used by tests and tools).

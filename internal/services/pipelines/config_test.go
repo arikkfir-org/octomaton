@@ -187,6 +187,9 @@ func TestParseProblems(t *testing.T) {
 		{name: "unknown top-level key", yaml: head + "extra: true\n", want: "field extra not found at the top level"},
 		{name: "unknown pipeline key", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, retries: 3}\n", want: "field retries not found in pipeline"},
 		{name: "unknown trigger", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {release: {}}}\n", want: "field release not found in on"},
+		{name: "labels without a label type", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {types: [opened], labels: [deploy]}}}\n", want: "on.pull_request.labels: filters only the types labeled and unlabeled"},
+		{name: "labels with the default types", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {labels: [deploy]}}}\n", want: "on.pull_request.labels: filters only the types labeled and unlabeled"},
+		{name: "empty label", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {pull_request: {types: [unlabeled], labels: [\"\"]}}}\n", want: "on.pull_request.labels[0]: a label's name must not be empty"},
 		{name: "unknown trigger key", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {branch: [main]}}}\n", want: "field branch not found in on.push"},
 		{name: "duplicate YAML key", yaml: head + "  - name: ci\n    name: cd\n    pipelineRun: a.yaml\n    on: {push: {}}\n", want: "already defined"},
 		{name: "wrong type", yaml: head + "  - {name: ci, pipelineRun: a.yaml, on: {push: {}}, taskChecks: sometimes}\n", want: "cannot unmarshal"},
@@ -321,7 +324,21 @@ pipelines:
       revision: "{{ .Revision }}"
       pr: "{{ .PullRequest.Number }}"
       safe-pr: "{{ if .PullRequest }}{{ .PullRequest.Number }}{{ else }}none{{ end }}"
+  - name: labels
+    pipelineRun: a.yaml
+    on: {pull_request: {}}
+    params:
+      extra-checks: '{{ $on := "false" }}{{ range .PullRequest.Labels }}{{ if eq . "run-extra-checks" }}{{ $on = "true" }}{{ end }}{{ end }}{{ $on }}'
 `)
+	for labels, want := range map[string]string{"": "false", "fix": "false", "fix,run-extra-checks": "true"} {
+		tr := ci.Trigger{Event: ci.EventPullRequest, PullRequest: &ci.PullRequest{Number: 1}}
+		if labels != "" {
+			tr.PullRequest.Labels = strings.Split(labels, ",")
+		}
+		if got, err := cfg.Pipeline("labels").RenderParams(ContextOf(tr)); err != nil || got["extra-checks"] != want {
+			t.Fatalf("RenderParams(labels %q) = %v, %v, want extra-checks %s", labels, got, err, want)
+		}
+	}
 	p := cfg.Pipeline("ci")
 	got, err := p.RenderParams(SampleFor("pull_request"))
 	if err != nil || got["pr"] != "1" || got["safe-pr"] != "1" || got["revision"] == "" {

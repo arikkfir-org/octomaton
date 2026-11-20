@@ -448,7 +448,7 @@ func matchEvent(t ci.Trigger, draft bool) pipelines.Event {
 	}
 	switch {
 	case t.PullRequest != nil:
-		ev.Branch = t.PullRequest.BaseRef
+		ev.Branch, ev.Label = t.PullRequest.BaseRef, t.PullRequest.Label
 	case t.MergeGroup != nil:
 		ev.Branch = strings.TrimPrefix(t.MergeGroup.BaseRef, "refs/heads/")
 	default:

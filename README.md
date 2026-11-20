@@ -109,6 +109,7 @@ pipelines:
       pull_request:
         branches: [main]               # base-branch globs; omitted = all
         types: [opened, reopened, synchronize, ready_for_review]  # default; also closed, converted_to_draft, edited…
+        labels: [run-extra-checks]     # optional, with the types labeled or unlabeled: only these labels trigger
         drafts: true                   # default; false skips draft pull requests (not their endings)
         paths: ["**"]                  # optional globs; no match = check reported as skipped
         pathsIgnore: []                # optional
@@ -163,7 +164,7 @@ organization:                          # only in the organization repository: pi
 
 | Trigger | Matches | Notes |
 | --- | --- | --- |
-| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests, but not their endings. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. `closed` (merged or not: `.PullRequest.Merged` tells) and `converted_to_draft` are endings: each runs the pipeline at the head commit as it was when the event fired, as a run of its own that only its redelivery finds, outside the default concurrency group (below), so by default no run supersedes it and it supersedes none. Closing a pull request does not cancel its other runs. `reopened`, and `ready_for_review` for a pipeline with `drafts: false`, resume a pull request after a time the pipeline did not run in (it was closed, or a draft the pipeline skipped): each runs it again at the same commit, as the next attempt, so that whatever an ending undid is done again. |
+| `pull_request` | the listed actions (`types`) on pull requests whose base branch matches `branches` | Default types: `opened`, `reopened`, `synchronize`, `ready_for_review`. `drafts: false` skips draft pull requests, but not their endings. `labels` lists the labels whose adding (`labeled`) or removing (`unlabeled`) triggers the pipeline, by their exact names, case-sensitive (no globs): any other label starts no run and creates no check. It filters no other action, and is an error unless `types` lists `labeled` or `unlabeled`; omitted, every label triggers. `edited`, `labeled` and `unlabeled` change the pull request, not its commit: on an open pull request, each runs the pipeline again at the same commit, as the next attempt, which supersedes the one before; only its redelivery finds that run. `closed` (merged or not: `.PullRequest.Merged` tells) and `converted_to_draft` are endings: each runs the pipeline at the head commit as it was when the event fired, as a run of its own that only its redelivery finds, outside the default concurrency group (below), so by default no run supersedes it and it supersedes none. Closing a pull request does not cancel its other runs. `reopened`, and `ready_for_review` for a pipeline with `drafts: false`, resume a pull request after a time the pipeline did not run in (it was closed, or a draft the pipeline skipped): each runs it again at the same commit, as the next attempt, so that whatever an ending undid is done again. |
 | `merge_group` | the listed actions (`types`) on merge groups whose base branch matches `branches` | Types: `checks_requested` (the default) and `destroyed`. Also accepts `paths`/`pathsIgnore`. A destroyed merge group cancels its `checks_requested` runs, then runs the pipelines that list `destroyed` at its head (the commit is read by its SHA: unless the group merged, no branch holds it any more), as a run of its own; `.MergeGroup.Reason` says why. An invalid configuration is reported on `checks_requested` only. |
 | `push` | pushes of branches matching `branches` and tags matching `tags` | As in GitHub Actions: with neither set every push matches; with only `branches`, tag pushes are ignored; with only `tags`, branch pushes are ignored. Deleted refs and merge queue branches never match. |
 | `comment` | a pull request comment whose first line matches `pattern` (which must start with `^/`) | Only new comments on open, non-draft pull requests into `branches`, by a commenter in `allow` ([Comment commands](#comment-commands)). A pattern that matches `/rerun`, the built-in command, is refused. |
@@ -221,13 +222,14 @@ the same group share it (include `{{ .Pipeline }}` to keep them apart).
 | --- | --- |
 | `supersede` | The newest commit wins: older live runs in the group are cancelled and their checks concluded `skipped` ("Superseded"); one that finishes first, or that can't be cancelled (the cluster refuses, or the call fails), runs on, and the newer run goes all the same. A run whose commit is no longer the head of its branch or pull request stands itself down. |
 | `queue` (default) | One run at a time, oldest first. |
-| `latest` | One run at a time; only the newest waiting run survives, older waiting runs are cancelled (one that can't be cancelled keeps its turn). |
+| `latest` | One run at a time; only the newest waiting run survives: older waiting runs with policy `latest` are cancelled (one that can't be cancelled keeps its turn); a waiting `queue` run keeps its turn. |
 
 Without `concurrency`, pull request and review request runs of the same pipeline and pull request share the group
 `pr-<number>` (per pipeline) with policy `supersede`; other runs are unconstrained, and so are the runs of a pull
 request's endings (`closed`, `converted_to_draft`). A pipeline that sets `concurrency` gets it for every run, endings
 included: a teardown that names the group of the pipeline that deploys, with policy `latest`, waits for a deployment
-in flight instead of racing it ([example](#examples)).
+in flight instead of racing it ([example](#examples)). Pipelines with different policies may share a group: runs
+still go one at a time, oldest first, and a `latest` run and a waiting `queue` run never cancel each other.
 
 ### Pipeline, Task and StepAction files
 
@@ -287,7 +289,8 @@ spec:
 `.Event` (`push`, `pull_request`, `merge_group`, `comment`, `review_request`, `schedule`), `.Action`, `.Repository`
 (`Owner`, `Name`, `FullName`, `CloneURL`, `HTMLURL`, `DefaultBranch`, `Private`), `.Revision` (SHA under test), `.Ref`,
 `.Branch`, `.Tag`, `.Sender`, `.Pipeline`, `.Push` (`Before`, `After`), `.PullRequest` (`Number`, `HeadRef`, `HeadSHA`,
-`BaseRef`, `BaseSHA`, `Merged`), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`, `PullRequestNumber`,
+`BaseRef`, `BaseSHA`, `Merged`, `Labels`: the names of the labels the pull request carries, as a list, empty when it
+has none), `.MergeGroup` (`HeadRef`, `HeadSHA`, `BaseRef`, `BaseSHA`, `PullRequestNumber`,
 `Reason`), `.Comment` (`ID`, `Author`,
 `Command`, `Arguments`), `.ReviewRequest` (`Reviewer`), `.Schedule` (`Cron`, `Slot`). Event-specific objects are nil for
 other events; referencing a missing value fails the check with the rendering error. Guard optional objects with
@@ -296,7 +299,7 @@ other events; referencing a missing value fails the check with the rendering err
 | Event | `.Revision` | `.Ref` | `.Branch` | Objects set |
 | --- | --- | --- | --- | --- |
 | `push` | pushed commit (the tagged commit for annotated tags) | `refs/heads/<b>` or `refs/tags/<t>` | pushed branch (`.Tag` for tags) | `.Push` |
-| `pull_request` | head commit | `refs/pull/<n>/head` | head branch | `.PullRequest` (`Merged` is true on `closed` when the pull request was merged) |
+| `pull_request` | head commit | `refs/pull/<n>/head` | head branch | `.PullRequest` (`Merged` is true on `closed` when the pull request was merged; `Labels` are the pull request's labels when the event fired, the one a `labeled` event added included) |
 | `merge_group` | merge group head | merge group ref | merge group branch | `.MergeGroup` (`HeadRef`/`BaseRef` are full refs; `PullRequestNumber` is the pull request whose queue entry the group is, from its branch's name, `0` when the name holds none; `Reason` is `merged`, `invalidated` or `dequeued` on `destroyed`, empty otherwise) |
 | `comment` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.Comment` (`Command` is the first word, `Arguments` the rest of the first line) |
 | `review_request` | pull request head commit | `refs/pull/<n>/head` | head branch | `.PullRequest`, `.ReviewRequest` (`Reviewer` as GitHub sent it; `.Action` is `review_requested`) |

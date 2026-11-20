@@ -64,6 +64,9 @@ func TestCommentCommandRuns(t *testing.T) {
 		tr.Comment == nil || *tr.Comment != (ci.Comment{ID: 101, Author: "maintainer", Command: "/deploy", Arguments: "staging --fast"}) || tr.PullRequest.Number != 5 {
 		t.Fatalf("comment trigger = %+v", tr)
 	}
+	if tr.PullRequest.Labels != nil {
+		t.Fatalf("a pull request without labels has none: %+v", tr.PullRequest)
+	}
 	if params := h.runner.Spec(runs[0].ID).Params; !reflect.DeepEqual(params, map[string]string{"target": "staging --fast", "by": "maintainer", "revision": sha1}) {
 		t.Fatalf("params = %v", params)
 	}
@@ -78,9 +81,17 @@ func TestCommentCommandRuns(t *testing.T) {
 	if len(h.runner.Runs()) != 1 {
 		t.Fatalf("a comment runs once")
 	}
-	h.svc.Handle(ctx, command(102, "maintainer", "/deploy staging --fast"))
+	labeled := command(102, "maintainer", "/deploy staging --fast")
+	labeled.Labels = []string{"fix", "run-extra-checks"}
+	h.svc.Handle(ctx, labeled)
 	if len(h.runner.Runs()) != 2 {
 		t.Fatalf("another comment runs again")
+	}
+	// The comment's delivery names the pull request's labels.
+	for _, r := range h.runner.Runs() {
+		if r.Trigger.Comment.ID == 102 && !reflect.DeepEqual(r.Trigger.PullRequest.Labels, labeled.Labels) {
+			t.Fatalf("labels = %v, want %v", r.Trigger.PullRequest.Labels, labeled.Labels)
+		}
 	}
 }
 

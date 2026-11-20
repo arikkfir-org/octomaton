@@ -17,6 +17,8 @@ pipelines:
   - {name: prs, pipelineRun: a.yaml, on: {pull_request: {}}}
   - {name: prs-main, pipelineRun: a.yaml, on: {pull_request: {branches: [main], types: [opened, closed]}}}
   - {name: no-drafts, pipelineRun: a.yaml, on: {pull_request: {drafts: false}}}
+  - {name: any-label, pipelineRun: a.yaml, on: {pull_request: {types: [labeled]}}}
+  - {name: labels, pipelineRun: a.yaml, on: {pull_request: {types: [opened, labeled, unlabeled], labels: [run-extra-checks, deploy]}}}
   - {name: queue, pipelineRun: a.yaml, on: {merge_group: {branches: [main]}}}
   - {name: teardown, pipelineRun: a.yaml, on: {pull_request: {types: [closed, converted_to_draft], drafts: false}, merge_group: {types: [destroyed]}}}
   - {name: queue-both, pipelineRun: a.yaml, on: {merge_group: {types: [checks_requested, destroyed]}}}
@@ -55,6 +57,15 @@ func TestMatch(t *testing.T) {
 		{"custom PR types", "prs-main", Event{Name: "pull_request", Action: "closed", Branch: "main"}, true},
 		{"custom PR types exclude defaults", "prs-main", Event{Name: "pull_request", Action: "synchronize", Branch: "main"}, false},
 		{"PR base branch filter", "prs-main", Event{Name: "pull_request", Action: "opened", Branch: "dev"}, false},
+		{"labeled without labels matches any label", "any-label", Event{Name: "pull_request", Action: "labeled", Label: "fix"}, true},
+		{"labels: a listed label added", "labels", Event{Name: "pull_request", Action: "labeled", Label: "run-extra-checks"}, true},
+		{"labels: a listed label removed", "labels", Event{Name: "pull_request", Action: "unlabeled", Label: "deploy"}, true},
+		{"labels: another label added", "labels", Event{Name: "pull_request", Action: "labeled", Label: "fix"}, false},
+		{"labels: another label removed", "labels", Event{Name: "pull_request", Action: "unlabeled", Label: "fix"}, false},
+		{"labels match case-sensitively", "labels", Event{Name: "pull_request", Action: "labeled", Label: "Deploy"}, false},
+		{"labels are not globs", "labels", Event{Name: "pull_request", Action: "labeled", Label: "run-extra-checks-2"}, false},
+		{"labels: an event without its label", "labels", Event{Name: "pull_request", Action: "labeled"}, false},
+		{"labels do not filter other actions", "labels", Event{Name: "pull_request", Action: "opened"}, true},
 		{"merge group base branch", "queue", Event{Name: "merge_group", Action: "checks_requested", Branch: "main"}, true},
 		{"merge group other base", "queue", Event{Name: "merge_group", Action: "checks_requested", Branch: "dev"}, false},
 		{"default merge group types: destroyed is not included", "queue", Event{Name: "merge_group", Action: "destroyed", Branch: "main"}, false},

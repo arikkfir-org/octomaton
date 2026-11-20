@@ -46,6 +46,27 @@ func TestMarkerRoundTrip(t *testing.T) {
 	}
 }
 
+// A trigger stored by a release that knew no labels still reads, as a pull request without labels,
+// and one stored with them reads them back.
+func TestMarkerLabels(t *testing.T) {
+	before := sampleTrigger()
+	m, err := Marker(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := DecodeMarker(m); err != nil || !found || got.Version != ci.TriggerVersion || len(got.PullRequest.Labels) != 0 || got.PullRequest.Label != "" {
+		t.Fatalf("DecodeMarker(a trigger without labels) = %+v, %v, %v", got, found, err)
+	}
+	with := sampleTrigger()
+	with.PullRequest.Labels, with.PullRequest.Label = []string{"fix", "run-extra-checks"}, "run-extra-checks"
+	if m, err = Marker(with); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := DecodeMarker(m); err != nil || !reflect.DeepEqual(got, with) {
+		t.Fatalf("DecodeMarker = %+v, %v\nwant %+v", got, err, with)
+	}
+}
+
 func TestMarkerSetsVersion(t *testing.T) {
 	trigger := sampleTrigger()
 	trigger.Version = 0

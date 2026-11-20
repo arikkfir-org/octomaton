@@ -32,7 +32,8 @@ func ContextOf(t ci.Trigger) TemplateContext {
 		c.Push = &Push{Before: p.Before, After: p.After}
 	}
 	if p := t.PullRequest; p != nil {
-		c.PullRequest = &PullRequest{Number: p.Number, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, Merged: p.Merged}
+		c.PullRequest = &PullRequest{Number: p.Number, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, Merged: p.Merged,
+			Labels: append([]string{}, p.Labels...)}
 	}
 	if m := t.MergeGroup; m != nil {
 		c.MergeGroup = &MergeGroup{HeadRef: m.HeadRef, HeadSHA: m.HeadSHA, BaseRef: m.BaseRef, BaseSHA: m.BaseSHA,

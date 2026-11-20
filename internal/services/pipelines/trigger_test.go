@@ -25,7 +25,18 @@ func TestContextOf(t *testing.T) {
 				Event: "pull_request", Action: "synchronize", Repository: Repository{Owner: "octo", Name: "repo", FullName: "octo/repo",
 					CloneURL: "https://github.com/octo/repo.git", HTMLURL: "https://github.com/octo/repo", DefaultBranch: "main", Private: true},
 				Revision: "abc", Ref: "refs/pull/5/head", Branch: "feature", Sender: "alice", Pipeline: "ci",
-				PullRequest: &PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "abc", BaseRef: "main", BaseSHA: "def"},
+				PullRequest: &PullRequest{Number: 5, HeadRef: "feature", HeadSHA: "abc", BaseRef: "main", BaseSHA: "def", Labels: []string{}},
+			},
+		},
+		{
+			name: "a pull request's labels",
+			trigger: ci.Trigger{
+				Event: ci.EventPullRequest, Action: "labeled", Repository: repo,
+				PullRequest: &ci.PullRequest{Number: 5, Labels: []string{"fix", "run-extra-checks"}, Label: "run-extra-checks"},
+			},
+			want: TemplateContext{
+				Event: "pull_request", Action: "labeled", Repository: RepositoryOf(repo),
+				PullRequest: &PullRequest{Number: 5, Labels: []string{"fix", "run-extra-checks"}},
 			},
 		},
 		{
@@ -42,7 +53,7 @@ func TestContextOf(t *testing.T) {
 			want: TemplateContext{
 				Event: "comment", Repository: RepositoryOf(repo), Tag: "v1",
 				Push:          &Push{Before: "a", After: "b"},
-				PullRequest:   &PullRequest{Number: 5, Merged: true},
+				PullRequest:   &PullRequest{Number: 5, Merged: true, Labels: []string{}},
 				MergeGroup:    &MergeGroup{HeadRef: "refs/heads/q", HeadSHA: "h", BaseRef: "refs/heads/main", BaseSHA: "b", PullRequestNumber: 5, Reason: "dequeued"},
 				Comment:       &Comment{ID: 3, Author: "alice", Command: "/deploy", Arguments: "prod"},
 				ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},

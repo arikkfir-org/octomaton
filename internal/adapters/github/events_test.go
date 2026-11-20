@@ -201,6 +201,16 @@ func TestDecodeEvents(t *testing.T) {
 			Base: &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
 		},
 	}
+	labeled := &github.PullRequestEvent{
+		Action: new("labeled"), Number: new(12), Repo: ghRepo(owner), Label: &github.Label{Name: "run-extra-checks"},
+		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("bob")},
+		PullRequest: &github.PullRequest{
+			State: new("open"), User: &github.User{Login: new("carol")}, HTMLURL: new("https://github.com/octo-org/demo/pull/12"),
+			Labels: []*github.Label{{Name: "fix"}, {Name: "run-extra-checks"}},
+			Head:   &github.PullRequestBranch{SHA: new(sha1), Ref: new("topic"), Repo: &github.Repository{FullName: new(owner + "/" + repoName)}},
+			Base:   &github.PullRequestBranch{SHA: new(baseSHA), Ref: new("main")},
+		},
+	}
 	queue := "refs/heads/gh-readonly-queue/release/1.x/pr-12-" + baseSHA
 	destroyed := &github.MergeGroupEvent{
 		Action: new("destroyed"), Reason: new("invalidated"), Repo: ghRepo(owner),
@@ -216,7 +226,8 @@ func TestDecodeEvents(t *testing.T) {
 		Repo: ghRepo(owner), Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("maintainer")},
 	}
 	comment := &github.IssueCommentEvent{
-		Action: new("created"), Issue: &github.Issue{Number: new(5), PullRequestLinks: &github.PullRequestLinks{URL: new("u")}}, Repo: ghRepo(owner),
+		Action: new("created"), Repo: ghRepo(owner),
+		Issue:        &github.Issue{Number: new(5), PullRequestLinks: &github.PullRequestLinks{URL: new("u")}, Labels: []*github.Label{{Name: "fix"}}},
 		Installation: &github.Installation{ID: new(int64(installationID))}, Sender: &github.User{Login: new("sender")},
 		Comment: &github.IssueComment{ID: new(int64(9)), Body: new("  /deploy staging  \r\nthanks"), User: &github.User{Login: new("alice")}},
 	}
@@ -256,6 +267,15 @@ func TestDecodeEvents(t *testing.T) {
 			}},
 		},
 		{
+			name: "a label added names the label and the pull request's labels", event: "pull_request", payload: labeled,
+			want: &ci.TriggerEvent{Trigger: ci.Trigger{
+				Version: ci.TriggerVersion, Event: ci.EventPullRequest, Action: "labeled", DeliveryID: "d", InstallationID: installationID,
+				Repository: repository, Revision: sha1, Ref: "refs/pull/12/head", Branch: "topic", Sender: "bob",
+				PullRequest: &ci.PullRequest{Number: 12, HeadRef: "topic", HeadSHA: sha1, BaseRef: "main", BaseSHA: baseSHA, HeadRepo: owner + "/" + repoName,
+					Author: "carol", HTMLURL: "https://github.com/octo-org/demo/pull/12", Labels: []string{"fix", "run-extra-checks"}, Label: "run-extra-checks"},
+			}},
+		},
+		{
 			name: "a destroyed merge group names its pull request and why", event: "merge_group", payload: destroyed,
 			want: &ci.MergeGroupDestroyed{Trigger: ci.Trigger{
 				Version: ci.TriggerVersion, Event: ci.EventMergeGroup, Action: "destroyed", DeliveryID: "d", InstallationID: installationID,
@@ -283,7 +303,7 @@ func TestDecodeEvents(t *testing.T) {
 		},
 		{
 			name: "a comment command is its first line", event: "issue_comment", payload: comment,
-			want: &ci.CommandEvent{InstallationID: installationID, Repository: repository, Number: 5, CommentID: 9, Author: "alice", Line: "/deploy staging", DeliveryID: "d"},
+			want: &ci.CommandEvent{InstallationID: installationID, Repository: repository, Number: 5, CommentID: 9, Author: "alice", Line: "/deploy staging", DeliveryID: "d", Labels: []string{"fix"}},
 		},
 	}
 	for _, tt := range tests {

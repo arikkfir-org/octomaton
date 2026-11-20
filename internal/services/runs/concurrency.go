@@ -106,8 +106,10 @@ func (s *Service) supersede(ctx context.Context, id ci.RunID) error {
 
 // keepLatest leaves one run waiting in a latest group, the newest, and reports whether that is this
 // run. Newer is the head's run first, then the later created run, then the greater name (a total
-// order, so two runs going at once agree). The running run is not touched, except that a run for
-// another commit stands down when the head's run is already running.
+// order, so two runs going at once agree). Only waiting runs whose policy is latest count: a waiting
+// queue run of the group keeps its turn, and is never the newer run this one stands down for. The
+// running run is not touched, except that a run for another commit stands down when the head's run
+// is already running.
 func (s *Service) keepLatest(ctx context.Context, id ci.RunID) (bool, error) {
 	run, found, err := s.get(ctx, id)
 	if err != nil || !found || run.CancelRequested || run.Phase == ci.Finished {
@@ -122,7 +124,9 @@ func (s *Service) keepLatest(ctx context.Context, id ci.RunID) (bool, error) {
 		switch {
 		case r.ID == run.ID || r.Phase == ci.Finished || r.CancelRequested:
 		case r.Phase == ci.Held:
-			held = append(held, r)
+			if r.Policy == ci.Latest {
+				held = append(held, r)
+			}
 		default:
 			going = append(going, r)
 		}

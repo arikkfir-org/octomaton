@@ -54,3 +54,20 @@ params:
 - A re-run of a `labeled` or `unlabeled` run that the release before created knows no label: it matches a pipeline without `labels` as before, and no pipeline that has since gained `labels`.
 - Labels are as the event's payload had them. A label added after a push is seen by the next event, not by the push's run.
 - `supersede` is unchanged: it still stands down every other live run of its group, whatever its policy.
+
+## Security and failure modes
+
+- Nothing new is trusted. A label's name comes from the webhook's payload, like a branch's, and reaches a pipeline only through `params`: pass it to a script through an environment variable, never by interpolating it. Whoever may label a pull request may start a pipeline that lists that label, with the definitions and the ServiceAccount the pipeline already runs with.
+- A payload without labels, or a comment's without its issue, reads as a pull request without labels: nothing fails.
+- A `latest` run that cannot be cancelled keeps its turn, as before.
+
+## Rollout
+
+- No host or configuration change is required: no object in `deploy/` changes, and a configuration without `labels` means what it did.
+- Triggers stored before this release read as a pull request without labels, so runs waiting through the upgrade resume, and earlier reports re-run.
+- While replicas of both releases run, either may hold the Lease: a group shared by `latest` and `queue` pipelines follows the old rule while the old replica leads, and the new rule from then on. A waiting run the old rule already cancelled stays cancelled; its check can be re-run.
+- A replica of the release before, reading a trigger stored by this one, ignores the labels it does not know.
+
+## Open questions
+
+None.

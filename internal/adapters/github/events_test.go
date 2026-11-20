@@ -147,6 +147,8 @@ func TestDecodeReasons(t *testing.T) {
 		{"check suite requested", "check_suite", &github.CheckSuiteEvent{Action: new("requested")}, "unhandled check_suite action requested", ""},
 		{"comment command", "issue_comment", comment("created", "/deploy now\nplease", true), "", "comment octo-org/demo"},
 		{"comment command with middle dots", "issue_comment", comment("created", "\u00b7/\u00b7r\u00b7erun docs", true), "", "comment octo-org/demo"},
+		{"comment without its issue", "issue_comment", &github.IssueCommentEvent{Action: new("created"), Repo: ghRepo(owner), Installation: installation, Sender: sender,
+			Comment: &github.IssueComment{ID: new(int64(9)), Body: new("/deploy"), User: sender}}, "comment is not on a pull request", ""},
 		{"comment on an issue", "issue_comment", comment("created", "/deploy", false), "comment is not on a pull request", ""},
 		{"plain comment", "issue_comment", comment("created", "looks good", true), "comment is not a command", ""},
 		{"edited comment", "issue_comment", comment("edited", "/deploy", true), "unhandled issue_comment action edited", ""},

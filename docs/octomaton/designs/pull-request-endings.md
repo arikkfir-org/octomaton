@@ -48,7 +48,8 @@ A commit's event never takes an ending's run for its own, so a push at a commit 
 - **Explicit concurrency.** A pipeline that sets `concurrency` gets it for its endings too. Two pipelines that name
   the same group share it, so a teardown in the group of the pipeline that deploys, with policy `latest`, waits for
   a deployment in flight. It replaces a deployment still waiting, a reopen's deployment replaces a teardown still
-  waiting, and nothing cancels a running one.
+  waiting, and nothing cancels a running one. Only waiting runs whose policy is `latest` are replaced: a waiting
+  `queue` run of the group keeps its turn ([label triggers](pull-request-labels.md)).
 - **`merge_group.types`.** `checks_requested` (the default, so every existing configuration means what it did) and
   `destroyed`.
 - **Template context.**

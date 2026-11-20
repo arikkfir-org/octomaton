@@ -331,7 +331,9 @@ func commandEvent(ev *github.IssueCommentEvent, delivery string) (*ci.CommandEve
 		Author:         ev.GetComment().GetUser().GetLogin(),
 		Line:           firstLine(ev.GetComment().GetBody()),
 		DeliveryID:     delivery,
-		Labels:         labelNames(ev.GetIssue().Labels),
+	}
+	if issue := ev.GetIssue(); issue != nil {
+		c.Labels = labelNames(issue.Labels)
 	}
 	if c.Author == "" {
 		c.Author = ev.GetSender().GetLogin()

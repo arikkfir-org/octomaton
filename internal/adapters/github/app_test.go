@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -238,7 +239,7 @@ func TestPullRequestAndBranchHead(t *testing.T) {
 			Author: "carol", HTMLURL: "https://github.com/octo-org/octo-repo/pull/3"},
 		State: "open", Draft: true,
 	}
-	if err != nil || pr != want {
+	if err != nil || !reflect.DeepEqual(pr, want) {
 		t.Fatalf("PullRequest = %+v, %v\nwant %+v", pr, err, want)
 	}
 	if _, err := gh.PullRequest(ctx, repo, 4); !errors.Is(err, ci.ErrNotFound) {

@@ -89,7 +89,10 @@ func (s *Service) HandleComment(ctx context.Context, e *ci.CommandEvent) error {
 	t.Revision = pr.HeadSHA
 	t.Ref = fmt.Sprintf("refs/pull/%d/head", pr.Number)
 	t.Branch = pr.HeadRef
-	t.PullRequest = &pr.PullRequest
+	// The comment's delivery carries the pull request's labels; reading the pull request does not.
+	commented := pr.PullRequest
+	commented.Labels, commented.Label = e.Labels, ""
+	t.PullRequest = &commented
 	t.Comment = &ci.Comment{ID: e.CommentID, Author: e.Author, Command: command, Arguments: strings.TrimSpace(arguments)}
 
 	started := false

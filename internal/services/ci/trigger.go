@@ -16,7 +16,9 @@ const (
 )
 
 // TriggerVersion is the version of the serialized Trigger. Runs and reports store their trigger
-// serialized, so a report can be re-run after its run is gone.
+// serialized, so a report can be re-run after its run is gone. A field added to the trigger needs no
+// new version while a trigger stored without it still reads as it should (a pull request's labels:
+// none), so that the runs and reports of the release before still resume and re-run.
 const TriggerVersion = 1
 
 // ConfigReportName names the report of problems that concern no single pipeline, such as an
@@ -54,6 +56,10 @@ type PullRequest struct {
 	HTMLURL  string `json:"htmlURL,omitempty"`
 	// Merged is set when the pull request was closed by merging it.
 	Merged bool `json:"merged,omitempty"`
+	// Labels are the names of the labels the pull request carried when the event fired.
+	Labels []string `json:"labels,omitempty"`
+	// Label is the name of the label a labeled or unlabeled event added or removed; "" otherwise.
+	Label string `json:"label,omitempty"`
 }
 
 // FromFork reports whether the pull request's head branch lives outside repository (the full name

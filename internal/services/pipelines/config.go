@@ -222,6 +222,9 @@ type PullRequestTrigger struct {
 	PathsIgnore []string `yaml:"pathsIgnore"`
 	// Drafts runs the pipeline on draft pull requests too (default true).
 	Drafts *bool `yaml:"drafts"`
+	// Labels are the names of the labels whose adding (labeled) or removing (unlabeled) triggers the
+	// pipeline (omitted = any label). Exact and case-sensitive; other actions are not filtered.
+	Labels []string `yaml:"labels"`
 }
 
 // MergeGroupTrigger configures merge_group (merge queue) events.
@@ -627,6 +630,14 @@ func (p *Pipeline) validate(check PermissionCheck, organization bool) []string {
 				add("on.pull_request.types[%d]: review requests trigger on.review_request, not on.pull_request", i)
 			case !pullRequestActions[typ]:
 				add("on.pull_request.types[%d]: unknown pull_request action %q", i, typ)
+			}
+		}
+		if len(t.Labels) > 0 && !slices.ContainsFunc(t.Types, func(typ string) bool { return labelActions[typ] }) {
+			add("on.pull_request.labels: filters only the types labeled and unlabeled, and types lists neither")
+		}
+		for i, label := range t.Labels {
+			if label == "" {
+				add("on.pull_request.labels[%d]: a label's name must not be empty", i)
 			}
 		}
 	}

@@ -402,3 +402,102 @@ func TestQueueHeadWaitsItsTurn(t *testing.T) {
 		})
 	}
 }
+
+// sharedGroupConfig runs "deploy" on every push to a pull request and "extra" once when its label is
+// added, one at a time: they share a concurrency group, the first with policy latest, the second
+// with policy queue.
+const sharedGroupConfig = `
+apiVersion: octomaton.dev/v1
+pipelines:
+  - name: deploy
+    pipelineRun: .tekton/ci.yaml
+    on:
+      pull_request: {}
+    concurrency: {group: "environment", policy: latest}
+  - name: extra
+    pipelineRun: .tekton/ci.yaml
+    on:
+      pull_request: {types: [labeled], labels: [run-extra-checks]}
+    concurrency: {group: "environment", policy: queue}
+`
+
+// labeledPR is the event of a label added to pull request #5 at a commit.
+func labeledPR(sha, label string) ci.Trigger {
+	t := branchPR(sha)
+	t.Action, t.DeliveryID = "labeled", "labeled-"+label
+	t.PullRequest.Labels, t.PullRequest.Label = []string{label}, label
+	return t
+}
+
+// A waiting queue run that shares a group with latest runs is no rival of theirs: the newest push's
+// run survives its resume, though the queue run is newer, and goes first when the running run ends.
+func TestLatestKeepsItsTurnAheadOfANewerQueueRun(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.files(sha1, sharedGroupConfig, ciRun)
+	h.files(sha2, sharedGroupConfig, ciRun)
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+	h.evaluate(branchPR(sha1), EvalOptions{})
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
+	h.evaluate(branchPR(sha2), EvalOptions{})
+	h.evaluate(labeledPR(sha2, "fix"), EvalOptions{})
+	h.evaluate(labeledPR(sha2, "run-extra-checks"), EvalOptions{})
+	if n := len(h.runner.Runs()); n != 3 {
+		t.Fatalf("runs = %d, want the two pushes' and the label's (another label starts none)", n)
+	}
+	a, b, s := h.run("demo-deploy-1111111-1"), h.run("demo-deploy-2222222-1"), h.run("demo-extra-2222222-1")
+	if a.Phase != ci.Released || b.Phase != ci.Held || s.Phase != ci.Held || !s.Created.After(b.Created) {
+		t.Fatalf("the first run runs and the others wait, the label's last: %s, %s, %s", a.Phase, b.Phase, s.Phase)
+	}
+
+	// The leader resumes the push's run after it has waited a while.
+	if err := h.svc.Resume(ctx, b); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if b = h.run(b.ID.Name); b.CancelRequested || b.Phase != ci.Held {
+		t.Fatalf("the newest push's run must survive its resume, waiting: %+v", b)
+	}
+	if s = h.run(s.ID.Name); s.CancelRequested || s.Phase != ci.Held {
+		t.Fatalf("the label's run must keep waiting: %+v", s)
+	}
+
+	h.finish(a.ID.Name, ci.Success)
+	if err := h.svc.ReleaseNext(ctx, h.run(a.ID.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if b, s = h.run(b.ID.Name), h.run(s.ID.Name); b.Phase != ci.Released || s.Phase != ci.Held {
+		t.Fatalf("the push's run goes before the label's: %s, %s", b.Phase, s.Phase)
+	}
+	h.finish(b.ID.Name, ci.Success)
+	if err := h.svc.ReleaseNext(ctx, h.run(b.ID.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if s = h.run(s.ID.Name); s.Phase != ci.Released || s.CancelRequested {
+		t.Fatalf("the label's run goes last: %+v", s)
+	}
+}
+
+// A newer latest run does not stand down a waiting queue run of its group.
+func TestLatestLeavesAWaitingQueueRunHeld(t *testing.T) {
+	h := newHarness(t)
+	h.files(sha1, sharedGroupConfig, ciRun)
+	h.files(sha2, sharedGroupConfig, ciRun)
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha1}, State: "open"})
+	h.evaluate(branchPR(sha1), EvalOptions{})
+	h.evaluate(labeledPR(sha1, "run-extra-checks"), EvalOptions{})
+	if s := h.run("demo-extra-1111111-1"); s.Phase != ci.Held {
+		t.Fatalf("the label's run must wait for the running one: %+v", s)
+	}
+
+	h.host.SetPullRequest(repo, ci.PullRequestState{PullRequest: ci.PullRequest{Number: 5, HeadSHA: sha2}, State: "open"})
+	h.evaluate(branchPR(sha2), EvalOptions{})
+	if s := h.run("demo-extra-1111111-1"); s.Phase != ci.Held || s.CancelRequested {
+		t.Fatalf("the label's run must still wait: %+v", s)
+	}
+	if b := h.run("demo-deploy-2222222-1"); b.Phase != ci.Held || b.CancelRequested {
+		t.Fatalf("the newer latest run waits too: %+v", b)
+	}
+	if h.run("demo-deploy-1111111-1").CancelRequested {
+		t.Fatalf("the running run is not touched")
+	}
+}

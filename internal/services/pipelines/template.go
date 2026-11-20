@@ -35,7 +35,8 @@ type PullRequest struct {
 	HeadSHA string
 	BaseRef string
 	BaseSHA string
-	Merged  bool // the pull request was closed by merging it
+	Merged  bool     // the pull request was closed by merging it
+	Labels  []string // the names of the labels the pull request carries; empty when it has none
 }
 
 // MergeGroup holds merge_group-specific values; it is nil for other events.
@@ -149,7 +150,7 @@ func Sample() TemplateContext {
 		Sender:        "octocat",
 		Pipeline:      "ci",
 		Push:          &Push{Before: "1111111111111111111111111111111111111111", After: "0123456789abcdef0123456789abcdef01234567"},
-		PullRequest:   &PullRequest{Number: 1, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "2222222222222222222222222222222222222222"},
+		PullRequest:   &PullRequest{Number: 1, HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main", BaseSHA: "2222222222222222222222222222222222222222", Labels: []string{"sample-label"}},
 		MergeGroup:    &MergeGroup{HeadRef: "refs/heads/gh-readonly-queue/main/pr-1-2222222222222222222222222222222222222222", HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "refs/heads/main", BaseSHA: "2222222222222222222222222222222222222222", PullRequestNumber: 1},
 		Comment:       &Comment{ID: 1, Author: "octocat", Command: "/deploy", Arguments: "staging"},
 		ReviewRequest: &ReviewRequest{Reviewer: "octo-reviewer"},

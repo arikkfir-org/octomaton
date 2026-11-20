@@ -23,6 +23,8 @@ type Event struct {
 	Draft bool
 	// Reviewer is the login a review was requested from (review_request).
 	Reviewer string
+	// Label is the name of the label a labeled or unlabeled pull_request action added or removed.
+	Label string
 }
 
 // PathFilter restricts a matched pipeline to events that change relevant files.
@@ -55,13 +57,18 @@ func (f PathFilter) Matches(files []string) bool {
 	return false
 }
 
+// labelActions are the pull_request actions that add or remove a label, which `labels` filters.
+var labelActions = map[string]bool{"labeled": true, "unlabeled": true}
+
 // Match reports whether the pipeline is triggered by ev, and the path filter that
 // applies to it.
 //
 // Branch and tag semantics follow GitHub Actions: for push, omitting both
 // branches and tags matches every push; setting only branches ignores tag pushes
 // and setting only tags ignores branch pushes. For pull_request and merge_group,
-// branches filters the base branch and omitting it matches every base branch.
+// branches filters the base branch and omitting it matches every base branch. For pull_request,
+// labels filters the labeled and unlabeled actions by the label added or removed, by its exact name,
+// and no other action.
 func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 	switch ev.Name {
 	case ci.EventPush:
@@ -96,6 +103,9 @@ func (p *Pipeline) Match(ev Event) (PathFilter, bool) {
 			types = DefaultPullRequestTypes
 		}
 		if !slices.Contains(types, ev.Action) {
+			return PathFilter{}, false
+		}
+		if len(t.Labels) > 0 && labelActions[ev.Action] && !slices.Contains(t.Labels, ev.Label) {
 			return PathFilter{}, false
 		}
 		// Closing a draft, or making a pull request one, ends work the pipeline may have done before it

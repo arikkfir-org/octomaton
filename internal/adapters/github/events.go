@@ -196,7 +196,11 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 			Author:   pr.GetUser().GetLogin(),
 			HTMLURL:  pr.GetHTMLURL(),
 			Merged:   pr.GetMerged(),
+			Labels:   labelNames(pr.Labels),
 		},
+	}
+	if t.Action == "labeled" || t.Action == "unlabeled" {
+		t.PullRequest.Label = ev.GetLabel().GetName()
 	}
 	if t.FromFork() {
 		return t, pr.GetDraft(), "pull request from a fork"
@@ -210,6 +214,17 @@ func pullRequestTrigger(ev *github.PullRequestEvent, delivery string) (ci.Trigge
 		return t, pr.GetDraft(), reason
 	}
 	return t, pr.GetDraft(), incomplete(t)
+}
+
+// labelNames are the names of a pull request's labels, as the code host sent them.
+func labelNames(labels []*github.Label) []string {
+	var names []string
+	for _, l := range labels {
+		if name := l.GetName(); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // reviewRequestTrigger turns a review requested from a user on an open pull request into a
@@ -316,6 +331,9 @@ func commandEvent(ev *github.IssueCommentEvent, delivery string) (*ci.CommandEve
 		Author:         ev.GetComment().GetUser().GetLogin(),
 		Line:           firstLine(ev.GetComment().GetBody()),
 		DeliveryID:     delivery,
+	}
+	if issue := ev.GetIssue(); issue != nil {
+		c.Labels = labelNames(issue.Labels)
 	}
 	if c.Author == "" {
 		c.Author = ev.GetSender().GetLogin()

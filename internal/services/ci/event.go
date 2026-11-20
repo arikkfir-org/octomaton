@@ -35,6 +35,8 @@ type CommandEvent struct {
 	// Line is the comment's first line, trimmed.
 	Line       string
 	DeliveryID string
+	// Labels are the names of the labels the pull request carries.
+	Labels []string
 }
 
 // RerunEvent asks to run reports again: a report's re-run, or the re-run of a whole suite of reports.

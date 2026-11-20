@@ -75,7 +75,7 @@ The full schema and template context are in the
 | Changed files can't be determined | Treated as matching (runs rather than silently skipping) |
 | Pull request from a fork (whoever opened it), or any event from a repository that is a fork | Ignored: no check run and no run; comment commands on it get no reaction or reply, and its stored reports are never re-run |
 | Repository namespace missing | Failed check: "repository not onboarded" |
-| Newer commit on the same pull request or branch | Concurrency groups decide: `supersede` cancels older runs (the default for pull requests), `queue` runs one at a time, `latest` keeps only the newest waiting run |
+| Newer commit on the same pull request or branch | Concurrency groups decide: `supersede` cancels older runs (the default for pull requests), `queue` runs one at a time, `latest` keeps only the newest waiting `latest` run ([label triggers](pull-request-labels.md)) |
 | `/command` comment on a pull request | Pipelines with a matching `on.comment.pattern` run (definitions from the default branch, code from the pull request); the commenter must be in the command's `allow` list, as a user or through a team; the built-in `/rerun` re-runs the failed or named checks ([comment commands](comment-commands.md)); 👀 when started, a reply with the result when done |
 | Cron schedule | Pipelines with `on.schedule` run at the default branch head, once per slot |
 | Long run | The installation token is refreshed while the run lives; a live task table and per-task checks (`taskChecks`) show progress, and with `liveTaskChecks` each task's check shows what the task prints about its own ([live task checks](live-task-checks.md)) |

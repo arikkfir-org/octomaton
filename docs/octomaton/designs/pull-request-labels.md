@@ -65,7 +65,7 @@ params:
 
 - No host or configuration change is required: no object in `deploy/` changes, and a configuration without `labels` means what it did.
 - Triggers stored before this release read as a pull request without labels, so runs waiting through the upgrade resume, and earlier reports re-run.
-- While replicas of both releases run, either may hold the Lease: a group shared by `latest` and `queue` pipelines follows the old rule while the old replica leads, and the new rule from then on. A waiting run the old rule already cancelled stays cancelled; its check can be re-run.
+- While replicas of both releases run, the rule follows the replica that handles each event, and the leader for each resume of a waiting run: a replica of the release before still applies the old rule, and may cancel a waiting `queue` run for a `latest` one, whichever replica holds the Lease. The new rule holds for certain only once every replica runs this release. A waiting run the old rule already cancelled stays cancelled; its check can be re-run.
 - A replica of the release before, reading a trigger stored by this one, ignores the labels it does not know.
 
 ## Open questions

@@ -16,7 +16,7 @@ sequenceDiagram
   Note over A,S: Before
   B->>B: resumed after waiting a while: keepLatest finds S, newer, at the same commit
   B--xB: superseded by S
-  A->>S: A ends, S runs; the newest push never runs
+  A->>S: A ends and S runs, so the newest push never runs
   Note over A,S: Now
   B->>B: resumed: S has policy queue, so it is no rival
   A->>B: A ends, B runs (the oldest waiting run)
